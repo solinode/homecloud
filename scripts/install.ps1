@@ -1,36 +1,40 @@
-# Function to check if Docker is installed
-function Check-Docker {
-    $dockerCheck = Get-Command docker -ErrorAction SilentlyContinue
-    return $dockerCheck -ne $null
+# HomeCloud installer for Windows (PowerShell 5+).
+#   irm https://homecloud.drk1rd.systems/scripts/install.ps1 | iex
+# Set $env:HOMECLOUD_VERSION (e.g. v0.1.0) to pin a release.
+$ErrorActionPreference = "Stop"
+$repo = "homecloudhq/homecloud"
+
+if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
+    Write-Host "HomeCloud runs every service on Docker, which is not installed."
+    Write-Host "Install Docker Desktop from https://www.docker.com/products/docker-desktop, start it, then re-run this script."
+    exit 1
 }
 
-# Check if Docker is installed
-if (-not (Check-Docker)) {
-    Write-Host "Docker is not installed. Installing Docker..."
-    # Open Docker installation URL in the browser
-    Start-Process "https://docker.com/"
-    Write-Host "Please install Docker Desktop and try running the script again after Docker is installed."
-    exit
-} else {
-    Write-Host "Docker is already installed."
+$arch = if ($env:PROCESSOR_ARCHITECTURE -eq "ARM64") { "arm64" } else { "amd64" }
+$version = $env:HOMECLOUD_VERSION
+if (-not $version) {
+    $version = (Invoke-RestMethod "https://api.github.com/repos/$repo/releases?per_page=1")[0].tag_name
 }
 
-# Define download URL for Windows binary
-$url = "https://github.com/homecloudhq/homecloud/releases/download/0.0.1/homecloud-windows.zip"
-$dest = "homecloud-windows.zip"
+$name = "homecloud-windows-$arch"
+$tmp = Join-Path $env:TEMP "homecloud-install"
+New-Item -ItemType Directory -Force -Path $tmp | Out-Null
+Write-Host "Downloading HomeCloud $version for windows/$arch..."
+Invoke-WebRequest "https://github.com/$repo/releases/download/$version/$name.zip" -OutFile "$tmp\$name.zip"
+Expand-Archive -Force "$tmp\$name.zip" -DestinationPath $tmp
 
-# Download the ZIP file
-Write-Host "Downloading HomeCloud CLI..."
-Invoke-WebRequest -Uri $url -OutFile $dest
+$dest = Join-Path $env:LOCALAPPDATA "Programs\HomeCloud"
+New-Item -ItemType Directory -Force -Path $dest | Out-Null
+Copy-Item -Force "$tmp\$name\homecloud.exe" "$dest\homecloud.exe"
 
-# Unzip the downloaded file
-Write-Host "Extracting HomeCloud CLI..."
-Expand-Archive -Path $dest -DestinationPath "."
+$userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+if ($userPath -notlike "*$dest*") {
+    [Environment]::SetEnvironmentVariable("Path", "$userPath;$dest", "User")
+    Write-Host "Added $dest to your PATH (open a new terminal to use it)."
+}
+Remove-Item -Recurse -Force $tmp
 
-# Move the executable to a system folder (optional)
-Write-Host "Moving executable to C:\Program Files\HomeCloud"
-New-Item -Path "C:\Program Files\HomeCloud" -ItemType Directory -Force
-Move-Item -Path ".\homecloud-windows.exe" -Destination "C:\Program Files\HomeCloud\homecloud.exe"
-
-Write-Host "HomeCloud CLI has been installed to C:\Program Files\HomeCloud\homecloud.exe"
-Write-Host "You can now use the 'homecloud' command in the terminal."
+& "$dest\homecloud.exe" version
+Write-Host ""
+Write-Host "Start your cloud with:   homecloud serve"
+Write-Host "Then open:               http://127.0.0.1:8080"

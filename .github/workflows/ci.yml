@@ -1,0 +1,40 @@
+name: CI
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+      - run: go vet ./...
+      - run: go test -race ./...
+      - name: Cross-compile
+        run: |
+          for p in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
+            GOOS=${p%/*} GOARCH=${p#*/} CGO_ENABLED=0 go build -o /dev/null .
+          done
+
+  console:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: console
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: console/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      - run: npm run build
