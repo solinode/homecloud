@@ -2,11 +2,13 @@
 
 ## 0.1.1 (2026-09-30)
 
+The first release of the rebuilt HomeCloud. It includes everything listed under 0.1.0 below, plus these fixes. (0.1.0 was withdrawn: S3 could not start on new installations.)
+
 ### Fixed
 - S3 failed to start on new installations: MinIO no longer publishes free images on Docker Hub or quay.io. HomeCloud now uses Chainguard's MinIO build (`cgr.dev/chainguard/minio`), the same server built from source for amd64 and arm64. Existing installations keep their data.
 - Data races in the test harness and in Secrets Manager and SNS settings replaced at runtime; a rotation with no Lambda invoker now records an error instead of crashing.
 
-## 0.1.0 (2026-09-30)
+## 0.1.0 (withdrawn)
 
 HomeCloud is rebuilt from a prototype CLI into a self-hosted cloud: one `homecloud` binary runs an authenticated REST API, the web console and around thirty AWS-style services on Docker.
 
