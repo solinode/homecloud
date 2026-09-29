@@ -89,6 +89,7 @@ type RunSpec struct {
 	Aliases    []string
 	Restart    string // "", "unless-stopped", "always"
 	WorkingDir string
+	User       string // run as this user (e.g. "0"); empty uses the image's default
 	Hostname   string
 	DNS        []string // upstream servers for Docker's embedded DNS
 	ExtraHosts []string // "name:ip" entries for /etc/hosts ("host-gateway" is the Docker host)
@@ -181,6 +182,7 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 			Labels:       s.Labels,
 			ExposedPorts: exposed,
 			WorkingDir:   s.WorkingDir,
+			User:         s.User,
 			Hostname:     s.Hostname,
 		},
 		HostConfig:       hc,

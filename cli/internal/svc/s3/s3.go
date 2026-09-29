@@ -36,7 +36,9 @@ import (
 const (
 	containerName = "homecloud-s3"
 	dataVolume    = "homecloud-s3-data"
-	minioImage    = "quay.io/minio/minio:latest"
+	// MinIO no longer publishes free images on Docker Hub or quay.io;
+	// Chainguard builds the same server from source (amd64 and arm64).
+	minioImage    = "cgr.dev/chainguard/minio:latest"
 	rootSecret    = "homecloud/s3/root"
 	cBuckets      = "s3_buckets"
 	signingRegion = "us-east-1"
@@ -101,9 +103,11 @@ func (s *Service) Start(ctx context.Context, vpcs []vpc.VPC) error {
 			return err
 		}
 		_, err := d.Run(ctx, runtime.RunSpec{
-			Name:    containerName,
-			Image:   minioImage,
-			Cmd:     []string{"server", "/data", "--console-address", ":9001"},
+			Name:  containerName,
+			Image: minioImage,
+			Cmd:   []string{"server", "/data", "--console-address", ":9001"},
+			// Root, as before: existing data volumes were written by a root MinIO.
+			User:    "0",
 			Env:     map[string]string{"MINIO_ROOT_USER": s.user, "MINIO_ROOT_PASSWORD": s.pass},
 			Labels:  runtime.Labels("s3", "server", nil),
 			Ports:   []runtime.Port{{ContainerPort: 9000, HostPort: s.env.Cfg.S3Port}, {ContainerPort: 9001, HostPort: s.env.Cfg.S3ConsolePort}},

@@ -3,6 +3,7 @@ package cloudwatch
 import (
 	"bytes"
 	"encoding/json"
+	"os"
 	"os/exec"
 	"strconv"
 	"strings"
@@ -171,12 +172,21 @@ func TestLogsTailFollow(t *testing.T) {
 	defer cmd.Process.Kill()
 	time.Sleep(2 * time.Second)
 	h.AWS(t, "logs", "put-log-events", "--log-group-name", "follow", "--log-stream-name", "s", "--log-events", "timestamp="+msNow(0)+",message=second line")
-	deadline := time.Now().Add(15 * time.Second)
+	deadline := time.Now().Add(25 * time.Second)
 	for time.Now().Before(deadline) && !strings.Contains(out.String(), "second line") {
 		time.Sleep(250 * time.Millisecond)
 	}
-	_ = cmd.Process.Kill()
-	_ = cmd.Wait()
+	// Interrupt rather than kill: the CLI may block-buffer stdout when it isn't a
+	// terminal (the bundled AWS CLI ignores PYTHONUNBUFFERED) and flushes on exit.
+	_ = cmd.Process.Signal(os.Interrupt)
+	done := make(chan struct{})
+	go func() { _ = cmd.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		_ = cmd.Process.Kill()
+		<-done
+	}
 	if s := out.String(); !strings.Contains(s, "first line") || !strings.Contains(s, "second line") || strings.Count(s, "first line") != 1 {
 		t.Fatalf("tail --follow output:\n%s", s)
 	}

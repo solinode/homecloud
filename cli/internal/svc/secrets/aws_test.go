@@ -50,6 +50,12 @@ func expectErr(t *testing.T, h *awstest.Harness, code string, args ...string) {
 
 func TestSecretsManagerCLI(t *testing.T) {
 	h, sec, _, clk := setup(t)
+	// Rotations run in the background; let them finish before the test ends.
+	t.Cleanup(func() {
+		for deadline := time.Now().Add(60 * time.Second); sec.Rotating() && time.Now().Before(deadline); {
+			time.Sleep(50 * time.Millisecond)
+		}
+	})
 	arnRe := regexp.MustCompile(`^arn:aws:secretsmanager:us-east-1:` + h.Env.AccountID + `:secret:app/db-[A-Za-z0-9]{6}$`)
 
 	c := h.AWSJSON(t, "secretsmanager", "create-secret", "--name", "app/db", "--secret-string", `{"user":"a","pass":"1"}`,
@@ -372,7 +378,7 @@ func TestSecretRotation(t *testing.T) {
 	var mu sync.Mutex
 	var steps []string
 	failTest := false
-	sec.Lambda = secrets.InvokerFunc(func(ctx context.Context, name string, payload []byte) ([]byte, string, error) {
+	sec.SetLambda(secrets.InvokerFunc(func(ctx context.Context, name string, payload []byte) ([]byte, string, error) {
 		var ev struct{ Step string }
 		_ = json.Unmarshal(payload, &ev)
 		mu.Lock()
@@ -390,7 +396,7 @@ func TestSecretRotation(t *testing.T) {
 			return []byte(`{"errorMessage":` + strings.TrimSpace(strconvQuote(out.String())) + `}`), "Unhandled", nil
 		}
 		return []byte("null"), "", nil
-	})
+	}))
 
 	h.AWS(t, "secretsmanager", "create-secret", "--name", "rot", "--secret-string", "initial")
 	fn := "arn:aws:lambda:us-east-1:" + h.Env.AccountID + ":function:rotator"

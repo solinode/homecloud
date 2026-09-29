@@ -62,8 +62,13 @@ jobs:
           nohup ./bin/homecloud serve > serve.log 2>&1 &
           for i in $(seq 1 60); do curl -fsS localhost:8080/api/v1/health && break; sleep 2; done
           # Background components pull images on first start; wait for S3 (MinIO) to be ready.
-          for i in $(seq 1 90); do grep -q "s3: MinIO ready" serve.log && break; sleep 2; done
-          grep "ready" serve.log || true
+          for i in $(seq 1 90); do
+            grep -q "s3: MinIO ready" serve.log && break
+            if grep -q "s3: " serve.log && ! grep -q "s3: MinIO ready" serve.log; then cat serve.log; echo "::error::S3 (MinIO) failed to start"; exit 1; fi
+            sleep 2
+          done
+          grep -q "s3: MinIO ready" serve.log || { cat serve.log; echo "::error::S3 (MinIO) not ready after 3 minutes"; exit 1; }
+          grep "ready" serve.log
       - name: Smoke test
         run: HC=$PWD/bin/homecloud ./scripts/smoke.sh
       - name: Server log
