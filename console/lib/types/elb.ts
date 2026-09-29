@@ -16,10 +16,16 @@ export interface ElbRule {
   target_group: string
 }
 
+export type ListenerProtocol = "HTTP" | "HTTPS"
+
 export interface ElbListener {
   id: string
   port: number
-  protocol: string
+  protocol: ListenerProtocol | string
+  /** ACM certificate ARN (HTTPS listeners) */
+  certificate_arn?: string
+  /** HTTP listeners: redirect every request to the HTTPS listener on this port */
+  redirect_https_port?: number
   /** requested host port (0/absent = any free port) */
   public_port?: number
   default_target_group: string
@@ -47,8 +53,11 @@ export interface LoadBalancer {
 
 export interface CreateListenerInput {
   port: number
-  protocol?: "HTTP"
+  protocol?: ListenerProtocol
+  certificate_arn?: string
+  redirect_https_port?: number
   public_port?: number
+  /** may be empty for a pure HTTP-to-HTTPS redirect listener */
   default_target_group: string
 }
 

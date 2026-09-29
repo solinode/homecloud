@@ -25,6 +25,7 @@ import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, api, errorMessage, seg } from "@/lib/api"
 import { formatDate, formatMemoryMB } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
+import { ASG_GROUP_TAG } from "@/lib/types"
 import type { Instance } from "@/lib/types"
 import { INSTANCES_PATH, PublicPorts, instanceLabel, isTransitional, pollInterval, useInstanceActions } from "./instance-actions"
 import { InstanceConsoleOutput } from "./instance-console-output"
@@ -139,6 +140,21 @@ export function InstanceDetail() {
           </AlertDescription>
         </Alert>
       )}
+      {inst.tags?.[ASG_GROUP_TAG] && s !== "terminated" && (
+        <Alert>
+          <Info />
+          <AlertTitle>Managed by an Auto Scaling group</AlertTitle>
+          <AlertDescription>
+            <p>
+              This instance belongs to{" "}
+              <Link href={`/ec2/autoscaling/group/?name=${encodeURIComponent(inst.tags[ASG_GROUP_TAG])}`} className="text-primary font-medium hover:underline">
+                {inst.tags[ASG_GROUP_TAG]}
+              </Link>
+              . If it stops, the group terminates and replaces it; change the group&apos;s capacity instead of terminating it directly.
+            </p>
+          </AlertDescription>
+        </Alert>
+      )}
       {isTransitional(s) && (
         <p className="text-muted-foreground flex items-center gap-2 text-sm">
           <Loader2 className="size-4 animate-spin" /> The instance is {s}. This page refreshes automatically.
@@ -216,6 +232,18 @@ function DetailsTab({ inst }: { inst: Instance }) {
             { label: "Launch time", value: <span>{formatDate(inst.launch_time)} (<TimeAgo value={inst.launch_time} />)</span> },
             { label: "Terminated at", value: inst.terminated_at ? formatDate(inst.terminated_at) : "" },
             { label: "Container ID", value: inst.container_id ? <CopyableText value={inst.container_id} display={inst.container_id.slice(0, 12)} /> : "" },
+            ...(inst.tags?.[ASG_GROUP_TAG]
+              ? [
+                  {
+                    label: "Auto Scaling group",
+                    value: (
+                      <Link href={`/ec2/autoscaling/group/?name=${encodeURIComponent(inst.tags[ASG_GROUP_TAG])}`} className="text-primary hover:underline">
+                        {inst.tags[ASG_GROUP_TAG]}
+                      </Link>
+                    ),
+                  },
+                ]
+              : []),
             { label: "Instance ARN", value: <CopyableText value={inst.arn} />, wide: true },
           ]}
         />

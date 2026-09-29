@@ -4,6 +4,7 @@ import Link from "next/link"
 import type { ReactNode } from "react"
 import {
   ArrowRight,
+  BadgeCheck,
   Bell,
   Cable,
   Container,
@@ -11,6 +12,7 @@ import {
   Database,
   FolderOpen,
   FunctionSquare,
+  Globe,
   HardDrive,
   KeyRound,
   Layers,
@@ -18,6 +20,7 @@ import {
   Megaphone,
   Network,
   Package,
+  Scaling,
   ScrollText,
   ShieldCheck,
   Split,
@@ -25,6 +28,7 @@ import {
   Terminal,
   Upload,
   UserPlus,
+  UsersRound,
   Workflow,
 } from "lucide-react"
 
@@ -36,11 +40,15 @@ import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { CopyableText } from "@/components/console/copy-button"
-import { formatDuration } from "@/lib/format"
+import { formatDuration, pluralize } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
 import { SERVICES, servicesByCategory } from "@/lib/services"
 import type {
   Alarm,
+  AutoScalingGroup,
+  Certificate,
+  HostedZoneSummary,
+  UserPool,
   Bucket,
   DbInstance,
   DynamoTable,
@@ -106,6 +114,7 @@ function Tile({
 
 const QUICK_LINKS = [
   { href: "/ec2/launch/", label: "Launch an instance", icon: Cpu },
+  { href: "/ec2/autoscaling/create/", label: "Create an Auto Scaling group", icon: Scaling },
   { href: "/lambda/create/", label: "Create a function", icon: FunctionSquare },
   { href: "/rds/create/", label: "Create a database", icon: Database },
   { href: "/sqs/create/", label: "Create a queue", icon: ListOrdered },
@@ -113,6 +122,9 @@ const QUICK_LINKS = [
   { href: "/s3/?create=1", label: "Create a bucket", icon: Upload },
   { href: "/iam/users/?create=1", label: "Add an IAM user", icon: UserPlus },
   { href: "/secrets/create/", label: "Store a secret", icon: KeyRound },
+  { href: "/route53/?create=1", label: "Create a hosted zone", icon: Globe },
+  { href: "/acm/?request=1", label: "Request a certificate", icon: BadgeCheck },
+  { href: "/cognito/?create=1", label: "Create a user pool", icon: UsersRound },
   { href: "/cloudwatch/logs/", label: "View logs", icon: Terminal },
   { href: "/cloudwatch/alarms/?create=1", label: "Create an alarm", icon: Bell },
 ]
@@ -138,6 +150,10 @@ export function ConsoleHome() {
   const fileSystems = useApi<FileSystem[]>("/api/v1/efs/file-systems")
   const stateMachines = useApi<StateMachineSummary[]>("/api/v1/sfn/state-machines", { refreshInterval: 30_000 })
   const stacks = useApi<{ name: string; status: string }[]>("/api/v1/cloudformation/stacks", { refreshInterval: 30_000 })
+  const zones = useApi<HostedZoneSummary[]>("/api/v1/route53/zones")
+  const certs = useApi<Certificate[]>("/api/v1/acm/certificates")
+  const pools = useApi<UserPool[]>("/api/v1/cognito/user-pools")
+  const asgs = useApi<AutoScalingGroup[]>("/api/v1/autoscaling/groups", { refreshInterval: 30_000 })
   const events = useApi<TrailEvent[]>("/api/v1/cloudtrail/events", { query: { limit: 10 }, refreshInterval: 30_000 })
 
   const live = (instances.data ?? []).filter((i) => i.state !== "terminated")
@@ -153,6 +169,9 @@ export function ConsoleHome() {
   const ecsDesired = (ecsServices.data ?? []).reduce((n, x) => n + (x.desired_count ?? 0), 0)
   const runningExecutions = (stateMachines.data ?? []).reduce((n, m) => n + (m.executions?.RUNNING ?? 0), 0)
   const stacksInProgress = (stacks.data ?? []).filter((x) => x.status.endsWith("_IN_PROGRESS")).length
+  const certsExpiring = (certs.data ?? []).filter((c) => new Date(c.not_after).getTime() - Date.now() < 30 * 86_400_000).length
+  const asgInstances = (asgs.data ?? []).reduce((n, g) => n + (g.instances ?? []).length, 0)
+  const cognitoUsers = (pools.data ?? []).reduce((n, p) => n + (p.users ?? 0), 0)
   const stacksFailed = (stacks.data ?? []).filter((x) => x.status.endsWith("_FAILED") || x.status.includes("ROLLBACK")).length
 
   return (
@@ -351,6 +370,46 @@ export function ConsoleHome() {
           sub={`Alarms in ALARM of ${alarms.data?.length ?? 0}`}
           loading={alarms.isLoading}
           error={!!alarms.error}
+        />
+        <Tile
+          href="/ec2/autoscaling/"
+          icon={Scaling}
+          color="bg-orange-500/10 text-orange-600 dark:text-orange-400"
+          service="Auto Scaling"
+          value={asgs.data?.length ?? 0}
+          sub={`Groups, ${pluralize(asgInstances, "instance")}`}
+          loading={asgs.isLoading}
+          error={!!asgs.error}
+        />
+        <Tile
+          href="/route53/"
+          icon={Globe}
+          color="bg-violet-500/10 text-violet-600 dark:text-violet-400"
+          service="Route 53"
+          value={zones.data?.length ?? 0}
+          sub={`Hosted zones, ${(zones.data ?? []).filter((z) => z.private).length} private`}
+          loading={zones.isLoading}
+          error={!!zones.error}
+        />
+        <Tile
+          href="/acm/"
+          icon={BadgeCheck}
+          color="bg-red-500/10 text-red-600 dark:text-red-400"
+          service="Certificate Manager"
+          value={<span className={cn(certsExpiring > 0 && "text-amber-600 dark:text-amber-400")}>{certs.data?.length ?? 0}</span>}
+          sub={`Certificates${certsExpiring ? `, ${certsExpiring} expiring or expired` : ""}`}
+          loading={certs.isLoading}
+          error={!!certs.error}
+        />
+        <Tile
+          href="/cognito/"
+          icon={UsersRound}
+          color="bg-red-500/10 text-red-600 dark:text-red-400"
+          service="Cognito"
+          value={pools.data?.length ?? 0}
+          sub={`User pools, ${pluralize(cognitoUsers, "user")}`}
+          loading={pools.isLoading}
+          error={!!pools.error}
         />
         <Tile
           href="/vpc/"
