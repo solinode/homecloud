@@ -118,6 +118,7 @@ type Service struct {
 	// Both refuse loopback and link-local addresses by default.
 	HTTP     *http.Client
 	CheckURL func(string) error
+	cfgMu    sync.RWMutex // guards HTTP and CheckURL once the service is serving
 
 	mu    sync.Mutex
 	dedup map[string]map[string]dedupEntry // FIFO topic -> dedup ID
@@ -463,7 +464,7 @@ func (s *Service) subscribe(t Topic, in subscribeInput, authorize func(action, r
 		if err != nil || u.Scheme != in.Protocol || u.Host == "" {
 			return Subscription{}, errInvalid("Endpoint must match the specified protocol")
 		}
-		if err := s.CheckURL(in.Endpoint); err != nil {
+		if err := s.checkURL(in.Endpoint); err != nil {
 			return Subscription{}, errInvalid("Endpoint: %v", err)
 		}
 	case "email", "email-json":
@@ -1049,7 +1050,7 @@ func (s *Service) post(sub Subscription, body []byte, typ, id string, raw bool) 
 	if raw {
 		req.Header.Set("x-amz-sns-rawdelivery", "true")
 	}
-	resp, err := s.HTTP.Do(req)
+	resp, err := s.client().Do(req)
 	if err != nil {
 		return err
 	}
@@ -1063,12 +1064,12 @@ func (s *Service) post(sub Subscription, body []byte, typ, id string, raw bool) 
 // Notify delivers an alarm-style notification to a topic ARN or an http(s) URL.
 func (s *Service) Notify(target, subject, message string) {
 	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
-		if err := s.CheckURL(target); err != nil {
+		if err := s.checkURL(target); err != nil {
 			log.Printf("notify %s: %v", target, err)
 			return
 		}
 		body, _ := json.Marshal(map[string]string{"subject": subject, "message": message})
-		resp, err := s.HTTP.Post(target, "application/json", bytes.NewReader(body))
+		resp, err := s.client().Post(target, "application/json", bytes.NewReader(body))
 		if err != nil {
 			log.Printf("notify %s: %v", target, err)
 			return
@@ -1414,4 +1415,24 @@ func (s *Service) cert(c *httpx.Ctx) (any, error) {
 	_, _ = c.W.Write(sg.certPEM)
 	c.MarkWritten()
 	return nil, nil
+}
+
+// SetHTTP replaces the delivery client and URL check while the service is running.
+func (s *Service) SetHTTP(c *http.Client, check func(string) error) {
+	s.cfgMu.Lock()
+	s.HTTP, s.CheckURL = c, check
+	s.cfgMu.Unlock()
+}
+
+func (s *Service) client() *http.Client {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.HTTP
+}
+
+func (s *Service) checkURL(u string) error {
+	s.cfgMu.RLock()
+	f := s.CheckURL
+	s.cfgMu.RUnlock()
+	return f(u)
 }

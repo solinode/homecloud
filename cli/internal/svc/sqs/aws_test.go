@@ -442,11 +442,11 @@ func TestIAMDenied(t *testing.T) {
 		t.Fatalf("send without permission: %v %s", err, out)
 	}
 	found := false
-	for _, a := range h.Audit {
+	for _, a := range h.AuditLog() {
 		found = found || a == "sqs:SendMessage arn:aws:sqs:us-east-1:"+h.Env.AccountID+":locked"
 	}
 	if !found {
-		t.Fatalf("audit %v", h.Audit)
+		t.Fatalf("audit %v", h.AuditLog())
 	}
 }
 

@@ -103,7 +103,7 @@ func (s *Service) rotate(az Authz, ref string, in RotateInput) (Secret, string, 
 	if fn == "" {
 		return sec, "", core.Errf(http.StatusBadRequest, "InvalidRequestException", "No Lambda rotation function ARN is associated with this secret.")
 	}
-	if s.Lambda == nil {
+	if s.lambda() == nil {
 		return sec, "", core.Errf(http.StatusBadRequest, "InvalidRequestException", "Lambda rotation functions are not available on this server.")
 	}
 	if !strings.HasPrefix(fn, "arn:") {
@@ -167,6 +167,13 @@ func (s *Service) pendingRotation(sec Secret) bool {
 
 // startRotation adds the AWSPENDING placeholder version and runs the rotation
 // function's four steps in the background.
+// Rotating reports whether any rotation is still in progress.
+func (s *Service) Rotating() bool {
+	s.rotMu.Lock()
+	defer s.rotMu.Unlock()
+	return len(s.rotating) > 0
+}
+
 func (s *Service) startRotation(name, token string) (string, error) {
 	if token == "" {
 		token = uuid()
@@ -222,7 +229,12 @@ func (s *Service) runRotation(sec Secret, token string) {
 	}
 	for _, step := range []string{"createSecret", "setSecret", "testSecret", "finishSecret"} {
 		payload, _ := json.Marshal(map[string]string{"Step": step, "SecretId": sec.ARN, "ClientRequestToken": token, "RotationToken": uuid()})
-		out, fnErr, err := s.Lambda.Invoke(ctx, functionName(sec.RotationLambdaARN), payload)
+		inv := s.lambda()
+		if inv == nil {
+			fail(step + ": Lambda rotation functions are not available on this server")
+			return
+		}
+		out, fnErr, err := inv.Invoke(ctx, functionName(sec.RotationLambdaARN), payload)
 		if err != nil {
 			fail(fmt.Sprintf("%s: %s", step, errMessage(err)))
 			return

@@ -11,7 +11,7 @@ import (
 func TestSecretsNativeRotationPolicyStages(t *testing.T) {
 	h, sec, _, _ := setup(t)
 	sec.Routes(h.Router)
-	sec.Lambda = secrets.InvokerFunc(func(context.Context, string, []byte) ([]byte, string, error) { return []byte("null"), "", nil })
+	sec.SetLambda(secrets.InvokerFunc(func(context.Context, string, []byte) ([]byte, string, error) { return []byte("null"), "", nil }))
 	get := func(method, path string, body any) map[string]any {
 		var m map[string]any
 		if err := json.Unmarshal(h.Native(t, method, path, body), &m); err != nil {
