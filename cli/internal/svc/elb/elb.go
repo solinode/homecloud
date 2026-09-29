@@ -560,6 +560,16 @@ func (s *Service) config(c *httpx.Ctx) (any, error) {
 	return map[string]string{"nginx_conf": s.render(lb)}, nil
 }
 
+// checkRedirects verifies that every redirect points at an HTTPS listener.
+func checkRedirects(ls []Listener) error {
+	for _, l := range ls {
+		if l.RedirectHTTPSPort > 0 && !slices.ContainsFunc(ls, func(o Listener) bool { return o.Protocol == "HTTPS" && o.Port == l.RedirectHTTPSPort }) {
+			return core.BadRequest("listener %d redirects to port %d, which has no HTTPS listener", l.Port, l.RedirectHTTPSPort)
+		}
+	}
+	return nil
+}
+
 func (s *Service) checkListener(l *Listener, vpcID string, taken []Listener) error {
 	if l.Port < 1 || l.Port > 65535 {
 		return core.BadRequest("listener port must be 1-65535")
@@ -579,7 +589,10 @@ func (s *Service) checkListener(l *Listener, vpcID string, taken []Listener) err
 		if l.RedirectHTTPSPort < 0 || l.RedirectHTTPSPort > 65535 {
 			return core.BadRequest("redirect_https_port must be a port number")
 		}
-		if l.RedirectHTTPSPort > 0 && l.DefaultTargetGroup == "" {
+		if l.RedirectHTTPSPort > 0 && l.DefaultTargetGroup != "" {
+			return core.BadRequest("a listener either redirects to HTTPS or forwards to a target group, not both")
+		}
+		if l.RedirectHTTPSPort > 0 {
 			l.ID = core.RandHex(12)
 			l.Rules = []Rule{}
 			return nil // a pure redirect listener needs no target group
@@ -644,6 +657,10 @@ func (s *Service) createLB(c *httpx.Ctx) (any, error) {
 		}
 		ls = append(ls, l)
 	}
+	if err := checkRedirects(ls); err != nil {
+		s.vpc.Release("elb:" + in.Name)
+		return nil, err
+	}
 	lb := LoadBalancer{Name: in.Name, ARN: s.env.ARN("elasticloadbalancing", "loadbalancer/app/"+in.Name), DNSName: in.Name + ".elb.internal",
 		Scheme: in.Scheme, VpcID: pl.VPC.ID, SubnetID: pl.Subnet.ID, PrivateIP: pl.IP, Listeners: ls, State: "provisioning",
 		PublicPorts: map[string]int{}, PublicHost: s.env.Cfg.PublicHost, CreatedAt: core.Now(), Tags: in.Tags}
@@ -705,7 +722,7 @@ func (s *Service) addListener(c *httpx.Ctx) (any, error) {
 			return err
 		}
 		lb.Listeners = append(lb.Listeners, l)
-		return nil
+		return checkRedirects(lb.Listeners)
 	})
 }
 
@@ -719,7 +736,7 @@ func (s *Service) deleteListener(c *httpx.Ctx) (any, error) {
 		if len(lb.Listeners) == 0 {
 			return core.BadRequest("a load balancer needs at least one listener")
 		}
-		return nil
+		return checkRedirects(lb.Listeners) // don't strand a redirect
 	})
 }
 
@@ -1008,6 +1025,26 @@ func (s *Service) SetTarget(tgName, id string, port int, add bool) error {
 	}
 	s.pushUsers(tgName)
 	return nil
+}
+
+// TargetIDs returns the IDs of every registered target.
+func (s *Service) TargetIDs() []string {
+	var out []string
+	for _, tg := range store.List[TargetGroup](s.env.Store, cTGs) {
+		for _, t := range tg.Targets {
+			out = append(out, t.ID)
+		}
+	}
+	return out
+}
+
+// DropTarget deregisters a target (e.g. a terminated instance) from every target group.
+func (s *Service) DropTarget(id string) {
+	for _, tg := range store.List[TargetGroup](s.env.Store, cTGs) {
+		if slices.ContainsFunc(tg.Targets, func(t Target) bool { return t.ID == id }) {
+			_ = s.SetTarget(tg.Name, id, 0, false)
+		}
+	}
 }
 
 // TargetGroupVPC returns the VPC of a target group.

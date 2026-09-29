@@ -86,6 +86,8 @@ type Service struct {
 	vpc     *vpc.Service
 	hostCPU float64
 	mu      sync.Mutex // serialises state transitions
+	// OnTerminate is called after an instance is terminated (e.g. to deregister it from target groups).
+	OnTerminate func(id string)
 }
 
 func New(env *svc.Env, v *vpc.Service) *Service {
@@ -566,6 +568,39 @@ func (s *Service) reboot(c *httpx.Ctx) (any, error) {
 
 func (s *Service) terminate(c *httpx.Ctx) (any, error) { return s.Terminate(c.Param("id")) }
 
+// CheckLaunch validates a launch's image, instance type, subnets and security
+// groups without launching anything, and returns the VPC the subnets are in.
+func (s *Service) CheckLaunch(in RunInput, subnets []string) (string, error) {
+	typ := in.InstanceType
+	if typ == "" {
+		typ = "t3.micro"
+	}
+	if _, ok := findType(typ); !ok {
+		return "", core.BadRequest("unknown instance type %q", typ)
+	}
+	if _, err := s.image(in.ImageID); err != nil {
+		return "", err
+	}
+	if len(subnets) == 0 {
+		subnets = []string{""}
+	}
+	vpcID := ""
+	for _, sn := range subnets {
+		v, err := s.vpc.SubnetVPC(sn)
+		if err != nil {
+			return "", err
+		}
+		if vpcID != "" && v != vpcID {
+			return "", core.BadRequest("subnets must all be in the same VPC")
+		}
+		vpcID = v
+	}
+	if err := s.vpc.CheckGroups(vpcID, in.SecurityGroupIDs); err != nil {
+		return "", err
+	}
+	return vpcID, nil
+}
+
 // Terminate removes an instance and its container.
 func (s *Service) Terminate(id string) (Instance, error) {
 	i, err := s.get(id)
@@ -583,11 +618,15 @@ func (s *Service) Terminate(id string) (Instance, error) {
 	}
 	s.releaseVolumes(i)
 	s.vpc.Release(id)
-	return store.Update(s.env.Store, cInstances, id, func(x *Instance) error {
+	out, err := store.Update(s.env.Store, cInstances, id, func(x *Instance) error {
 		n := core.Now()
 		x.State, x.TerminatedAt, x.PublicPorts, x.StateReason = "terminated", &n, map[string]int{}, "Client.UserInitiatedShutdown"
 		return nil
 	})
+	if err == nil && s.OnTerminate != nil {
+		s.OnTerminate(id)
+	}
+	return out, err
 }
 
 func (s *Service) releaseVolumes(i Instance) {

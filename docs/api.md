@@ -270,6 +270,7 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | PATCH | `/api/v1/apigateway/apis/{id}` | `apigateway:PATCH` |
 | DELETE | `/api/v1/apigateway/apis/{id}` | `apigateway:DELETE` |
 | POST | `/api/v1/apigateway/apis/{id}/routes` | `apigateway:POST` |
+| PATCH | `/api/v1/apigateway/apis/{id}/routes/{route}` | `apigateway:PATCH` |
 | DELETE | `/api/v1/apigateway/apis/{id}/routes/{route}` | `apigateway:DELETE` |
 | ANY | `/apigw/{id}/{path...}` | `(public)` |
 | GET | `/api/v1/lambda/event-source-mappings` | `lambda:ListEventSourceMappings` |

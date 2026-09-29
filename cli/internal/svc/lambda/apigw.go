@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"slices"
 	"sort"
 	"strings"
 	"time"
@@ -240,6 +241,7 @@ func (s *Service) apigwRoutes(r *httpx.Router) {
 	r.Handle("PATCH /api/v1/apigateway/apis/{id}", "apigateway:PATCH", s.patchAPI, res)
 	r.Handle("DELETE /api/v1/apigateway/apis/{id}", "apigateway:DELETE", s.deleteAPI, res)
 	r.Handle("POST /api/v1/apigateway/apis/{id}/routes", "apigateway:POST", s.addRoute, res)
+	r.Handle("PATCH /api/v1/apigateway/apis/{id}/routes/{route}", "apigateway:PATCH", s.updateRoute, res)
 	r.Handle("DELETE /api/v1/apigateway/apis/{id}/routes/{route}", "apigateway:DELETE", s.deleteRoute, res)
 	r.Handle("/apigw/{id}/{path...}", "", s.serveAPI, httpx.Public())
 }
@@ -282,13 +284,31 @@ func (s *Service) checkRoute(c *httpx.Ctx, r *Route) error {
 	if err := c.Authorize("lambda:InvokeFunction", s.env.ARN("lambda", "function:"+r.FunctionName)); err != nil {
 		return err
 	}
+	r.Authorization = strings.ToUpper(r.Authorization)
 	if r.Authorization == "" {
 		r.Authorization = "NONE"
 	}
 	if r.Authorization != "NONE" && r.Authorization != "JWT" {
 		return core.BadRequest("authorization must be NONE or JWT")
 	}
-	r.ID = strings.ToLower(core.RandHex(7))
+	if r.ID == "" {
+		r.ID = strings.ToLower(core.RandHex(7))
+	}
+	return nil
+}
+
+// checkAuthorizer verifies the pool and client exist and that the caller may use
+// the pool: attaching it makes the API trust the pool's tokens.
+func (s *Service) checkAuthorizer(c *httpx.Ctx, a *Authorizer) error {
+	if a == nil || a.UserPoolID == "" {
+		return nil
+	}
+	if err := c.Authorize("cognito-idp:DescribeUserPool", s.env.ARN("cognito-idp", "userpool/"+a.UserPoolID)); err != nil {
+		return err
+	}
+	if s.CheckAuthorizer != nil {
+		return s.CheckAuthorizer(a.UserPoolID, a.Audience)
+	}
 	return nil
 }
 
@@ -305,6 +325,12 @@ func (s *Service) createAPI(c *httpx.Ctx) (any, error) {
 	}
 	if strings.TrimSpace(in.Name) == "" {
 		return nil, core.BadRequest("name is required")
+	}
+	if err := s.checkAuthorizer(c, in.Authorizer); err != nil {
+		return nil, err
+	}
+	if in.Authorizer != nil && in.Authorizer.UserPoolID == "" {
+		in.Authorizer = nil
 	}
 	id := strings.ToLower(core.RandHex(10))
 	a := API{ID: id, Name: in.Name, Description: in.Description, CORS: in.CORS, Routes: []Route{}, Endpoint: s.apiEndpoint(id), CreatedAt: core.Now(), Authorizer: in.Authorizer}
@@ -325,6 +351,9 @@ func (s *Service) patchAPI(c *httpx.Ctx) (any, error) {
 		Authorizer  *Authorizer `json:"authorizer"`
 	}
 	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	if err := s.checkAuthorizer(c, in.Authorizer); err != nil {
 		return nil, err
 	}
 	a, err := store.Update(s.env.Store, cAPIs, c.Param("id"), func(a *API) error {
@@ -374,6 +403,62 @@ func (s *Service) addRoute(c *httpx.Ctx) (any, error) {
 			}
 		}
 		a.Routes = append(a.Routes, r)
+		return nil
+	})
+	if err == store.ErrNotFound {
+		return nil, core.NotFound("api", c.Param("id"))
+	}
+	return a, err
+}
+
+// updateRoute changes a route in place, keeping its ID.
+func (s *Service) updateRoute(c *httpx.Ctx) (any, error) {
+	var in struct {
+		Method        *string `json:"method"`
+		Path          *string `json:"path"`
+		FunctionName  *string `json:"function_name"`
+		Authorization *string `json:"authorization"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	cur, err := store.Get[API](s.env.Store, cAPIs, c.Param("id"))
+	if err != nil {
+		return nil, core.NotFound("api", c.Param("id"))
+	}
+	i := slices.IndexFunc(cur.Routes, func(r Route) bool { return r.ID == c.Param("route") })
+	if i < 0 {
+		return nil, core.NotFound("route", c.Param("route"))
+	}
+	r := cur.Routes[i]
+	if in.Method != nil {
+		r.Method = *in.Method
+	}
+	if in.Path != nil {
+		r.Path = *in.Path
+	}
+	if in.FunctionName != nil {
+		r.FunctionName = *in.FunctionName
+	}
+	if in.Authorization != nil {
+		r.Authorization = *in.Authorization
+	}
+	if err := s.checkRoute(c, &r); err != nil {
+		return nil, err
+	}
+	a, err := store.Update(s.env.Store, cAPIs, c.Param("id"), func(a *API) error {
+		j := -1
+		for k, x := range a.Routes {
+			if x.ID == r.ID {
+				j = k
+			} else if x.Key() == r.Key() {
+				return core.Conflict("route %q already exists", r.Key())
+			}
+		}
+		if j < 0 {
+			return core.NotFound("route", r.ID)
+		}
+		a.Routes[j] = r
 		return nil
 	})
 	if err == store.ErrNotFound {

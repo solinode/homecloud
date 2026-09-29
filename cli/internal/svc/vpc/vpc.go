@@ -272,6 +272,19 @@ func (s *Service) DefaultSecurityGroup(vpcID string) string {
 	return ""
 }
 
+// SubnetVPC returns the VPC of a subnet (the default subnet's VPC when id is empty).
+func (s *Service) SubnetVPC(id string) (string, error) {
+	if id == "" {
+		sn, err := s.defaultSubnet()
+		return sn.VpcID, err
+	}
+	sn, err := store.Get[Subnet](s.env.Store, cSubnets, id)
+	if err != nil {
+		return "", core.NotFound("subnet", id)
+	}
+	return sn.VpcID, nil
+}
+
 // CheckGroups verifies that every group exists and belongs to vpcID.
 func (s *Service) CheckGroups(vpcID string, ids []string) error {
 	for _, id := range ids {
