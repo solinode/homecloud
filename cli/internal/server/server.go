@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
@@ -48,6 +49,7 @@ type Credentials struct {
 	AccessKeyID     string `json:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key"`
 	Region          string `json:"region"`
+	CAFile          string `json:"ca_file,omitempty"`
 }
 
 func CredentialsPath(dataDir string) string {
@@ -81,6 +83,15 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if err != nil {
 		return err
 	}
+	runtime.Account = account
+	if cs, err := dk.ManagedContainers(); err == nil {
+		for _, c := range cs {
+			if other := c.Labels[core.LabelAccount]; other != "" && other != account {
+				return fmt.Errorf("this Docker host already runs HomeCloud account %s (container %s); "+
+					"start HomeCloud with that installation's --data-dir, or remove its containers first", other, strings.TrimPrefix(c.Names[0], "/"))
+			}
+		}
+	}
 	env := &svc.Env{Cfg: cfg, Store: st, Docker: dk, AccountID: account}
 
 	iamSvc := iam.New(env)
@@ -88,9 +99,17 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if err != nil {
 		return fmt.Errorf("bootstrap iam: %w", err)
 	}
-	endpoint := "http://" + cfg.APIAddr
+	scheme := "http"
+	if cfg.TLSCert != "" {
+		scheme = "https"
+	}
+	endpoint := scheme + "://" + cfg.APIAddr
 	if boot != nil {
-		if err := writeCredentials(cfg, Credentials{Endpoint: endpoint, AccessKeyID: boot.AccessKeyID, SecretAccessKey: boot.SecretKey, Region: cfg.Region}); err != nil {
+		creds := Credentials{Endpoint: endpoint, AccessKeyID: boot.AccessKeyID, SecretAccessKey: boot.SecretKey, Region: cfg.Region}
+		if cfg.TLSCert == cfg.Path("tls", "cert.pem") {
+			creds.CAFile = cfg.TLSCert // self-signed: let the CLI trust it
+		}
+		if err := writeCredentials(cfg, creds); err != nil {
 			return err
 		}
 		logf("first start: created account %s", boot.AccountID)
@@ -213,7 +232,13 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 	srv := &http.Server{Addr: cfg.APIAddr, Handler: withCORS(mux), ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
-	go func() { errc <- srv.ListenAndServe() }()
+	go func() {
+		if cfg.TLSCert != "" {
+			errc <- srv.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
+			return
+		}
+		errc <- srv.ListenAndServe()
+	}()
 	logf("HomeCloud %s listening on %s (data: %s)", Version, endpoint, cfg.DataDir)
 	select {
 	case <-ctx.Done():

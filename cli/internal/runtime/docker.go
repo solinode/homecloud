@@ -33,9 +33,12 @@ func New() (*Docker, error) {
 	return &Docker{C: c}, nil
 }
 
+// Account is stamped on every managed object so two installations never share a Docker host by accident.
+var Account string
+
 // Labels returns the label set for a managed object.
 func Labels(service, resource string, extra map[string]string) map[string]string {
-	l := map[string]string{core.LabelManaged: "true", core.LabelService: service, core.LabelResource: resource}
+	l := map[string]string{core.LabelManaged: "true", core.LabelService: service, core.LabelResource: resource, core.LabelAccount: Account}
 	for k, v := range extra {
 		l[k] = v
 	}

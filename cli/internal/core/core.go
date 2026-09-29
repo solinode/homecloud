@@ -20,6 +20,7 @@ const (
 	LabelManaged  = "homecloud.managed"
 	LabelService  = "homecloud.service"
 	LabelResource = "homecloud.resource"
+	LabelAccount  = "homecloud.account"
 	DefaultRegion = "local-1"
 )
 
@@ -30,6 +31,8 @@ type Config struct {
 	S3Port        int    `json:"s3_port"`
 	S3ConsolePort int    `json:"s3_console_port"`
 	ECRPort       int    `json:"ecr_port"`
+	TLSCert       string `json:"tls_cert,omitempty"` // PEM files; empty = plain HTTP
+	TLSKey        string `json:"tls_key,omitempty"`
 	Region        string `json:"region"`
 }
 

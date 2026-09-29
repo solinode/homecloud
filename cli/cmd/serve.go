@@ -18,7 +18,7 @@ import (
 )
 
 func init() {
-	var resetRoot bool
+	var resetRoot, selfSigned bool
 	cfg := core.DefaultConfig()
 	serveCmd := &cobra.Command{
 		Use:   "serve",
@@ -28,6 +28,17 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 <data-dir>/config.json and reused on later starts.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			cfg = mergeConfig(cmd, cfg)
+			if selfSigned && cfg.TLSCert == "" {
+				c, k, err := server.SelfSignedCert(cfg.DataDir, cfg.PublicHost)
+				if err != nil {
+					return err
+				}
+				cfg.TLSCert, cfg.TLSKey = c, k
+				saveConfig(cfg)
+			}
+			if (cfg.TLSCert == "") != (cfg.TLSKey == "") {
+				return fmt.Errorf("--tls-cert and --tls-key must be used together")
+			}
 			server.Version = Version
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
@@ -41,6 +52,9 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 	f.IntVar(&cfg.S3Port, "s3-port", cfg.S3Port, "host port for the S3-compatible endpoint")
 	f.IntVar(&cfg.S3ConsolePort, "s3-console-port", cfg.S3ConsolePort, "host port for the MinIO console")
 	f.BoolVar(&resetRoot, "reset-root-password", false, "generate a new root console password and print it")
+	f.StringVar(&cfg.TLSCert, "tls-cert", "", "serve HTTPS with this PEM certificate")
+	f.StringVar(&cfg.TLSKey, "tls-key", "", "PEM private key for --tls-cert")
+	f.BoolVar(&selfSigned, "tls-self-signed", false, "serve HTTPS with a generated self-signed certificate")
 	RootCmd.AddCommand(serveCmd)
 
 	var p client.Profile
@@ -131,11 +145,17 @@ func mergeConfig(cmd *cobra.Command, flags core.Config) core.Config {
 	set("public-host", func() { cfg.PublicHost = flags.PublicHost })
 	set("s3-port", func() { cfg.S3Port = flags.S3Port })
 	set("s3-console-port", func() { cfg.S3ConsolePort = flags.S3ConsolePort })
+	set("tls-cert", func() { cfg.TLSCert = flags.TLSCert })
+	set("tls-key", func() { cfg.TLSKey = flags.TLSKey })
+	saveConfig(cfg)
+	return cfg
+}
+
+func saveConfig(cfg core.Config) {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err == nil {
 		b, _ := json.MarshalIndent(cfg, "", "  ")
-		_ = os.WriteFile(path, b, 0o600)
+		_ = os.WriteFile(cfg.Path("config.json"), b, 0o600)
 	}
-	return cfg
 }
 
 func prompt(label, def string) string {

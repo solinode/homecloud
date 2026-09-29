@@ -13,6 +13,7 @@ import (
 	"regexp"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
@@ -105,10 +106,38 @@ type account struct {
 }
 
 type Service struct {
-	env *svc.Env
+	env      *svc.Env
+	failMu   sync.Mutex
+	failures map[string][]time.Time // client IP -> recent failed sign-ins
 }
 
-func New(env *svc.Env) *Service { return &Service{env: env} }
+func New(env *svc.Env) *Service { return &Service{env: env, failures: map[string][]time.Time{}} }
+
+const (
+	maxFailures   = 10
+	failureWindow = 5 * time.Minute
+)
+
+// throttled reports whether ip has too many recent failed sign-ins; fail records one.
+func (s *Service) throttled(ip string, fail bool) bool {
+	s.failMu.Lock()
+	defer s.failMu.Unlock()
+	recent := s.failures[ip][:0]
+	for _, t := range s.failures[ip] {
+		if time.Since(t) < failureWindow {
+			recent = append(recent, t)
+		}
+	}
+	if fail {
+		recent = append(recent, time.Now())
+	}
+	if len(recent) == 0 {
+		delete(s.failures, ip)
+	} else {
+		s.failures[ip] = recent
+	}
+	return len(recent) >= maxFailures
+}
 
 // BootstrapResult carries credentials that exist only at first start.
 type BootstrapResult struct {
@@ -330,8 +359,13 @@ func (s *Service) login(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	ip := httpx.ClientIP(c.R)
+	if s.throttled(ip, false) {
+		return nil, core.Errf(http.StatusTooManyRequests, "TooManyRequests", "too many failed sign-in attempts; try again in a few minutes")
+	}
 	u, err := store.Get[User](s.env.Store, cUsers, in.Username)
 	if err != nil || u.PasswordHash == "" || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Password)) != nil {
+		s.throttled(ip, true)
 		time.Sleep(300 * time.Millisecond)
 		return nil, core.Errf(http.StatusUnauthorized, "AuthFailure", "incorrect user name or password")
 	}

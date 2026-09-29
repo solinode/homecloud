@@ -95,7 +95,9 @@ var engines = []Engine{
 		dump: func(u, p string) []string {
 			return sh("redis-cli --no-auth-warning -a " + q(p) + " --rdb /tmp/hc-snapshot.rdb >/dev/null 2>&1 && cat /tmp/hc-snapshot.rdb && rm -f /tmp/hc-snapshot.rdb")
 		},
-		query: func(u, p, db, cmd string) []string { return sh("redis-cli --no-auth-warning -a " + q(p) + " " + cmd) },
+		query: func(u, p, db, cmd string) []string {
+			return append([]string{"redis-cli", "--no-auth-warning", "-a", p}, splitCommand(cmd)...)
+		},
 	},
 	{
 		Name: "valkey", Label: "Valkey", Kind: "cache", Versions: []string{"8"}, DefaultPort: 6379, DataDir: "/data", HasPassword: true,
@@ -107,7 +109,9 @@ var engines = []Engine{
 		dump: func(u, p string) []string {
 			return sh("valkey-cli --no-auth-warning -a " + q(p) + " --rdb /tmp/hc-snapshot.rdb >/dev/null 2>&1 && cat /tmp/hc-snapshot.rdb && rm -f /tmp/hc-snapshot.rdb")
 		},
-		query: func(u, p, db, cmd string) []string { return sh("valkey-cli --no-auth-warning -a " + q(p) + " " + cmd) },
+		query: func(u, p, db, cmd string) []string {
+			return append([]string{"valkey-cli", "--no-auth-warning", "-a", p}, splitCommand(cmd)...)
+		},
 	},
 	{
 		Name: "memcached", Label: "Memcached", Kind: "cache", Versions: []string{"1.6"}, DefaultPort: 11211,
@@ -134,6 +138,38 @@ var engines = []Engine{
 			return sh("mongosh --quiet --host 127.0.0.1 -u " + q(u) + " -p " + q(p) + " --authenticationDatabase admin " + q(db) + " --eval " + q(js))
 		},
 	},
+}
+
+// splitCommand splits a Redis-style command line into arguments, honouring
+// single and double quotes, so it can be executed without a shell.
+func splitCommand(s string) []string {
+	var args []string
+	var cur strings.Builder
+	var quote rune
+	inArg := false
+	for _, r := range s {
+		switch {
+		case quote != 0 && r == quote:
+			quote = 0
+		case quote != 0:
+			cur.WriteRune(r)
+		case r == '"' || r == '\'':
+			quote, inArg = r, true
+		case r == ' ' || r == '\t' || r == '\n':
+			if inArg {
+				args = append(args, cur.String())
+				cur.Reset()
+				inArg = false
+			}
+		default:
+			cur.WriteRune(r)
+			inArg = true
+		}
+	}
+	if inArg {
+		args = append(args, cur.String())
+	}
+	return args
 }
 
 func findEngine(name string) (Engine, bool) {
