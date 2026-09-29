@@ -503,13 +503,26 @@ func lambdaCommands() {
 		return call("POST", "/api/v1/apigateway/apis", map[string]any{"name": a[0], "cors": cors}, nil)
 	})
 	ca.Flags().BoolVar(&cors, "cors", false, "answer CORS preflight requests")
-	sub(g, "route API_ID \"METHOD /path/{param}\" FUNCTION", "Add a route", cobra.ExactArgs(3), func(a []string) error {
+	var routeAuth string
+	rt := sub(g, "route API_ID \"METHOD /path/{param}\" FUNCTION", "Add a route", cobra.ExactArgs(3), func(a []string) error {
 		m, p, ok := strings.Cut(a[1], " ")
 		if !ok {
 			return fmt.Errorf("route must look like \"GET /items/{id}\"")
 		}
-		return call("POST", "/api/v1/apigateway/apis/"+a[0]+"/routes", map[string]any{"method": m, "path": p, "function_name": a[2]}, nil)
+		return call("POST", "/api/v1/apigateway/apis/"+a[0]+"/routes", map[string]any{"method": m, "path": p, "function_name": a[2], "authorization": routeAuth}, nil)
 	})
+	rt.Flags().StringVar(&routeAuth, "auth", "NONE", "NONE, or JWT to require a token from the API's Cognito authorizer")
+	var authz string
+	ra := sub(g, "route-auth API_ID ROUTE_ID", "Change a route's authorization (NONE or JWT)", cobra.ExactArgs(2), func(a []string) error {
+		return call("PATCH", "/api/v1/apigateway/apis/"+a[0]+"/routes/"+a[1], map[string]any{"authorization": authz}, nil)
+	})
+	ra.Flags().StringVar(&authz, "auth", "JWT", "NONE or JWT")
+	var pool, client string
+	au := sub(g, "authorizer API_ID", "Set the API's Cognito authorizer (empty --pool removes it)", cobra.ExactArgs(1), func(a []string) error {
+		return call("PATCH", "/api/v1/apigateway/apis/"+a[0], map[string]any{"authorizer": map[string]any{"user_pool_id": pool, "audience": client}}, nil)
+	})
+	au.Flags().StringVar(&pool, "pool", "", "user pool ID")
+	au.Flags().StringVar(&client, "client", "", "app client ID (default: any client of the pool)")
 }
 
 func queueCommands() {

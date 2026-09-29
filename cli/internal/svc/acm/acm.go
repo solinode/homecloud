@@ -47,7 +47,7 @@ type Certificate struct {
 	NotBefore  time.Time `json:"not_before"`
 	NotAfter   time.Time `json:"not_after"`
 	Serial     string    `json:"serial"`
-	CertPEM    string    `json:"certificate"`
+	CertPEM    string    `json:"certificate,omitempty"`
 	ChainPEM   string    `json:"certificate_chain,omitempty"`
 	KeyCT      string    `json:"key_ct,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
@@ -264,7 +264,7 @@ func (s *Service) importCert(c *httpx.Ctx) (any, error) {
 	if domain == "" && len(leaf.DNSNames) > 0 {
 		domain = leaf.DNSNames[0]
 	}
-	cert := Certificate{ARN: s.env.ARN("acm", "certificate/"+id), ID: id, DomainName: domain, SANs: leaf.DNSNames, Type: "IMPORTED", Status: "ISSUED",
+	cert := Certificate{ARN: s.env.ARN("acm", "certificate/"+id), ID: id, DomainName: domain, SANs: leafSANs(leaf), Type: "IMPORTED", Status: "ISSUED",
 		Issuer: leaf.Issuer.CommonName, NotBefore: leaf.NotBefore.UTC(), NotAfter: leaf.NotAfter.UTC(), Serial: hex.EncodeToString(leaf.SerialNumber.Bytes()),
 		CertPEM: strings.TrimSpace(in.Certificate) + "\n", ChainPEM: strings.TrimSpace(in.Chain), KeyCT: s.secrets.Encrypt([]byte(in.PrivateKey)),
 		CreatedAt: core.Now(), Tags: in.Tags}
@@ -332,4 +332,13 @@ func (s *Service) caCert(c *httpx.Ctx) (any, error) {
 	}
 	return map[string]any{"subject": cert.Subject.CommonName, "not_after": cert.NotAfter, "certificate": p,
 		"hint": fmt.Sprintf("Trust this CA on your devices to accept certificates issued by HomeCloud (%s).", cert.Subject.CommonName)}, nil
+}
+
+// leafSANs lists a certificate's DNS and IP subject alternative names.
+func leafSANs(c *x509.Certificate) []string {
+	out := append([]string{}, c.DNSNames...)
+	for _, ip := range c.IPAddresses {
+		out = append(out, ip.String())
+	}
+	return out
 }

@@ -11,6 +11,7 @@ import (
 	"net/http"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -312,8 +313,14 @@ func validate(g *Group) error {
 		if p.CooldownSeconds == 0 {
 			p.CooldownSeconds = 180
 		}
-		if p.Name == "" {
+		// Generated names track the policy's target; custom names are kept.
+		if p.Name == "" || strings.HasPrefix(p.Name, "target-") {
 			p.Name = fmt.Sprintf("target-%s-%.0f", p.Metric, p.TargetValue)
+		}
+		for _, q := range g.Policies[:i] {
+			if q.Name == p.Name {
+				return core.BadRequest("policy name %q is used twice", p.Name)
+			}
 		}
 	}
 	return nil
@@ -333,6 +340,25 @@ func (s *Service) authorizeLaunch(c *httpx.Ctx, l LaunchConfig, targetGroups []s
 	for _, tg := range targetGroups {
 		if err := c.Authorize("elasticloadbalancing:RegisterTargets", s.env.ARN("elasticloadbalancing", "targetgroup/"+tg)); err != nil {
 			return err
+		}
+	}
+	return nil
+}
+
+// checkPlacement verifies the launch configuration, subnets, security groups and
+// target groups up front, so mistakes fail the request instead of every launch.
+func (s *Service) checkPlacement(l LaunchConfig, subnets, targetGroups []string) error {
+	vpcID, err := s.ec2.CheckLaunch(ec2.RunInput{ImageID: l.ImageID, InstanceType: l.InstanceType, SecurityGroupIDs: l.SecurityGroupIDs}, subnets)
+	if err != nil {
+		return err
+	}
+	for _, tg := range targetGroups {
+		v, ok := s.elb.TargetGroupVPC(tg)
+		if !ok {
+			return core.NotFound("target group", tg)
+		}
+		if v != vpcID {
+			return core.BadRequest("target group %s is in %s, but the group's subnets are in %s", tg, v, vpcID)
 		}
 	}
 	return nil
@@ -361,10 +387,8 @@ func (s *Service) create(c *httpx.Ctx) (any, error) {
 	if err := validate(&g); err != nil {
 		return nil, err
 	}
-	for _, tg := range g.TargetGroups {
-		if _, ok := s.elb.TargetGroupVPC(tg); !ok {
-			return nil, core.NotFound("target group", tg)
-		}
+	if err := s.checkPlacement(g.Launch, g.SubnetIDs, g.TargetGroups); err != nil {
+		return nil, err
 	}
 	if g.HealthGraceSecs == 0 {
 		g.HealthGraceSecs = 120
@@ -395,15 +419,43 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 		Launch          *LaunchConfig `json:"launch"`
 		Policies        *[]Policy     `json:"policies"`
 		Suspended       *bool         `json:"suspended"`
+		SubnetIDs       *[]string     `json:"subnet_ids"`
+		TargetGroups    *[]string     `json:"target_groups"`
 	}
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	cur, err := store.Get[Group](s.env.Store, cGroups, c.Param("name"))
+	if err != nil {
+		return nil, core.NotFound("auto scaling group", c.Param("name"))
+	}
+	launch, subnets, tgs := cur.Launch, cur.SubnetIDs, cur.TargetGroups
+	var newTGs []string
 	if in.Launch != nil {
-		if err := s.authorizeLaunch(c, *in.Launch, nil); err != nil {
+		launch = *in.Launch
+	}
+	if in.SubnetIDs != nil {
+		subnets = *in.SubnetIDs
+	}
+	if in.TargetGroups != nil {
+		tgs = *in.TargetGroups
+		for _, tg := range tgs {
+			if !slices.Contains(cur.TargetGroups, tg) {
+				newTGs = append(newTGs, tg)
+			}
+		}
+	}
+	if in.Launch != nil || newTGs != nil {
+		if err := s.authorizeLaunch(c, launch, newTGs); err != nil {
 			return nil, err
 		}
 	}
+	if in.Launch != nil || in.SubnetIDs != nil || in.TargetGroups != nil {
+		if err := s.checkPlacement(launch, subnets, tgs); err != nil {
+			return nil, err
+		}
+	}
+	var dropped []string
 	g, err := store.Update(s.env.Store, cGroups, c.Param("name"), func(g *Group) error {
 		if in.MinSize != nil {
 			g.MinSize = *in.MinSize
@@ -425,6 +477,18 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 		if in.Suspended != nil {
 			g.Suspended = *in.Suspended
 		}
+		if in.SubnetIDs != nil {
+			g.SubnetIDs = *in.SubnetIDs // existing instances stay where they are
+		}
+		if in.TargetGroups != nil {
+			dropped = nil
+			for _, tg := range g.TargetGroups {
+				if !slices.Contains(*in.TargetGroups, tg) {
+					dropped = append(dropped, tg)
+				}
+			}
+			g.TargetGroups = *in.TargetGroups
+		}
 		return validate(g)
 	})
 	if err == store.ErrNotFound {
@@ -432,6 +496,12 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 	}
 	if err != nil {
 		return nil, err
+	}
+	if len(dropped) > 0 {
+		live, _ := s.members(g.Name)
+		for _, i := range live {
+			s.detach(Group{TargetGroups: dropped}, i.ID)
+		}
 	}
 	go s.reconcile(g)
 	return s.view(g), nil

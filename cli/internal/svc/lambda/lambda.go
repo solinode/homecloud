@@ -88,6 +88,8 @@ type Service struct {
 	Queues QueueSource
 	// VerifyJWT validates user pool tokens for API Gateway routes that require them.
 	VerifyJWT JWTVerifier
+	// CheckAuthorizer verifies that a user pool (and optional app client of it) exists.
+	CheckAuthorizer func(pool, client string) error
 	// DNSFor returns resolver addresses for containers in a VPC (Route 53).
 	DNSFor func(vpcID string) []string
 }

@@ -165,6 +165,20 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	elbSvc := elb.New(env, vpcSvc)
 	acmSvc := acm.New(env, secSvc)
 	elbSvc.Certs = acmSvc
+	ec2Svc.OnTerminate = elbSvc.DropTarget
+	// Deregister instances that were terminated before this hook existed.
+	go func() {
+		defer core.Recover("stale targets")
+		alive := map[string]bool{}
+		for _, i := range ec2Svc.Instances() {
+			alive[i.ID] = i.State != "terminated"
+		}
+		for _, id := range elbSvc.TargetIDs() {
+			if strings.HasPrefix(id, "i-") && !alive[id] {
+				elbSvc.DropTarget(id)
+			}
+		}
+	}()
 	acmSvc.InUse, acmSvc.OnRenew = elbSvc.UsesCertificate, elbSvc.CertificateRenewed
 	ecsSvc := ecs.New(env, vpcSvc, elbSvc, secSvc)
 	elbSvc.Resolve = func(id string) (string, string, bool) {
@@ -196,6 +210,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		return elbSvc.PrivateIP(id)
 	}
 	lambdaSvc.VerifyJWT = cognitoSvc.VerifyToken
+	lambdaSvc.CheckAuthorizer = cognitoSvc.CheckClient
 	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc, sfn: sfnSvc}
 	sfnSvc.Tasks = tg
 	eventsSvc.Deliver, eventsSvc.Exists = tg.deliver, tg.exists

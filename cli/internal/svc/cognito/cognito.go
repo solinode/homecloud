@@ -20,6 +20,7 @@ import (
 	"sync"
 	"time"
 	"unicode"
+	"unicode/utf8"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
@@ -179,7 +180,7 @@ func (p PasswordPolicy) check(pw string) error {
 		}
 	}
 	var missing []string
-	if len(pw) < p.MinLength {
+	if utf8.RuneCountInString(pw) < p.MinLength {
 		missing = append(missing, fmt.Sprintf("at least %d characters", p.MinLength))
 	}
 	if p.RequireUppercase && !up {
@@ -255,6 +256,21 @@ func (s *Service) issue(p Pool, c Client, u User, withRefresh bool) (*tokens, er
 
 // VerifyToken validates a pool token for API Gateway's JWT authorizer.
 // audience (a client ID) is optional.
+// CheckClient verifies that a pool exists and, when clientID is set, that the client belongs to it.
+func (s *Service) CheckClient(poolID, clientID string) error {
+	if _, err := s.pool(poolID); err != nil {
+		return core.NotFound("user pool", poolID)
+	}
+	if clientID == "" {
+		return nil
+	}
+	cl, err := store.Get[Client](s.env.Store, cClients, clientID)
+	if err != nil || cl.PoolID != poolID {
+		return core.NotFound("app client", clientID)
+	}
+	return nil
+}
+
 func (s *Service) VerifyToken(poolID, token, audience string) (map[string]any, error) {
 	p, err := s.pool(poolID)
 	if err != nil {
@@ -367,8 +383,11 @@ func (s *Service) createPool(c *httpx.Ctx) (any, error) {
 	pp := PasswordPolicy{MinLength: 8, RequireLowercase: true, RequireNumbers: true}
 	if in.PasswordPolicy != nil {
 		pp = *in.PasswordPolicy
-		if pp.MinLength < 6 {
-			pp.MinLength = 6
+		if pp.MinLength == 0 {
+			pp.MinLength = 8
+		}
+		if pp.MinLength < 6 || pp.MinLength > 99 {
+			return nil, core.BadRequest("password_policy.min_length must be 6-99")
 		}
 	}
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -402,8 +421,11 @@ func (s *Service) updatePool(c *httpx.Ctx) (any, error) {
 	p, err := store.Update(s.env.Store, cPools, c.Param("pool"), func(p *Pool) error {
 		if in.PasswordPolicy != nil {
 			p.PasswordPolicy = *in.PasswordPolicy
-			if p.PasswordPolicy.MinLength < 6 {
-				p.PasswordPolicy.MinLength = 6
+			if p.PasswordPolicy.MinLength == 0 {
+				p.PasswordPolicy.MinLength = 8
+			}
+			if p.PasswordPolicy.MinLength < 6 || p.PasswordPolicy.MinLength > 99 {
+				return core.BadRequest("password_policy.min_length must be 6-99")
 			}
 		}
 		if in.AutoConfirm != nil {

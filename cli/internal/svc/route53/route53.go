@@ -135,6 +135,18 @@ func (s *Service) zoneFile(z Zone, nsIP string) string {
 	return b.String()
 }
 
+// nsAddress is the address for a zone's generated ns record: the VPC resolver,
+// or for public zones the host's address when it is an IP (LAN clients can't
+// reach VPC addresses).
+func (s *Service) nsAddress(z Zone, vpcNS string) string {
+	if !z.Private {
+		if a, err := netip.ParseAddr(s.env.Cfg.PublicHost); err == nil && !a.IsLoopback() {
+			return a.String()
+		}
+	}
+	return vpcNS
+}
+
 func (s *Service) render() map[string]string {
 	vpcs := s.vpc.List()
 	files := map[string]string{}
@@ -148,7 +160,7 @@ func (s *Service) render() map[string]string {
 	}
 	for _, z := range zones {
 		file := "zones/" + z.ID + ".db"
-		files[file] = s.zoneFile(z, nsIP)
+		files[file] = s.zoneFile(z, s.nsAddress(z, nsIP))
 		fmt.Fprintf(&cf, "%s {\n  errors\n  reload 5s\n", z.Name)
 		if z.Private {
 			// Private zones answer only clients inside their VPCs.
@@ -301,7 +313,7 @@ func (s *Service) list(c *httpx.Ctx) (any, error) {
 	out := []map[string]any{}
 	for _, z := range store.List[Zone](s.env.Store, cZones) {
 		out = append(out, map[string]any{"id": z.ID, "name": z.Name, "private": z.Private, "vpc_ids": z.VpcIDs, "comment": z.Comment,
-			"record_count": len(z.Records) + 2, "created_at": z.CreatedAt})
+			"record_count": len(z.Records), "created_at": z.CreatedAt})
 	}
 	return out, nil
 }
@@ -359,6 +371,9 @@ func (s *Service) get(c *httpx.Ctx) (any, error) {
 	}
 	nameservers := []string{}
 	for _, v := range s.vpc.List() {
+		if z.Private && len(z.VpcIDs) > 0 && !slices.Contains(z.VpcIDs, v.ID) {
+			continue // the zone doesn't answer in this VPC
+		}
 		nameservers = append(nameservers, vpc.DNSAddress(v.CIDR)+" ("+v.Name+" VPC)")
 	}
 	if !z.Private {
@@ -515,7 +530,7 @@ func (s *Service) exportZone(c *httpx.Ctx) (any, error) {
 	if vs := s.vpc.List(); len(vs) > 0 {
 		ns = vpc.DNSAddress(vs[0].CIDR)
 	}
-	return map[string]string{"zone_file": s.zoneFile(z, ns)}, nil
+	return map[string]string{"zone_file": s.zoneFile(z, s.nsAddress(z, ns))}, nil
 }
 
 // test queries the DNS server through its host port, like `dig`.
@@ -537,7 +552,15 @@ func (s *Service) test(c *httpx.Ctx) (any, error) {
 	var err error
 	switch strings.ToUpper(in.Type) {
 	case "", "A", "AAAA":
-		answers, err = r.LookupHost(ctx, in.Name)
+		family := "ip4"
+		if strings.EqualFold(in.Type, "AAAA") {
+			family = "ip6"
+		}
+		var ips []net.IP
+		ips, err = r.LookupIP(ctx, family, in.Name)
+		for _, ip := range ips {
+			answers = append(answers, ip.String())
+		}
 	case "CNAME":
 		var cn string
 		cn, err = r.LookupCNAME(ctx, in.Name)
