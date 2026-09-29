@@ -197,42 +197,6 @@ func respond(w http.ResponseWriter, res *InvokeResult, cors bool) {
 	}
 }
 
-// serveURL handles a function URL: /lambda-url/{name}/{path...}.
-func (s *Service) serveURL(c *httpx.Ctx) (any, error) {
-	name := c.Param("name")
-	f, err := store.Get[Function](s.env.Store, cFunctions, name)
-	if err != nil || !f.URL.Enabled {
-		return nil, core.Errf(http.StatusNotFound, "NotFound", "no function URL is configured for %q", name)
-	}
-	if c.R.URL.Query().Has("access_token") {
-		return nil, core.BadRequest("function URLs do not accept access_token; send an Authorization header")
-	}
-	if f.URL.AuthType == "HC_IAM" {
-		if s.Auth == nil {
-			return nil, core.Errf(http.StatusForbidden, "AccessDenied", "IAM auth unavailable")
-		}
-		p, err := s.Auth.Authenticate(c.R)
-		if err != nil {
-			return nil, err
-		}
-		if !p.Can("lambda:InvokeFunctionUrl", f.ARN) {
-			return nil, core.Errf(http.StatusForbidden, "AccessDenied", "%s may not invoke %s", p.ARN, f.ARN)
-		}
-	}
-	ev, err := s.httpEvent(c.R, "/"+c.Param("path"), "$default", "", nil)
-	if err != nil {
-		return nil, err
-	}
-	payload, _ := json.Marshal(ev)
-	res, err := s.Invoke(c.R.Context(), name, payload)
-	if err != nil {
-		return nil, err
-	}
-	c.MarkWritten()
-	respond(c.W, res, false)
-	return nil, nil
-}
-
 func (s *Service) apigwRoutes(r *httpx.Router) {
 	r.Handle("GET /api/v1/apigateway/apis", "apigateway:GET", s.listAPIs)
 	r.Handle("POST /api/v1/apigateway/apis", "apigateway:POST", s.createAPI)

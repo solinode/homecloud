@@ -250,6 +250,20 @@ func (s *Service) AssumeRoleForService(ref, service, sessionName string, ttl tim
 	return c, nil
 }
 
+// ServiceRole returns a role (by name or ARN) if its trust policy lets the AWS
+// service principal assume it, without issuing credentials. Services use it to
+// validate a role when it is configured (after checking iam:PassRole).
+func (s *Service) ServiceRole(ref, service string) (Role, error) {
+	r, err := s.GetRole(ref)
+	if err != nil {
+		return r, err
+	}
+	if r.TrustPolicy.trusts("sts:AssumeRole", "", service, s.env.AccountID, nil) != allow {
+		return r, core.Errf(http.StatusForbidden, "AccessDenied", "role %s does not trust %s (add it to the role's trust policy)", r.Name, service)
+	}
+	return r, nil
+}
+
 // SessionToken issues temporary credentials carrying a user's own permissions.
 func (s *Service) SessionToken(p *httpx.Principal, seconds int) (Credentials, error) {
 	if p.RoleName != "" {
