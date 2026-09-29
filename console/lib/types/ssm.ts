@@ -2,6 +2,11 @@ import type { Tags } from "./common"
 
 export type SsmParameterType = "String" | "StringList" | "SecureString"
 
+export type SsmParameterTier = "Standard" | "Advanced" | "Intelligent-Tiering"
+
+/** "text" (default), "aws:ec2:image" or "aws:ssm:integration". */
+export type SsmDataType = "text" | "aws:ec2:image" | "aws:ssm:integration"
+
 /** Parameter summary from GET /api/v1/ssm/parameters (DescribeParameters). */
 export interface SsmParameter {
   name: string
@@ -14,6 +19,8 @@ export interface SsmParameter {
   last_modified: string
   last_modified_by: string
   data_type: string
+  tier?: SsmParameterTier | string
+  allowed_pattern?: string
   tags?: Tags | null
 }
 
@@ -33,11 +40,13 @@ export interface SsmParameterValue {
 /** One entry of GET /api/v1/ssm/parameter/history. */
 export interface SsmParameterVersion {
   version: number
+  type?: SsmParameterType
   /** "****" for SecureString unless with_decryption=true. */
   value: string
   last_modified: string
   modified_by: string
   labels?: string[] | null
+  description?: string
 }
 
 export interface PutSsmParameterInput {
@@ -47,6 +56,9 @@ export interface PutSsmParameterInput {
   key_id?: string
   description?: string
   overwrite?: boolean
+  tier?: SsmParameterTier
+  allowed_pattern?: string
+  data_type?: SsmDataType
   tags?: Tags
 }
 

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { FileArchive, FileCode2, Loader2, Rocket, Upload, X } from "lucide-react"
+import { Box, FileArchive, FileCode2, Loader2, Package, Rocket, Upload, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -14,6 +14,7 @@ import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
+import { RolePicker } from "@/components/iam/role-picker"
 import { api, errorMessage } from "@/lib/api"
 import { formatBytes, formatMemoryMB } from "@/lib/format"
 import { revalidate } from "@/lib/hooks"
@@ -21,9 +22,9 @@ import type { CreateFunctionInput, LambdaFunction } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 import {
+  ARCHITECTURES,
   ENV_KEY_RE,
   FUNCTIONS_PATH,
-  HANDLER_RE,
   FUNCTION_NAME_RE,
   LAMBDA_PATH,
   MAX_ZIP_BYTES,
@@ -31,10 +32,15 @@ import {
   fileToBase64,
   formatTimeout,
   functionHref,
+  handlerError,
+  handlerHelp,
   useRuntimes,
 } from "./common"
+import { ImageUriPicker } from "./image-picker"
+import { LayersPicker } from "./pickers"
 
 type CodeSource = "template" | "zip"
+type PackageType = "Zip" | "Image"
 
 /** envErrors validates environment variable rows; shared with the configuration tab. */
 export function envErrors(rows: TagRow[]): string | null {
@@ -46,12 +52,54 @@ export function envErrors(rows: TagRow[]): string | null {
   return null
 }
 
+/** OptionCard is a large radio button used for package type and code source choices. */
+function OptionCard({
+  active,
+  disabled,
+  onClick,
+  icon: Icon,
+  title,
+  text,
+}: {
+  active: boolean
+  disabled?: boolean
+  onClick: () => void
+  icon: React.ComponentType<{ className?: string }>
+  title: string
+  text: string
+}) {
+  return (
+    <button
+      type="button"
+      role="radio"
+      aria-checked={active}
+      disabled={disabled}
+      onClick={onClick}
+      className={cn(
+        "flex items-start gap-3 rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
+        active ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
+      )}
+    >
+      <Icon className="text-muted-foreground mt-0.5 size-5 shrink-0" />
+      <span className="flex flex-col gap-0.5">
+        <span className="text-sm font-medium">{title}</span>
+        <span className="text-muted-foreground text-xs">{text}</span>
+      </span>
+    </button>
+  )
+}
+
 export function CreateFunction() {
   const router = useRouter()
   const runtimes = useRuntimes()
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  const [pkg, setPkg] = useState<PackageType>("Zip")
+  const [imageUri, setImageUri] = useState("")
   const [runtime, setRuntime] = useState("")
+  const [arch, setArch] = useState<string>("x86_64")
+  const [role, setRole] = useState("")
+  const [layers, setLayers] = useState<string[]>([])
   const [source, setSource] = useState<CodeSource>("template")
   const [zip, setZip] = useState<File | null>(null)
   const [handler, setHandler] = useState("")
@@ -68,6 +116,11 @@ export function CreateFunction() {
   }, [runtimes.data, runtime])
 
   const rt = runtimes.data?.find((r) => r.name === runtime)
+  // Runtimes without a hello-world template (Java, .NET, OS-only) need a deployment package.
+  const hasTemplate = !!rt?.template
+  useEffect(() => {
+    if (rt && !rt.template && source === "template") setSource("zip")
+  }, [rt, source])
   // The handler follows the runtime until the user edits it; template code always uses the runtime default.
   useEffect(() => {
     if (rt && (!handlerTouched || source === "template")) setHandler(rt.default_handler)
@@ -78,18 +131,20 @@ export function CreateFunction() {
   const errors = useMemo(() => {
     const e: Record<string, string> = {}
     if (!FUNCTION_NAME_RE.test(name)) e.name = "1-64 characters: letters, digits, hyphens (-) and underscores (_)"
-    if (!runtime) e.runtime = "Choose a runtime"
+    if (pkg === "Zip" && !runtime) e.runtime = "Choose a runtime"
+    if (pkg === "Image" && !/^\S+$/.test(imageUri.trim())) e.image = "Enter a container image URI, e.g. localhost:5500/my-repo:latest"
     if (!Number.isInteger(mem) || mem < 128 || mem > 10240) e.memory = "Enter a whole number of MB from 128 to 10240"
     if (!Number.isInteger(to) || to < 1 || to > 900) e.timeout = "Enter a whole number of seconds from 1 to 900"
-    if (source === "zip") {
+    if (pkg === "Zip" && source === "zip") {
       if (!zip) e.zip = "Choose a .zip file"
       else if (zip.size > MAX_ZIP_BYTES) e.zip = `The package is ${formatBytes(zip.size)}; the limit is 50 MB`
-      if (!HANDLER_RE.test(handler)) e.handler = "Use the form file.function, e.g. index.handler"
+      const he = handlerError(runtime, handler)
+      if (he) e.handler = he
     }
     const envErr = envErrors(env)
     if (envErr) e.env = envErr
     return e
-  }, [name, runtime, mem, to, source, zip, handler, env])
+  }, [name, pkg, imageUri, runtime, mem, to, source, zip, handler, env])
   const err = (k: string) => (submitted || (k === "name" && name) ? errors[k] : undefined)
   const valid = Object.keys(errors).length === 0
 
@@ -103,20 +158,28 @@ export function CreateFunction() {
     try {
       const body: CreateFunctionInput = {
         name,
-        runtime,
         description: description.trim() || undefined,
         memory_mb: mem,
         timeout_seconds: to,
         environment: rowsToTags(env),
+        architectures: [arch],
+        role: role || undefined,
       }
-      if (source === "zip" && zip) {
-        body.handler = handler
-        body.code = { zip_base64: await fileToBase64(zip) }
+      if (pkg === "Image") {
+        body.package_type = "Image"
+        body.image_uri = imageUri.trim()
+      } else {
+        body.runtime = runtime
+        if (layers.length) body.layers = layers
+        if (source === "zip" && zip) {
+          body.handler = handler
+          body.code = { zip_base64: await fileToBase64(zip) }
+        }
       }
       const fn = await api.post<LambdaFunction>(FUNCTIONS_PATH, body)
       toast.success(`Created function ${fn.name}`)
       await revalidate(LAMBDA_PATH)
-      router.push(functionHref(fn.name, source === "template" ? "code" : undefined))
+      router.push(functionHref(fn.name, pkg === "Zip" && source === "template" ? "code" : undefined))
     } catch (e) {
       toast.error(errorMessage(e))
       setPending(false)
@@ -127,7 +190,7 @@ export function CreateFunction() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Create function"
-        description="Start from a runtime's hello-world template and edit it in the console, or upload a deployment package."
+        description="Start from a runtime's hello-world template, upload a deployment package, or run a container image."
         breadcrumbs={[{ label: "Lambda", href: "/lambda/" }, { label: "Functions", href: "/lambda/" }, { label: "Create function" }]}
       />
       <form
@@ -156,133 +219,183 @@ export function CreateFunction() {
               <Field label="Description" htmlFor="fn-desc" optional>
                 <Input id="fn-desc" value={description} onChange={(e) => setDescription(e.target.value)} className="max-w-xl" maxLength={256} />
               </Field>
-              <Field label="Runtime" error={err("runtime")}>
-                {runtimes.error ? (
-                  <ErrorState error={runtimes.error} onRetry={() => runtimes.mutate()} />
-                ) : !runtimes.data ? (
-                  <Skeleton className="h-20 rounded-md" />
-                ) : (
-                  <div role="radiogroup" className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                    {runtimes.data.map((r) => {
-                      const active = r.name === runtime
-                      return (
-                        <button
-                          key={r.name}
-                          type="button"
-                          role="radio"
-                          aria-checked={active}
-                          onClick={() => setRuntime(r.name)}
-                          className={cn(
-                            "flex flex-col items-start gap-0.5 rounded-md border px-3 py-2.5 text-left transition-colors",
-                            active ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
-                          )}
-                        >
-                          <span className="text-sm font-medium">{r.label}</span>
-                          <span className="text-muted-foreground font-mono text-xs">{r.name}</span>
-                          <span className="text-muted-foreground text-xs">Image {r.image}</span>
-                        </button>
-                      )
-                    })}
-                  </div>
-                )}
+              <Field label="Package type">
+                <div role="radiogroup" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <OptionCard
+                    active={pkg === "Zip"}
+                    onClick={() => setPkg("Zip")}
+                    icon={Package}
+                    title="Zip archive"
+                    text="Pick a managed runtime; author code in the console or upload a .zip."
+                  />
+                  <OptionCard
+                    active={pkg === "Image"}
+                    onClick={() => setPkg("Image")}
+                    icon={Box}
+                    title="Container image"
+                    text="Run an image that implements the Lambda Runtime API, e.g. from ECR."
+                  />
+                </div>
+              </Field>
+              {pkg === "Image" ? (
+                <Field label="Container image URI" htmlFor="fn-image" error={err("image")} help="The image is pulled when the function is created and whenever its code is updated.">
+                  <ImageUriPicker id="fn-image" value={imageUri} onChange={setImageUri} invalid={!!err("image")} />
+                </Field>
+              ) : (
+                <Field label="Runtime" error={err("runtime")}>
+                  {runtimes.error ? (
+                    <ErrorState error={runtimes.error} onRetry={() => runtimes.mutate()} />
+                  ) : !runtimes.data ? (
+                    <Skeleton className="h-20 rounded-md" />
+                  ) : (
+                    <div role="radiogroup" className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                      {runtimes.data.map((r) => {
+                        const active = r.name === runtime
+                        return (
+                          <button
+                            key={r.name}
+                            type="button"
+                            role="radio"
+                            aria-checked={active}
+                            onClick={() => setRuntime(r.name)}
+                            className={cn(
+                              "flex min-w-0 flex-col items-start gap-0.5 rounded-md border px-3 py-2.5 text-left transition-colors",
+                              active ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
+                            )}
+                          >
+                            <span className="text-sm font-medium">
+                              {r.label}
+                              {r.deprecated && <span className="text-muted-foreground text-xs font-normal"> (deprecated)</span>}
+                            </span>
+                            <span className="text-muted-foreground font-mono text-xs">{r.name}</span>
+                            <span className="text-muted-foreground max-w-full truncate text-xs" title={r.image}>
+                              {r.template ? `Image ${r.image}` : "Deployment package required"}
+                            </span>
+                          </button>
+                        )
+                      })}
+                    </div>
+                  )}
+                </Field>
+              )}
+              <Field label="Architecture" help="The instruction set of the execution environment.">
+                <div role="radiogroup" className="flex flex-wrap gap-2">
+                  {ARCHITECTURES.map((a) => (
+                    <Button
+                      key={a}
+                      type="button"
+                      role="radio"
+                      aria-checked={arch === a}
+                      size="sm"
+                      variant={arch === a ? "secondary" : "outline"}
+                      onClick={() => setArch(a)}
+                      className={cn("font-mono", arch === a && "ring-primary ring-1")}
+                    >
+                      {a}
+                    </Button>
+                  ))}
+                </div>
               </Field>
             </div>
           </Section>
 
-          <Section title="Code source">
-            <div className="flex flex-col gap-4">
-              <div role="radiogroup" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                {(
-                  [
-                    { v: "template", icon: FileCode2, title: "Start from runtime template", text: "A hello-world handler you can edit in the console." },
-                    { v: "zip", icon: FileArchive, title: "Upload a .zip file", text: "A deployment package with your code and dependencies." },
-                  ] as const
-                ).map((o) => (
-                  <button
-                    key={o.v}
-                    type="button"
-                    role="radio"
-                    aria-checked={source === o.v}
-                    onClick={() => setSource(o.v)}
-                    className={cn(
-                      "flex items-start gap-3 rounded-md border p-3 text-left transition-colors",
-                      source === o.v ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
-                    )}
-                  >
-                    <o.icon className="text-muted-foreground mt-0.5 size-5 shrink-0" />
-                    <span className="flex flex-col gap-0.5">
-                      <span className="text-sm font-medium">{o.title}</span>
-                      <span className="text-muted-foreground text-xs">{o.text}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
-
-              {source === "template" ? (
-                rt ? (
-                  <div className="overflow-hidden rounded-md border">
-                    <div className="bg-muted/50 flex items-center justify-between gap-2 border-b px-3 py-1.5 text-xs">
-                      <span className="font-mono font-medium">{rt.default_file}</span>
-                      <span className="text-muted-foreground">Read-only preview</span>
-                    </div>
-                    <pre className="bg-muted/20 max-h-80 overflow-auto p-3 font-mono text-[12.5px] leading-5">{rt.template}</pre>
-                  </div>
-                ) : (
-                  <Skeleton className="h-40 rounded-md" />
-                )
-              ) : (
-                <Field label="Deployment package" error={err("zip")} help="A .zip file up to 50 MB. Files at the root of the archive end up in /var/task.">
-                  <input
-                    ref={fileInput}
-                    type="file"
-                    accept=".zip,application/zip"
-                    className="hidden"
-                    onChange={(e) => {
-                      setZip(e.target.files?.[0] ?? null)
-                      e.target.value = ""
-                    }}
+          {pkg === "Zip" && (
+            <Section title="Code source">
+              <div className="flex flex-col gap-4">
+                <div role="radiogroup" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                  <OptionCard
+                    active={source === "template"}
+                    disabled={!hasTemplate}
+                    onClick={() => setSource("template")}
+                    icon={FileCode2}
+                    title="Start from runtime template"
+                    text={hasTemplate ? "A hello-world handler you can edit in the console." : `${rt?.label ?? "This runtime"} has no template: upload a package.`}
                   />
-                  <div className="flex flex-wrap items-center gap-2">
-                    <Button type="button" variant="outline" size="sm" onClick={() => fileInput.current?.click()}>
-                      <Upload /> {zip ? "Choose another file" : "Choose .zip file"}
-                    </Button>
-                    {zip && (
-                      <span className="bg-muted inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-sm">
-                        <FileArchive className="size-4 shrink-0" />
-                        <span className="truncate font-mono text-[13px]">{zip.name}</span>
-                        <span className="text-muted-foreground text-xs">{formatBytes(zip.size)}</span>
-                        <button type="button" onClick={() => setZip(null)} aria-label="Remove file" className="text-muted-foreground hover:text-foreground">
-                          <X className="size-3.5" />
-                        </button>
-                      </span>
-                    )}
-                  </div>
-                </Field>
-              )}
+                  <OptionCard
+                    active={source === "zip"}
+                    onClick={() => setSource("zip")}
+                    icon={FileArchive}
+                    title="Upload a .zip file"
+                    text="A deployment package with your code and dependencies."
+                  />
+                </div>
 
-              <Field
-                label="Handler"
-                htmlFor="fn-handler"
-                error={err("handler")}
-                help={
-                  source === "template"
-                    ? "Template code uses the runtime's default handler. You can change it after creation."
-                    : "file.function: the module (without extension) and the exported function that receives the event."
-                }
-              >
-                <Input
-                  id="fn-handler"
-                  value={handler}
-                  disabled={source === "template"}
-                  onChange={(e) => {
-                    setHandler(e.target.value)
-                    setHandlerTouched(true)
-                  }}
-                  className="max-w-md font-mono"
-                  spellCheck={false}
-                />
-              </Field>
-            </div>
+                {source === "template" ? (
+                  rt ? (
+                    <div className="overflow-hidden rounded-md border">
+                      <div className="bg-muted/50 flex items-center justify-between gap-2 border-b px-3 py-1.5 text-xs">
+                        <span className="font-mono font-medium">{rt.default_file}</span>
+                        <span className="text-muted-foreground">Read-only preview</span>
+                      </div>
+                      <pre className="bg-muted/20 max-h-80 overflow-auto p-3 font-mono text-[12.5px] leading-5">{rt.template}</pre>
+                    </div>
+                  ) : (
+                    <Skeleton className="h-40 rounded-md" />
+                  )
+                ) : (
+                  <Field label="Deployment package" error={err("zip")} help="A .zip file up to 50 MB. Files at the root of the archive end up in /var/task.">
+                    <input
+                      ref={fileInput}
+                      type="file"
+                      accept=".zip,application/zip"
+                      className="hidden"
+                      onChange={(e) => {
+                        setZip(e.target.files?.[0] ?? null)
+                        e.target.value = ""
+                      }}
+                    />
+                    <div className="flex flex-wrap items-center gap-2">
+                      <Button type="button" variant="outline" size="sm" onClick={() => fileInput.current?.click()}>
+                        <Upload /> {zip ? "Choose another file" : "Choose .zip file"}
+                      </Button>
+                      {zip && (
+                        <span className="bg-muted inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-sm">
+                          <FileArchive className="size-4 shrink-0" />
+                          <span className="truncate font-mono text-[13px]">{zip.name}</span>
+                          <span className="text-muted-foreground text-xs">{formatBytes(zip.size)}</span>
+                          <button type="button" onClick={() => setZip(null)} aria-label="Remove file" className="text-muted-foreground hover:text-foreground">
+                            <X className="size-3.5" />
+                          </button>
+                        </span>
+                      )}
+                    </div>
+                  </Field>
+                )}
+
+                <Field
+                  label="Handler"
+                  htmlFor="fn-handler"
+                  error={err("handler")}
+                  help={source === "template" ? "Template code uses the runtime's default handler. You can change it after creation." : handlerHelp(runtime)}
+                >
+                  <Input
+                    id="fn-handler"
+                    value={handler}
+                    disabled={source === "template"}
+                    onChange={(e) => {
+                      setHandler(e.target.value)
+                      setHandlerTouched(true)
+                    }}
+                    className="max-w-md font-mono"
+                    spellCheck={false}
+                  />
+                </Field>
+                <Field label="Layers" optional help="Shared libraries and code, extracted to /opt in order before the function starts.">
+                  <LayersPicker value={layers} onChange={setLayers} runtime={runtime} architecture={arch} />
+                </Field>
+              </div>
+            </Section>
+          )}
+
+          <Section title="Permissions">
+            <Field
+              label="Execution role"
+              htmlFor="fn-role"
+              optional
+              help="The function's code receives temporary credentials for this role in AWS_ACCESS_KEY_ID and friends. Without a role it runs without credentials."
+            >
+              <RolePicker id="fn-role" value={role} onChange={(v) => setRole(v)} service="lambda.amazonaws.com" allowNone placeholder="No execution role" className="max-w-xl" />
+            </Field>
           </Section>
 
           <Section title="Settings">
@@ -314,23 +427,38 @@ export function CreateFunction() {
                 <SummaryItem label="Function name">
                   <span className="font-mono text-[13px] break-all">{name || "-"}</span>
                 </SummaryItem>
-                <SummaryItem label="Runtime">{rt?.label ?? "-"}</SummaryItem>
-                <SummaryItem label="Code">
-                  {source === "template" ? (
-                    <>
-                      Template <span className="text-muted-foreground font-mono text-xs">{rt?.default_file}</span>
-                    </>
-                  ) : zip ? (
-                    <>
-                      <span className="font-mono text-[13px] break-all">{zip.name}</span>{" "}
-                      <span className="text-muted-foreground text-xs">({formatBytes(zip.size)})</span>
-                    </>
-                  ) : (
-                    "No package chosen"
-                  )}
+                {pkg === "Image" ? (
+                  <SummaryItem label="Container image">
+                    <span className="font-mono text-[13px] break-all">{imageUri || "-"}</span>
+                  </SummaryItem>
+                ) : (
+                  <>
+                    <SummaryItem label="Runtime">{rt?.label ?? "-"}</SummaryItem>
+                    <SummaryItem label="Code">
+                      {source === "template" ? (
+                        <>
+                          Template <span className="text-muted-foreground font-mono text-xs">{rt?.default_file}</span>
+                        </>
+                      ) : zip ? (
+                        <>
+                          <span className="font-mono text-[13px] break-all">{zip.name}</span>{" "}
+                          <span className="text-muted-foreground text-xs">({formatBytes(zip.size)})</span>
+                        </>
+                      ) : (
+                        "No package chosen"
+                      )}
+                    </SummaryItem>
+                    <SummaryItem label="Handler">
+                      <span className="font-mono text-[13px] break-all">{handler || "-"}</span>
+                    </SummaryItem>
+                    {layers.length > 0 && <SummaryItem label="Layers">{layers.length}</SummaryItem>}
+                  </>
+                )}
+                <SummaryItem label="Architecture">
+                  <span className="font-mono text-[13px]">{arch}</span>
                 </SummaryItem>
-                <SummaryItem label="Handler">
-                  <span className="font-mono text-[13px]">{handler || "-"}</span>
+                <SummaryItem label="Execution role">
+                  <span className="font-mono text-[13px] break-all">{role ? role.split("/").pop() : "None"}</span>
                 </SummaryItem>
                 <SummaryItem label="Memory / timeout">
                   {Number.isInteger(mem) ? formatMemoryMB(mem) : "-"} / {Number.isInteger(to) && to > 0 ? formatTimeout(to) : "-"}
@@ -339,7 +467,7 @@ export function CreateFunction() {
               </dl>
               {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
               <div className="flex flex-col gap-2 border-t pt-4">
-                <Button type="submit" disabled={pending || !runtime}>
+                <Button type="submit" disabled={pending || (pkg === "Zip" && !runtime)}>
                   {pending ? <Loader2 className="animate-spin" /> : <Rocket />}
                   Create function
                 </Button>

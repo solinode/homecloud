@@ -9,6 +9,8 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Switch } from "@/components/ui/switch"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
@@ -18,10 +20,12 @@ import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
+import { QueueTypeBadge } from "@/components/sqs/common"
 import { api, errorMessage } from "@/lib/api"
 import { formatNumber } from "@/lib/format"
 import { revalidate, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { Topic } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 import { SNS_PATH, TOPICS_PATH, TOPIC_NAME_RE, topicHref, topicPath, useTopics } from "./common"
 
@@ -36,6 +40,7 @@ const columns: Column<Topic>[] = [
     ),
     value: (t) => t.name,
   },
+  { id: "type", header: "Type", cell: (t) => <QueueTypeBadge fifo={t.fifo} />, value: (t) => (t.fifo ? "FIFO" : "Standard"), hideBelow: "sm" },
   {
     id: "display",
     header: "Display name",
@@ -148,6 +153,8 @@ export function TopicsList() {
 
 export function CreateTopicDialog({ open, onOpenChange, existing }: { open: boolean; onOpenChange: (o: boolean) => void; existing: string[] }) {
   const router = useRouter()
+  const [fifo, setFifo] = useState(false)
+  const [dedup, setDedup] = useState(false)
   const [name, setName] = useState("")
   const [display, setDisplay] = useState("")
   const [tags, setTags] = useState<TagRow[]>([])
@@ -156,6 +163,8 @@ export function CreateTopicDialog({ open, onOpenChange, existing }: { open: bool
 
   useEffect(() => {
     if (open) {
+      setFifo(false)
+      setDedup(false)
       setName("")
       setDisplay("")
       setTags([])
@@ -164,9 +173,18 @@ export function CreateTopicDialog({ open, onOpenChange, existing }: { open: bool
   }, [open])
 
   const tagKeys = tags.map((r) => r.key.trim()).filter(Boolean)
+  const setType = (f: boolean) => {
+    if (f === fifo) return
+    setFifo(f)
+    setName((n) => (f ? (n && !n.endsWith(".fifo") ? `${n}.fifo` : n) : n.replace(/\.fifo$/, "")))
+  }
   const nameErr = !TOPIC_NAME_RE.test(name)
     ? "Use 1-256 letters, digits, hyphens (-) or underscores (_)"
-    : existing.includes(name)
+    : fifo !== name.endsWith(".fifo")
+      ? fifo
+        ? "FIFO topic names must end in .fifo"
+        : "Only FIFO topic names end in .fifo"
+      : existing.includes(name)
       ? `A topic named ${name} already exists`
       : null
   const tagErr = new Set(tagKeys).size !== tagKeys.length ? "Tag keys must be unique" : null
@@ -178,7 +196,12 @@ export function CreateTopicDialog({ open, onOpenChange, existing }: { open: bool
     if (nameErr || tagErr || displayErr) return
     setPending(true)
     try {
-      await api.post(TOPICS_PATH, { name, display_name: display.trim(), tags: rowsToTags(tags) })
+      await api.post(TOPICS_PATH, {
+        name,
+        display_name: display.trim(),
+        tags: rowsToTags(tags),
+        ...(fifo ? { attributes: { FifoTopic: "true" }, content_based_deduplication: dedup } : {}),
+      })
       toast.success(`Created topic ${name}`)
       await revalidate(SNS_PATH)
       onOpenChange(false)
@@ -198,7 +221,37 @@ export function CreateTopicDialog({ open, onOpenChange, existing }: { open: bool
             <DialogTitle>Create topic</DialogTitle>
             <DialogDescription>A topic is a communication channel: publishers send to it, and every subscription receives a copy.</DialogDescription>
           </DialogHeader>
-          <Field label="Name" htmlFor="topic-name" error={touched || name ? nameErr : null} help="Letters, digits, hyphens and underscores; up to 256 characters.">
+          <div className="flex flex-col gap-2">
+            <span className="text-sm font-medium">Type</span>
+            <div role="radiogroup" aria-label="Topic type" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+              {[
+                { f: false, title: "Standard", text: "Best-effort ordering, at-least-once delivery; all protocols." },
+                { f: true, title: "FIFO", text: "Strict ordering and deduplication; delivers to SQS queues." },
+              ].map((o) => (
+                <button
+                  key={o.title}
+                  type="button"
+                  role="radio"
+                  aria-checked={fifo === o.f}
+                  onClick={() => setType(o.f)}
+                  className={cn(
+                    "flex flex-col gap-0.5 rounded-md border p-3 text-left transition-colors",
+                    fifo === o.f ? "border-primary bg-primary/5 ring-primary ring-1" : "hover:bg-muted/40",
+                  )}
+                >
+                  <span className="text-sm font-medium">{o.title}</span>
+                  <span className="text-muted-foreground text-xs">{o.text}</span>
+                </button>
+              ))}
+            </div>
+            <p className="text-muted-foreground text-xs">You can&apos;t change the topic type after you create it.</p>
+          </div>
+          <Field
+            label="Name"
+            htmlFor="topic-name"
+            error={touched || name ? nameErr : null}
+            help={`Letters, digits, hyphens and underscores; up to 256 characters${fifo ? ", ending in .fifo" : ""}.`}
+          >
             <Input
               id="topic-name"
               autoFocus
@@ -206,13 +259,27 @@ export function CreateTopicDialog({ open, onOpenChange, existing }: { open: bool
               spellCheck={false}
               value={name}
               onChange={(e) => setName(e.target.value.trim())}
-              placeholder="order-events"
+              onBlur={() => fifo && name && !name.endsWith(".fifo") && setName(`${name}.fifo`)}
+              placeholder={fifo ? "order-events.fifo" : "order-events"}
               aria-invalid={!!(touched && nameErr)}
             />
           </Field>
           <Field label="Display name" htmlFor="topic-display" optional error={displayErr} help="A friendly name, used as the sender name for notifications.">
             <Input id="topic-display" value={display} onChange={(e) => setDisplay(e.target.value)} placeholder="Order events" />
           </Field>
+          {fifo && (
+            <div className="flex items-start justify-between gap-4 rounded-md border p-3">
+              <div>
+                <Label htmlFor="topic-dedup" className="font-medium">
+                  Content-based deduplication
+                </Label>
+                <p className="text-muted-foreground mt-0.5 text-xs">
+                  Use a hash of the message body as the deduplication ID, so publishers don&apos;t have to provide one.
+                </p>
+              </div>
+              <Switch id="topic-dedup" checked={dedup} onCheckedChange={setDedup} />
+            </div>
+          )}
           <Field label="Tags" optional error={touched ? tagErr : null}>
             <TagsEditor rows={tags} onChange={setTags} />
           </Field>

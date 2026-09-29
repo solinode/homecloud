@@ -31,7 +31,7 @@ import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks
 import type { SsmParameter, SsmParameterValue, SsmParameterVersion } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { PARAMETER_PATH, SSM_PATH, TypeBadge, editParameterHref, listItems, useParameter } from "./shared"
+import { PARAMETER_PATH, SSM_PATH, TierBadge, TypeBadge, editParameterHref, listItems, useParameter } from "./shared"
 
 const TABS = ["overview", "history"] as const
 type Tab = (typeof TABS)[number]
@@ -192,7 +192,9 @@ function Overview({ p }: { p: SsmParameter }) {
             { label: "Version", value: <span className="tabular-nums">{p.version}</span> },
             { label: "Last modified", value: <span>{formatDate(p.last_modified)} (<TimeAgo value={p.last_modified} />)</span> },
             { label: "Last modified by", value: p.last_modified_by ? <span title={p.last_modified_by}>{principalName(p.last_modified_by)}</span> : "" },
-            { label: "Tier / data type", value: `Standard · ${p.data_type || "text"}` },
+            { label: "Tier", value: <TierBadge tier={p.tier} /> },
+            { label: "Data type", value: <span className="font-mono text-[13px]">{p.data_type || "text"}</span> },
+            ...(p.allowed_pattern ? [{ label: "Allowed pattern", value: <CopyableText value={p.allowed_pattern} /> }] : []),
             ...(p.type === "SecureString" ? [{ label: "KMS key", value: <KmsKeyLink arn={p.key_id} /> }] : []),
             { label: "Description", value: p.description, wide: p.type !== "SecureString" },
             { label: "ARN", value: <CopyableText value={p.arn} />, wide: true },
@@ -295,14 +297,15 @@ function ValuePanel({ p }: { p: SsmParameter }) {
 }
 
 function History({ p, onChanged }: { p: SsmParameter; onChanged: () => void }) {
-  const secure = p.type === "SecureString"
   const [decrypt, setDecrypt] = useState(false)
   const { data, error, isLoading, isValidating, mutate } = useApi<SsmParameterVersion[]>(`${PARAMETER_PATH}/history`, {
-    query: { name: p.name, with_decryption: secure && decrypt ? true : undefined },
+    query: { name: p.name, with_decryption: decrypt ? true : undefined },
     refreshInterval: 15_000,
   })
   const [labeling, setLabeling] = useState<SsmParameterVersion | null>(null)
   const versions = [...(data ?? [])].reverse()
+  // Versions keep their own type, so a parameter that was once a SecureString still has encrypted history.
+  const secure = p.type === "SecureString" || versions.some((v) => v.type === "SecureString")
 
   return (
     <Section
@@ -352,7 +355,7 @@ function History({ p, onChanged }: { p: SsmParameter; onChanged: () => void }) {
             </thead>
             <tbody>
               {versions.map((v) => {
-                const masked = secure && !decrypt
+                const masked = (v.type ?? p.type) === "SecureString" && !decrypt
                 return (
                   <tr key={v.version} className="border-b last:border-0">
                     <td className="px-4 py-2 align-top tabular-nums">
@@ -372,7 +375,7 @@ function History({ p, onChanged }: { p: SsmParameter; onChanged: () => void }) {
                       )}
                     </td>
                     <td className="hidden px-3 py-2 align-top md:table-cell">
-                      <TypeBadge type={p.type} />
+                      <TypeBadge type={v.type ?? p.type} />
                     </td>
                     <td className="hidden px-3 py-2 align-top whitespace-nowrap sm:table-cell">
                       <TimeAgo value={v.last_modified} />
@@ -393,11 +396,13 @@ function History({ p, onChanged }: { p: SsmParameter; onChanged: () => void }) {
               })}
             </tbody>
           </table>
-          {secure && (
-            <p className="text-muted-foreground flex items-center gap-1.5 border-t px-4 py-2 text-xs">
-              <Info className="size-3.5 shrink-0" /> Type and KMS key are tracked per parameter, not per version; the table shows the current type.
-            </p>
-          )}
+          <p className="text-muted-foreground flex items-start gap-1.5 border-t px-4 py-2 text-xs">
+            <Info className="mt-px size-3.5 shrink-0" />
+            <span className="min-w-0 break-words">
+              Read a specific version with <span className="font-mono break-all">{`${p.name}:<version>`}</span> or a labelled one with{" "}
+              <span className="font-mono break-all">{`${p.name}:<label>`}</span>.
+            </span>
+          </p>
         </div>
       )}
 
@@ -470,7 +475,7 @@ function LabelDialog({ name, version, onClose, onSaved }: { name: string; versio
           <Field label="Labels" htmlFor="ssm-labels" error={touched || text ? err : undefined} help="Comma-separated, e.g. prod, stable">
             <Input id="ssm-labels" autoFocus autoComplete="off" spellCheck={false} value={text} onChange={(e) => setText(e.target.value)} placeholder="prod" className="font-mono text-[13px]" />
           </Field>
-          <p className="text-muted-foreground text-xs">The API has no detach operation: to remove a label from this version, attach it to a different version.</p>
+          <p className="text-muted-foreground text-xs">To remove a label from this version, attach it to a different version.</p>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={pending}>
               Cancel

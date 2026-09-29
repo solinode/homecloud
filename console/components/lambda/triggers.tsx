@@ -22,13 +22,51 @@ import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { MethodBadge, apiHref } from "@/components/apigateway/common"
+import { tableHref } from "@/components/dynamodb/common"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
-import type { EventSourceMapping, HttpApi, LambdaFunction, Queue } from "@/lib/types"
+import type { DynamoTable, EventSourceMapping, HttpApi, LambdaFunction, Queue } from "@/lib/types"
 
 import { FUNCTIONS_PATH, LAMBDA_PATH, MAPPINGS_PATH, functionHref, queueHref } from "./common"
+import { DestinationPicker } from "./pickers"
 
 const mappingPath = (id: string) => `${MAPPINGS_PATH}/${seg(id)}`
+
+type SourceKind = "sqs" | "dynamodb"
+
+/** streamTable extracts the table name from a DynamoDB stream ARN (…:table/NAME/stream/LABEL). */
+export function streamTable(arn: string): string | null {
+  const m = /:table\/([^/]+)\/stream\//.exec(arn)
+  return m ? m[1] : null
+}
+
+const sourceKind = (m: Pick<EventSourceMapping, "event_source_arn">): SourceKind => (streamTable(m.event_source_arn) ? "dynamodb" : "sqs")
+const sourceName = (m: EventSourceMapping) => streamTable(m.event_source_arn) ?? m.queue_name
+
+/** Batch size limits per source type (HomeCloud: SQS 1-10, DynamoDB streams 1-1000). */
+const BATCH_MAX: Record<SourceKind, number> = { sqs: 10, dynamodb: 1000 }
+
+type StreamTable = DynamoTable & { stream_arn?: string; stream_view_type?: string }
+
+function SourceCell({ m }: { m: EventSourceMapping }) {
+  const table = streamTable(m.event_source_arn)
+  return (
+    <span className="flex min-w-0 flex-col">
+      {table ? (
+        <Link href={tableHref(table)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()} title={m.event_source_arn}>
+          {table}
+        </Link>
+      ) : (
+        <Link href={queueHref(m.queue_name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()} title={m.event_source_arn}>
+          {m.queue_name}
+        </Link>
+      )}
+      <span className="text-muted-foreground text-xs">
+        {table ? `DynamoDB stream${m.starting_position ? ` · ${m.starting_position}` : ""}` : "SQS queue"}
+      </span>
+    </span>
+  )
+}
 
 function ResultBadge({ result }: { result: string }) {
   if (!result) return <span className="text-muted-foreground">-</span>
@@ -49,7 +87,7 @@ function EnabledSwitch({ m }: { m: EventSourceMapping }) {
           setPending(true)
           try {
             await api.patch(mappingPath(m.id), { enabled: v })
-            toast.success(`${v ? "Enabled" : "Disabled"} trigger ${m.queue_name} → ${m.function_name}`)
+            toast.success(`${v ? "Enabled" : "Disabled"} trigger ${sourceName(m)} → ${m.function_name}`)
             await revalidate(MAPPINGS_PATH)
           } catch (e) {
             toast.error(errorMessage(e))
@@ -96,13 +134,9 @@ export function MappingsTable({ functionName }: { functionName?: string }) {
         ]),
     {
       id: "queue",
-      header: "SQS queue",
-      value: (m) => m.queue_name,
-      cell: (m) => (
-        <Link href={queueHref(m.queue_name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()} title={m.event_source_arn}>
-          {m.queue_name}
-        </Link>
-      ),
+      header: "Event source",
+      value: (m) => sourceName(m),
+      cell: (m) => <SourceCell m={m} />,
     },
     { id: "batch", header: "Batch size", value: (m) => m.batch_size, cell: (m) => m.batch_size, hideBelow: "sm" },
     { id: "enabled", header: "State", value: (m) => (m.enabled ? "enabled" : "disabled"), cell: (m) => <EnabledSwitch m={m} /> },
@@ -126,11 +160,11 @@ export function MappingsTable({ functionName }: { functionName?: string }) {
   return (
     <>
       <DataTable
-        title={functionName ? "SQS triggers" : "Event source mappings"}
+        title={functionName ? "Event source triggers" : "Event source mappings"}
         description={
           functionName
-            ? "Messages from these queues are delivered to the function in batches and deleted when it succeeds."
-            : "Each mapping polls an SQS queue and invokes a function with batches of messages."
+            ? "SQS messages and DynamoDB stream records are delivered to the function in batches."
+            : "Each mapping polls an SQS queue or a DynamoDB stream and invokes a function with batches of records."
         }
         data={data}
         columns={columns}
@@ -143,7 +177,7 @@ export function MappingsTable({ functionName }: { functionName?: string }) {
         selected={selected}
         onSelectedChange={setSelected}
         noSearch={!!functionName}
-        searchPlaceholder="Filter by function or queue"
+        searchPlaceholder="Filter by function or source"
         defaultSort={{ id: functionName ? "queue" : "function" }}
         actions={
           <>
@@ -159,8 +193,8 @@ export function MappingsTable({ functionName }: { functionName?: string }) {
             title="No triggers"
             description={
               functionName
-                ? "Add an SQS queue as a trigger to process its messages with this function."
-                : "Connect an SQS queue to a function to process messages automatically."
+                ? "Add an SQS queue or a DynamoDB stream as a trigger to process its records with this function."
+                : "Connect an SQS queue or DynamoDB stream to a function to process records automatically."
             }
             action={
               <Button size="sm" onClick={() => setAdding(true)}>
@@ -179,15 +213,16 @@ export function MappingsTable({ functionName }: { functionName?: string }) {
         description={
           deleting && (
             <>
-              <span className="font-mono">{deleting.function_name}</span> stops receiving messages from{" "}
-              <span className="font-mono">{deleting.queue_name}</span>. Messages stay in the queue.
+              <span className="font-mono">{deleting.function_name}</span> stops receiving records from{" "}
+              <span className="font-mono">{sourceName(deleting)}</span>.{" "}
+              {sourceKind(deleting) === "sqs" ? "Messages stay in the queue." : "The stream keeps its records until they expire."}
             </>
           )
         }
         onConfirm={async () => {
           if (!deleting) return
           await api.del(mappingPath(deleting.id))
-          toast.success(`Deleted trigger ${deleting.queue_name} → ${deleting.function_name}`)
+          toast.success(`Deleted trigger ${sourceName(deleting)} → ${deleting.function_name}`)
           await revalidate(MAPPINGS_PATH)
         }}
       />
@@ -195,42 +230,91 @@ export function MappingsTable({ functionName }: { functionName?: string }) {
   )
 }
 
-function batchError(v: string) {
+function batchError(v: string, max: number) {
   const n = Number(v)
-  return Number.isInteger(n) && n >= 1 && n <= 100 ? null : "Enter a whole number from 1 to 100"
+  return Number.isInteger(n) && n >= 1 && n <= max ? null : `Enter a whole number from 1 to ${max}`
 }
 
 export function AddTriggerDialog({ open, onOpenChange, functionName }: { open: boolean; onOpenChange: (o: boolean) => void; functionName?: string }) {
-  const queues = useApi<Queue[]>(open ? "/api/v1/sqs/queues" : null)
-  const functions = useApi<LambdaFunction[]>(open && !functionName ? FUNCTIONS_PATH : null)
+  const [kind, setKind] = useState<SourceKind>("sqs")
+  const queues = useApi<Queue[]>(open && kind === "sqs" ? "/api/v1/sqs/queues" : null)
+  const tables = useApi<StreamTable[]>(open && kind === "dynamodb" ? "/api/v1/dynamodb/tables" : null)
+  const functions = useApi<LambdaFunction[]>(open ? FUNCTIONS_PATH : null)
   const [fn, setFn] = useState("")
   const [queue, setQueue] = useState("")
+  const [table, setTable] = useState("")
+  const [position, setPosition] = useState("LATEST")
   const [batch, setBatch] = useState("10")
+  const [windowSec, setWindowSec] = useState("0")
+  const [retries, setRetries] = useState("-1")
+  const [bisect, setBisect] = useState(false)
+  const [onFailure, setOnFailure] = useState("")
+  const [partial, setPartial] = useState(false)
   const [enabled, setEnabled] = useState(true)
   const [pending, setPending] = useState(false)
   const [touched, setTouched] = useState(false)
 
   useEffect(() => {
     if (open) {
+      setKind("sqs")
       setFn(functionName ?? "")
       setQueue("")
+      setTable("")
+      setPosition("LATEST")
       setBatch("10")
+      setWindowSec("0")
+      setRetries("-1")
+      setBisect(false)
+      setOnFailure("")
+      setPartial(false)
       setEnabled(true)
       setTouched(false)
     }
   }, [open, functionName])
 
-  const bErr = batchError(batch)
+  useEffect(() => setBatch(kind === "sqs" ? "10" : "100"), [kind])
+
+  const bErr = batchError(batch, BATCH_MAX[kind])
+  const w = Number(windowSec)
+  const wErr = Number.isInteger(w) && w >= 0 && w <= 300 ? null : "0-300 seconds"
+  const r = Number(retries)
+  const rErr = kind === "dynamodb" && !(Number.isInteger(r) && r >= -1 && r <= 10000) ? "-1 (infinite) to 10000" : null
   const q = queues.data?.find((x) => x.name === queue)
+  const t = tables.data?.find((x) => x.name === table)
+  const source = kind === "sqs" ? queue : table
+  const fnArn = functions.data?.find((f) => f.name === fn)?.arn ?? functions.data?.[0]?.arn ?? ""
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setTouched(true)
-    if (!fn || !queue || bErr) return
+    if (!fn || !source || bErr || wErr || rErr) return
+    if (kind === "dynamodb" && !t?.stream_arn) return
     setPending(true)
     try {
-      await api.post(MAPPINGS_PATH, { function_name: fn, queue_name: queue, batch_size: Number(batch), enabled })
-      toast.success(`Added trigger ${queue} → ${fn}`)
+      const body =
+        kind === "sqs"
+          ? {
+              function_name: fn,
+              queue_name: queue,
+              batch_size: Number(batch),
+              batching_window_seconds: w,
+              function_response_types: partial ? ["ReportBatchItemFailures"] : [],
+              enabled,
+            }
+          : {
+              function_name: fn,
+              event_source_arn: t!.stream_arn,
+              starting_position: position,
+              batch_size: Number(batch),
+              batching_window_seconds: w,
+              maximum_retry_attempts: r,
+              bisect_batch_on_function_error: bisect,
+              on_failure: onFailure,
+              function_response_types: partial ? ["ReportBatchItemFailures"] : [],
+              enabled,
+            }
+      await api.post(MAPPINGS_PATH, body)
+      toast.success(`Added trigger ${source} → ${fn}`)
       await revalidate(LAMBDA_PATH)
       onOpenChange(false)
     } catch (err) {
@@ -245,12 +329,32 @@ export function AddTriggerDialog({ open, onOpenChange, functionName }: { open: b
       <DialogContent className="sm:max-w-lg">
         <form onSubmit={submit} className="flex flex-col gap-5">
           <DialogHeader>
-            <DialogTitle>Add SQS trigger</DialogTitle>
+            <DialogTitle>Add trigger</DialogTitle>
             <DialogDescription>
-              HomeCloud polls the queue every second and invokes {functionName ? <span className="font-mono">{functionName}</span> : "the function"} with up
-              to batch-size messages. Messages are deleted when the function succeeds; return {"{ batchItemFailures }"} to retry some of them.
+              {kind === "sqs" ? (
+                <>
+                  HomeCloud polls the queue every second and invokes {functionName ? <span className="font-mono">{functionName}</span> : "the function"} with up
+                  to batch-size messages. Messages are deleted when the function succeeds.
+                </>
+              ) : (
+                <>
+                  HomeCloud reads the table&apos;s stream in order and invokes {functionName ? <span className="font-mono">{functionName}</span> : "the function"}{" "}
+                  with batches of change records. A failing batch is retried until it succeeds, expires or runs out of retries.
+                </>
+              )}
             </DialogDescription>
           </DialogHeader>
+          <Field label="Source" htmlFor="trg-kind">
+            <Select value={kind} onValueChange={(v) => setKind(v as SourceKind)}>
+              <SelectTrigger id="trg-kind" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="sqs">SQS queue</SelectItem>
+                <SelectItem value="dynamodb">DynamoDB stream</SelectItem>
+              </SelectContent>
+            </Select>
+          </Field>
           {!functionName && (
             <Field label="Function" htmlFor="trg-fn" error={touched && !fn ? "Choose a function" : undefined}>
               {functions.error ? (
@@ -271,6 +375,7 @@ export function AddTriggerDialog({ open, onOpenChange, functionName }: { open: b
               )}
             </Field>
           )}
+          {kind === "sqs" ? (
           <Field
             label="SQS queue"
             htmlFor="trg-queue"
@@ -307,9 +412,106 @@ export function AddTriggerDialog({ open, onOpenChange, functionName }: { open: b
               </Select>
             )}
           </Field>
-          <Field label="Batch size" htmlFor="trg-batch" error={touched || batch ? (bErr ?? undefined) : undefined} help="1-100 messages per invocation.">
-            <Input id="trg-batch" type="number" min={1} max={100} value={batch} onChange={(e) => setBatch(e.target.value)} className="h-8 w-28" />
-          </Field>
+          ) : (
+            <>
+              <Field
+                label="DynamoDB table"
+                htmlFor="trg-table"
+                error={touched && !table ? "Choose a table" : touched && t && !t.stream_arn ? "Enable the table's stream first" : undefined}
+                help={
+                  t?.stream_arn ? (
+                    <span className="font-mono break-all">{t.stream_arn}</span>
+                  ) : t ? (
+                    <>
+                      This table has no stream.{" "}
+                      <Link href={tableHref(t.name)} target="_blank" className="text-primary hover:underline">
+                        Enable it
+                      </Link>{" "}
+                      in the table&apos;s settings.
+                    </>
+                  ) : tables.data && !tables.data.length ? (
+                    <>
+                      No tables yet.{" "}
+                      <Link href="/dynamodb/" className="text-primary hover:underline">
+                        Create a table
+                      </Link>{" "}
+                      first.
+                    </>
+                  ) : undefined
+                }
+              >
+                {tables.error ? (
+                  <ErrorState error={tables.error} onRetry={() => tables.mutate()} />
+                ) : (
+                  <Select value={table} onValueChange={setTable} disabled={!tables.data}>
+                    <SelectTrigger id="trg-table" className="w-full">
+                      <SelectValue placeholder={tables.data ? "Choose a table" : "Loading tables..."} />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {(tables.data ?? []).map((x) => (
+                        <SelectItem key={x.name} value={x.name}>
+                          {x.name}
+                          <span className="text-muted-foreground text-xs">{x.stream_arn ? (x.stream_view_type ?? "stream") : "no stream"}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                )}
+              </Field>
+              <Field label="Starting position" htmlFor="trg-pos" help="LATEST reads only new records; TRIM_HORIZON starts at the oldest record still in the stream.">
+                <Select value={position} onValueChange={setPosition}>
+                  <SelectTrigger id="trg-pos" className="w-full sm:w-56">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="LATEST">LATEST</SelectItem>
+                    <SelectItem value="TRIM_HORIZON">TRIM_HORIZON</SelectItem>
+                  </SelectContent>
+                </Select>
+              </Field>
+            </>
+          )}
+          <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Field
+              label="Batch size"
+              htmlFor="trg-batch"
+              error={touched || batch ? (bErr ?? undefined) : undefined}
+              help={`1-${BATCH_MAX[kind]} ${kind === "sqs" ? "messages" : "records"} per invocation.`}
+            >
+              <Input id="trg-batch" type="number" min={1} max={BATCH_MAX[kind]} value={batch} onChange={(e) => setBatch(e.target.value)} className="h-8 w-28" />
+            </Field>
+            <Field label="Batching window (seconds)" htmlFor="trg-window" error={wErr ?? undefined} help="Wait up to this long to fill a batch.">
+              <Input id="trg-window" type="number" min={0} max={300} value={windowSec} onChange={(e) => setWindowSec(e.target.value)} className="h-8 w-28" />
+            </Field>
+          </div>
+          {kind === "dynamodb" && (
+            <>
+              <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                <Field label="Retry attempts" htmlFor="trg-retries" error={rErr ?? undefined} help="-1 retries until the records expire.">
+                  <Input id="trg-retries" type="number" min={-1} max={10000} value={retries} onChange={(e) => setRetries(e.target.value)} className="h-8 w-28" />
+                </Field>
+                <label className="flex items-start gap-2 pt-6 text-sm">
+                  <Switch checked={bisect} onCheckedChange={setBisect} aria-label="Split batch on error" />
+                  <span>
+                    Split batch on error
+                    <span className="text-muted-foreground block text-xs">Retry each half of a failing batch separately.</span>
+                  </span>
+                </label>
+              </div>
+              <Field label="On-failure destination" optional help="Receives details of batches that are discarded after the retries.">
+                <DestinationPicker value={onFailure} onChange={setOnFailure} selfArn={fnArn} kinds={["sqs", "sns"]} />
+              </Field>
+            </>
+          )}
+          <label className="flex items-start gap-2 text-sm">
+            <Switch checked={partial} onCheckedChange={setPartial} aria-label="Report batch item failures" />
+            <span>
+              Report batch item failures
+              <span className="text-muted-foreground block text-xs">
+                The function returns {"{ batchItemFailures: [{ itemIdentifier }] }"} to retry only the failed {kind === "sqs" ? "messages" : "records"}.
+              </span>
+            </span>
+          </label>
           <div className="flex items-start justify-between gap-4 rounded-md border p-3">
             <div>
               <Label htmlFor="trg-enabled" className="font-medium">
@@ -340,7 +542,7 @@ function BatchSizeDialog({ mapping, onClose }: { mapping: EventSourceMapping | n
   useEffect(() => {
     if (mapping) setBatch(String(mapping.batch_size))
   }, [mapping])
-  const err = batchError(batch)
+  const err = batchError(batch, BATCH_MAX[mapping ? sourceKind(mapping) : "sqs"])
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -365,11 +567,11 @@ function BatchSizeDialog({ mapping, onClose }: { mapping: EventSourceMapping | n
           <DialogHeader>
             <DialogTitle>Edit batch size</DialogTitle>
             <DialogDescription>
-              {mapping?.queue_name} → {mapping?.function_name}
+              {mapping ? sourceName(mapping) : ""} → {mapping?.function_name}
             </DialogDescription>
           </DialogHeader>
           <Field label="Batch size" htmlFor="edit-batch" error={err ?? undefined}>
-            <Input id="edit-batch" type="number" min={1} max={100} value={batch} onChange={(e) => setBatch(e.target.value)} autoFocus className="w-28" />
+            <Input id="edit-batch" type="number" min={1} value={batch} onChange={(e) => setBatch(e.target.value)} autoFocus className="w-28" />
           </Field>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={pending}>
@@ -449,7 +651,7 @@ export function TriggersList() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Event source mappings"
-        description="SQS queues that trigger functions. HomeCloud polls each enabled queue and invokes the function with batches of messages."
+        description="SQS queues and DynamoDB streams that trigger functions. HomeCloud polls each enabled source and invokes the function with batches of records."
         breadcrumbs={[{ label: "Lambda", href: "/lambda/" }, { label: "Event source mappings" }]}
       />
       <MappingsTable />

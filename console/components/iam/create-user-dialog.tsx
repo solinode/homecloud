@@ -30,10 +30,12 @@ import {
   downloadText,
   nameError,
   newPasswordChoice,
+  policyNameFromArn,
   signInUrl,
   userHref,
   type PasswordChoice,
 } from "./common"
+import { BoundaryHelp, BoundarySelect } from "./boundary"
 
 const STEPS = ["User details", "Permissions", "Review and create"]
 
@@ -50,6 +52,7 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
   const [groups, setGroups] = useState<string[]>([])
   const [policies, setPolicies] = useState<string[]>([])
   const [tags, setTags] = useState<TagRow[]>([])
+  const [boundary, setBoundary] = useState("")
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
   const [created, setCreated] = useState<Created | null>(null)
@@ -66,6 +69,7 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
       setGroups([])
       setPolicies([])
       setTags([])
+      setBoundary("")
       setTouched(false)
       setCreated(null)
     }
@@ -86,7 +90,7 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
     setPending(true)
     const password = consoleAccess ? choicePassword(pw) : null
     try {
-      await api.post<IamUser>(`${IAM}/users`, { name, password: password ?? undefined, groups, policies, tags: rowsToTags(tags) })
+      await api.post<IamUser>(`${IAM}/users`, { name, password: password ?? undefined, groups, policies, tags: rowsToTags(tags), permissions_boundary: boundary || undefined })
       toast.success(`User ${name} created`)
       revalidate(IAM)
       setCreated({ name, password })
@@ -229,6 +233,9 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
                   </div>
                   <PolicyPicker policies={policiesQ.data} loading={policiesQ.isLoading} selected={policies} onChange={setPolicies} maxHeight="max-h-60" />
                 </div>
+                <Field label="Permissions boundary" optional htmlFor="new-user-boundary" help={<BoundaryHelp kind="user" />}>
+                  <BoundarySelect id="new-user-boundary" value={boundary} onChange={setBoundary} />
+                </Field>
               </div>
             )}
 
@@ -250,6 +257,10 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
                   <div>
                     <p className="text-muted-foreground text-xs">Policies attached directly</p>
                     <p>{policies.length ? policies.join(", ") : "None"}</p>
+                  </div>
+                  <div>
+                    <p className="text-muted-foreground text-xs">Permissions boundary</p>
+                    <p>{boundary ? policyNameFromArn(boundary) : "Not set"}</p>
                   </div>
                 </div>
                 {!groups.length && !policies.length && (

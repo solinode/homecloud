@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Eye, EyeOff, FileJson, Info, KeyRound, Loader2, Pencil, Plus, ShieldCheck, ShieldOff, Trash2 } from "lucide-react"
+import { AlertTriangle, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, ShieldCheck, ShieldOff, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -25,18 +25,20 @@ import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
-import { TagList } from "@/components/console/tags-editor"
+import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { API_BASE, api, errorMessage, seg } from "@/lib/api"
 import { formatDate, pluralize } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
-import type { Health, IamRole, PolicyDocument, PolicySummary, TempCredentials } from "@/lib/types"
+import type { Health, IamRole, PolicySummary, TempCredentials } from "@/lib/types"
 
 import { AttachPoliciesDialog, runEach } from "./dialogs"
-import { IAM, LINK, PolicyTypeBadge, SecretValue, nameError, policyHref, policyJson } from "./common"
-import { InlinePolicyDialog } from "./inline-policy-dialog"
+import { IAM, LINK, PolicyTypeBadge, SecretValue, instanceProfileHref, nameError, policyHref, policyJson, policyNameFromArn } from "./common"
+import { PermissionsBoundarySection } from "./boundary"
+import { InlinePoliciesSection } from "./inline-policies-section"
 import { SESSION_DURATIONS, formatSessionDuration, trustedEntities, validateTrustPolicy } from "./role-common"
 import { DeleteRolesDialog } from "./roles-list"
+import { TagsSection } from "./tags-section"
 
 const TABS = ["permissions", "trust", "sessions", "tags"] as const
 
@@ -83,6 +85,7 @@ export function RoleDetail() {
       <PageHeader
         title={role.name}
         breadcrumbs={crumbs}
+        badge={role.service_linked ? <StatusBadge status="service-linked" tone="info" label="Service-linked role" /> : undefined}
         actions={
           <Button variant="outline" size="sm" onClick={() => setConfirmDelete(true)}>
             <Trash2 /> Delete
@@ -109,6 +112,37 @@ export function RoleDetail() {
             { label: "Role ID", value: <CopyableText value={role.id} className="text-[13px]" /> },
             { label: "Path", value: <span className="font-mono text-[13px]">{role.path}</span> },
             { label: "Permissions", value: `${pluralize(role.attached_policies.length, "managed policy", "managed policies")}, ${inlineCount} inline` },
+            {
+              label: "Permissions boundary",
+              value: role.permissions_boundary ? (
+                <Link href={policyHref(policyNameFromArn(role.permissions_boundary))} className={LINK}>
+                  {policyNameFromArn(role.permissions_boundary)}
+                </Link>
+              ) : (
+                "Not set"
+              ),
+            },
+            {
+              label: "Instance profiles",
+              value: role.instance_profiles?.length ? (
+                <span className="flex flex-wrap gap-x-2">
+                  {role.instance_profiles.map((p) => (
+                    <Link key={p} href={instanceProfileHref(p)} className={LINK}>
+                      {p}
+                    </Link>
+                  ))}
+                </span>
+              ) : role.trusted_services?.includes("ec2.amazonaws.com") ? (
+                <span>
+                  None{" "}
+                  <Link href={`/iam/instance-profiles/?create=1&role=${encodeURIComponent(role.name)}`} className="text-primary hover:underline">
+                    (create one)
+                  </Link>
+                </span>
+              ) : (
+                "None"
+              ),
+            },
           ]}
         />
       </Section>
@@ -130,14 +164,15 @@ export function RoleDetail() {
           <SessionsTab role={role} onChanged={refresh} />
         </TabsContent>
         <TabsContent value="tags">
-          <Section title="Tags" description="Key-value pairs to organize and find roles.">
-            <div className="flex flex-col gap-3">
-              <TagList tags={role.tags} />
-              <p className="text-muted-foreground flex items-start gap-2 text-xs">
-                <Info className="mt-0.5 size-3.5 shrink-0" /> Role tags are set when the role is created. The HomeCloud API cannot change them yet.
-              </p>
-            </div>
-          </Section>
+          <TagsSection
+            tags={role.tags}
+            noun="roles"
+            onSave={async (tags) => {
+              // PATCH with tags replaces the whole set (TagRole + UntagRole).
+              await api.patch(`${IAM}/roles/${seg(role.name)}`, { tags })
+              refresh()
+            }}
+          />
         </TabsContent>
       </Tabs>
 
@@ -232,8 +267,6 @@ function PermissionsTab({ role, policies, loading, onChanged }: { role: IamRole;
   const [selected, setSelected] = useState<string[]>([])
   const [attachOpen, setAttachOpen] = useState(false)
   const [confirmDetach, setConfirmDetach] = useState(false)
-  const [inline, setInline] = useState<{ open: boolean; initial: { name: string; doc: PolicyDocument } | null; readOnly?: boolean }>({ open: false, initial: null })
-  const [deleteInline, setDeleteInline] = useState<string | null>(null)
   const base = `${IAM}/roles/${seg(role.name)}`
 
   const rows = useMemo<PermRow[]>(() => {
@@ -252,11 +285,9 @@ function PermissionsTab({ role, policies, loading, onChanged }: { role: IamRole;
         </Link>
       ),
     },
-    { id: "type", header: "Type", value: (r) => (r.managed ? "HomeCloud managed" : "Customer managed"), cell: (r) => (r.managed === undefined ? "-" : <PolicyTypeBadge managed={r.managed} />), hideBelow: "sm" },
+    { id: "type", header: "Type", value: (r) => (r.managed ? "AWS managed" : "Customer managed"), cell: (r) => (r.managed === undefined ? "-" : <PolicyTypeBadge managed={r.managed} />), hideBelow: "sm" },
     { id: "desc", header: "Description", value: (r) => r.description, cell: (r) => <span className="text-muted-foreground">{r.description || "-"}</span>, hideBelow: "lg" },
   ]
-
-  const inlineNames = Object.keys(role.inline_policies ?? {}).sort()
 
   return (
     <div className="flex flex-col gap-6">
@@ -293,46 +324,13 @@ function PermissionsTab({ role, policies, loading, onChanged }: { role: IamRole;
         }
       />
 
-      <Section
-        title={`Inline policies (${inlineNames.length})`}
-        description="Policies embedded in this role only."
-        flush
-        actions={
-          <Button size="sm" variant="outline" onClick={() => setInline({ open: true, initial: null })}>
-            <Plus /> Create inline policy
-          </Button>
-        }
-      >
-        {!inlineNames.length ? (
-          <p className="text-muted-foreground p-6 text-center text-sm">No inline policies.</p>
-        ) : (
-          <ul>
-            {inlineNames.map((n) => {
-              const doc = role.inline_policies![n]
-              return (
-                <li key={n} className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5 last:border-0">
-                  <span className="flex min-w-0 items-center gap-2 text-sm">
-                    <FileJson className="text-muted-foreground size-4 shrink-0" />
-                    <span className="truncate font-medium">{n}</span>
-                    <span className="text-muted-foreground text-xs">{pluralize(doc?.Statement?.length ?? 0, "statement")}</span>
-                  </span>
-                  <span className="flex gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => setInline({ open: true, initial: { name: n, doc }, readOnly: true })}>
-                      View
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setInline({ open: true, initial: { name: n, doc } })}>
-                      Edit
-                    </Button>
-                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setDeleteInline(n)}>
-                      Delete
-                    </Button>
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </Section>
+      <InlinePoliciesSection kind="role" owner={role.name} policies={role.inline_policies} onChanged={onChanged} />
+
+      <PermissionsBoundarySection
+        kind="role"
+        arn={role.permissions_boundary}
+        readOnlyNote="A permissions boundary can be chosen when the role is created. Changing it later needs the AWS API (PutRolePermissionsBoundary / DeleteRolePermissionsBoundary)."
+      />
 
       <AttachPoliciesDialog
         open={attachOpen}
@@ -362,28 +360,7 @@ function PermissionsTab({ role, policies, loading, onChanged }: { role: IamRole;
         }}
       />
 
-      <InlinePolicyDialog
-        open={inline.open}
-        onOpenChange={(o) => setInline((s) => ({ ...s, open: o }))}
-        owner={role.name}
-        kind="role"
-        initial={inline.initial}
-        readOnly={inline.readOnly}
-        existing={inlineNames}
-        onSaved={onChanged}
-      />
 
-      <ConfirmDialog
-        open={!!deleteInline}
-        onOpenChange={(o) => !o && setDeleteInline(null)}
-        title={`Delete inline policy ${deleteInline}?`}
-        description="The role loses the permissions this policy grants. Inline policies cannot be recovered."
-        onConfirm={async () => {
-          await api.del(`${base}/inline-policies/${seg(deleteInline!)}`)
-          toast.success(`Inline policy ${deleteInline} deleted`)
-          onChanged()
-        }}
-      />
     </div>
   )
 }

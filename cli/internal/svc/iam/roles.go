@@ -264,6 +264,23 @@ func (s *Service) ServiceRole(ref, service string) (Role, error) {
 	return r, nil
 }
 
+// ServiceRolePrincipal returns the principal of role acting for an AWS
+// service principal (e.g. "states.amazonaws.com") inside HomeCloud, if the
+// role trusts that service. Unlike AssumeRoleForService it issues no
+// credentials; the principal reflects the role's policies at call time. The
+// service must check iam:PassRole when the role is configured.
+func (s *Service) ServiceRolePrincipal(ref, service, sessionName string) (*httpx.Principal, error) {
+	r, err := s.GetRole(ref)
+	if err != nil {
+		return nil, err
+	}
+	if r.TrustPolicy.trusts("sts:AssumeRole", "", service, s.env.AccountID, nil) != allow {
+		return nil, core.Errf(http.StatusForbidden, "AccessDenied", "role %s does not trust %s (add it to the role's trust policy)", r.Name, service)
+	}
+	s.touchRole(r.Name, core.Region)
+	return s.rolePrincipal(r, tempCred{RoleName: r.Name, RoleID: r.ID, SessionName: sessionName, IssuedTo: service}), nil
+}
+
 // SessionToken issues temporary credentials carrying a user's own permissions.
 func (s *Service) SessionToken(p *httpx.Principal, seconds int) (Credentials, error) {
 	if p.RoleName != "" {

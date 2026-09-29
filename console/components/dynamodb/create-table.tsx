@@ -16,8 +16,18 @@ import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-e
 import { api, errorMessage } from "@/lib/api"
 import { pluralize } from "@/lib/format"
 import { revalidate } from "@/lib/hooks"
-import type { CreateTableInput, DynamoTable, KeyType, TableIndex } from "@/lib/types"
-import { KeyTypeSelect, TABLES_PATH, TABLE_NAME_RE, tableHref, tableNameError } from "./common"
+import type { CreateTableInput, DynamoTable, KeyDef, KeyType, ProjectionType, StreamViewType, TableIndex } from "@/lib/types"
+import {
+  KeyTypeSelect,
+  ProjectionTypeSelect,
+  STREAM_VIEW_TYPES,
+  StreamViewTypeSelect,
+  TABLES_PATH,
+  TABLE_NAME_RE,
+  streamViewLabel,
+  tableHref,
+  tableNameError,
+} from "./common"
 
 export interface IndexRow {
   name: string
@@ -25,26 +35,45 @@ export interface IndexRow {
   pkType: KeyType
   skName: string
   skType: KeyType
+  projType: ProjectionType
+  /** Comma-separated non-key attributes for INCLUDE projections. */
+  include: string
 }
 
-export const emptyIndexRow = (): IndexRow => ({ name: "", pkName: "", pkType: "S", skName: "", skType: "S" })
+export const emptyIndexRow = (): IndexRow => ({ name: "", pkName: "", pkType: "S", skName: "", skType: "S", projType: "ALL", include: "" })
 
-export function rowToIndex(r: IndexRow): TableIndex {
+const splitAttrs = (s: string) =>
+  s
+    .split(",")
+    .map((a) => a.trim())
+    .filter(Boolean)
+
+/** rowToIndex builds an index; for a local index pk is the table's partition key. */
+export function rowToIndex(r: IndexRow, pk?: KeyDef): TableIndex {
   return {
     name: r.name.trim(),
-    partition_key: { name: r.pkName.trim(), type: r.pkType },
+    partition_key: pk ?? { name: r.pkName.trim(), type: r.pkType },
     sort_key: r.skName.trim() ? { name: r.skName.trim(), type: r.skType } : undefined,
+    projection: r.projType === "INCLUDE" ? { type: "INCLUDE", non_key_attributes: splitAttrs(r.include) } : { type: r.projType },
   }
 }
 
-/** indexRowErrors validates a GSI definition; taken lists names already in use. */
-export function indexRowErrors(r: IndexRow, taken: string[]): Partial<Record<"name" | "pk", string>> {
-  const e: Partial<Record<"name" | "pk", string>> = {}
+export type IndexRowErrors = Partial<Record<"name" | "pk" | "sk" | "include", string>>
+
+/**
+ * indexRowErrors validates an index definition; taken lists names already in
+ * use. Local indexes need a sort key and share the table's partition key.
+ */
+export function indexRowErrors(r: IndexRow, taken: string[], local = false): IndexRowErrors {
+  const e: IndexRowErrors = {}
   const name = r.name.trim()
   if (!name) e.name = "Enter an index name"
   else if (!TABLE_NAME_RE.test(name)) e.name = "3-255 letters, digits, underscores, hyphens or dots"
   else if (taken.includes(name)) e.name = "Index names must be unique"
-  if (!r.pkName.trim()) e.pk = "Enter the index partition key"
+  if (!local && !r.pkName.trim()) e.pk = "Enter the index partition key"
+  if (local && !r.skName.trim()) e.sk = "Local indexes need a sort key"
+  if (!local && r.skName.trim() && r.skName.trim() === r.pkName.trim()) e.sk = "The sort key must differ from the partition key"
+  if (r.projType === "INCLUDE" && splitAttrs(r.include).length === 0) e.include = "List at least one attribute"
   return e
 }
 
@@ -57,6 +86,10 @@ export function CreateTable() {
   const [skName, setSkName] = useState("")
   const [skType, setSkType] = useState<KeyType>("S")
   const [gsis, setGsis] = useState<IndexRow[]>([])
+  const [lsis, setLsis] = useState<IndexRow[]>([])
+  const [streamOn, setStreamOn] = useState(false)
+  const [streamView, setStreamView] = useState<StreamViewType>("NEW_AND_OLD_IMAGES")
+  const [protect, setProtect] = useState(false)
   const [ttlOn, setTtlOn] = useState(false)
   const [ttlAttr, setTtlAttr] = useState("expires_at")
   const [tagRows, setTagRows] = useState<TagRow[]>([])
@@ -72,23 +105,31 @@ export function CreateTable() {
       if (!skName.trim()) e.sk = "Enter the sort key name"
       else if (skName.trim() === pkName.trim()) e.sk = "The sort key must differ from the partition key"
     }
-    gsis.forEach((g, i) => {
+    const all = [...gsis, ...lsis]
+    all.forEach((g, i) => {
+      const local = i >= gsis.length
       const ge = indexRowErrors(
         g,
-        gsis.filter((_, j) => j < i).map((x) => x.name.trim()),
+        all.filter((_, j) => j < i).map((x) => x.name.trim()),
+        local,
       )
-      if (ge.name) e[`gsi${i}name`] = ge.name
-      if (ge.pk) e[`gsi${i}pk`] = ge.pk
+      if (local && !ge.sk && g.skName.trim() === skName.trim()) ge.sk = "Use a sort key other than the table's"
+      for (const [k, v] of Object.entries(ge)) e[`ix${i}${k}`] = v
     })
+    if (lsis.length && !useSort) e.lsi = "Local secondary indexes need a table with a sort key"
     if (ttlOn && !ttlAttr.trim()) e.ttl = "Enter the TTL attribute name"
     const keys = tagRows.map((r) => r.key.trim()).filter(Boolean)
     if (new Set(keys).size !== keys.length) e.tags = "Tag keys must be unique"
     return e
-  }, [name, pkName, useSort, skName, gsis, ttlOn, ttlAttr, tagRows])
+  }, [name, pkName, useSort, skName, gsis, lsis, ttlOn, ttlAttr, tagRows])
   const err = (k: string) => (submitted ? errors[k] : undefined)
   const valid = Object.keys(errors).length === 0
+  const ixErrors = (i: number): IndexRowErrors =>
+    submitted ? { name: errors[`ix${i}name`], pk: errors[`ix${i}pk`], sk: errors[`ix${i}sk`], include: errors[`ix${i}include`] } : {}
 
   const setGsi = (i: number, patch: Partial<IndexRow>) => setGsis(gsis.map((g, j) => (j === i ? { ...g, ...patch } : g)))
+  const setLsi = (i: number, patch: Partial<IndexRow>) => setLsis(lsis.map((g, j) => (j === i ? { ...g, ...patch } : g)))
+  const tablePk: KeyDef = { name: pkName.trim(), type: pkType }
 
   const create = async () => {
     setSubmitted(true)
@@ -100,8 +141,11 @@ export function CreateTable() {
       name,
       partition_key: { name: pkName.trim(), type: pkType },
       sort_key: useSort ? { name: skName.trim(), type: skType } : undefined,
-      global_secondary_indexes: gsis.length ? gsis.map(rowToIndex) : undefined,
+      global_secondary_indexes: gsis.length ? gsis.map((g) => rowToIndex(g)) : undefined,
+      local_secondary_indexes: lsis.length ? lsis.map((g) => rowToIndex(g, tablePk)) : undefined,
       ttl_attribute: ttlOn ? ttlAttr.trim() : undefined,
+      stream_view_type: streamOn ? streamView : undefined,
+      deletion_protection: protect || undefined,
       tags: rowsToTags(tagRows),
     }
     setPending(true)
@@ -200,15 +244,55 @@ export function CreateTable() {
                   row={g}
                   onChange={(p) => setGsi(i, p)}
                   onRemove={() => setGsis(gsis.filter((_, j) => j !== i))}
-                  nameError={err(`gsi${i}name`)}
-                  pkError={err(`gsi${i}pk`)}
+                  errors={ixErrors(i)}
                 />
               ))}
               <div>
                 <Button type="button" variant="outline" size="sm" onClick={() => setGsis([...gsis, emptyIndexRow()])} disabled={gsis.length >= 20}>
-                  <Plus /> Add index
+                  <Plus /> Add global index
                 </Button>
               </div>
+            </div>
+          </Section>
+
+          <Section
+            title="Local secondary indexes"
+            description="Sort items within a partition by another attribute. Local indexes share the table's partition key and can only be defined when the table is created."
+          >
+            <div className="flex flex-col gap-3">
+              {lsis.length === 0 && (
+                <p className="text-muted-foreground text-sm">{useSort ? "No local indexes." : "Add a sort key to the table to define local indexes."}</p>
+              )}
+              {lsis.map((g, i) => (
+                <IndexRowEditor
+                  key={i}
+                  row={g}
+                  localPk={tablePk}
+                  onChange={(p) => setLsi(i, p)}
+                  onRemove={() => setLsis(lsis.filter((_, j) => j !== i))}
+                  errors={ixErrors(gsis.length + i)}
+                />
+              ))}
+              {err("lsi") && <p className="text-destructive text-xs">{err("lsi")}</p>}
+              <div>
+                <Button type="button" variant="outline" size="sm" onClick={() => setLsis([...lsis, emptyIndexRow()])} disabled={!useSort || lsis.length >= 5}>
+                  <Plus /> Add local index
+                </Button>
+              </div>
+            </div>
+          </Section>
+
+          <Section title="DynamoDB stream" description="Record every item change in a time-ordered log that DynamoDB Streams clients and Lambda triggers can read for 24 hours.">
+            <div className="flex flex-col gap-3">
+              <label className="flex items-center gap-2 text-sm font-medium">
+                <Checkbox checked={streamOn} onCheckedChange={(v) => setStreamOn(v === true)} />
+                Enable stream
+              </label>
+              {streamOn && (
+                <Field label="View type" htmlFor="stream-view" help={STREAM_VIEW_TYPES.find((s) => s.value === streamView)?.help}>
+                  <StreamViewTypeSelect id="stream-view" value={streamView} onChange={setStreamView} className="max-w-md" />
+                </Field>
+              )}
             </div>
           </Section>
 
@@ -229,6 +313,16 @@ export function CreateTable() {
                 </Field>
               )}
             </div>
+          </Section>
+
+          <Section title="Deletion protection">
+            <label className="flex items-start gap-2 text-sm">
+              <Checkbox checked={protect} onCheckedChange={(v) => setProtect(v === true)} className="mt-0.5" />
+              <span>
+                <span className="font-medium">Turn on deletion protection</span>
+                <span className="text-muted-foreground block text-xs">The table cannot be deleted until deletion protection is turned off.</span>
+              </span>
+            </label>
           </Section>
 
           <Section title="Tags">
@@ -254,14 +348,17 @@ export function CreateTable() {
                     "-"
                   )}
                 </SummaryItem>
-                <SummaryItem label="Secondary indexes">{gsis.length ? gsis.map((g) => g.name || "(unnamed)").join(", ") : "None"}</SummaryItem>
+                <SummaryItem label="Global indexes">{gsis.length ? gsis.map((g) => g.name || "(unnamed)").join(", ") : "None"}</SummaryItem>
+                <SummaryItem label="Local indexes">{lsis.length ? lsis.map((g) => g.name || "(unnamed)").join(", ") : "None"}</SummaryItem>
+                <SummaryItem label="Stream">{streamOn ? streamViewLabel(streamView) : "Off"}</SummaryItem>
+                <SummaryItem label="Deletion protection">{protect ? "On" : "Off"}</SummaryItem>
                 <SummaryItem label="TTL">{ttlOn && ttlAttr.trim() ? <span className="font-mono text-[13px]">{ttlAttr.trim()}</span> : "Off"}</SummaryItem>
                 <SummaryItem label="Capacity mode">On-demand (pay per request)</SummaryItem>
                 <SummaryItem label="Tags">{pluralize(tagRows.filter((r) => r.key.trim()).length, "tag")}</SummaryItem>
               </dl>
               <p className="text-muted-foreground flex gap-1.5 border-t pt-3 text-xs">
                 <Info className="mt-px size-3.5 shrink-0" />
-                The key schema cannot be changed after creation. Indexes and TTL can be changed later.
+                The key schema and local indexes cannot be changed after creation. Global indexes, streams and TTL can be changed later.
               </p>
               {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
               <div className="flex flex-col gap-2 border-t pt-4">
@@ -281,38 +378,48 @@ export function CreateTable() {
   )
 }
 
-/** IndexRowEditor edits one GSI: name, partition key and optional sort key. */
+/**
+ * IndexRowEditor edits one secondary index: name, keys and projection. With
+ * localPk set it edits a local index, whose partition key is the table's.
+ */
 export function IndexRowEditor({
   row,
   onChange,
   onRemove,
-  nameError,
-  pkError,
+  errors = {},
+  localPk,
 }: {
   row: IndexRow
   onChange: (patch: Partial<IndexRow>) => void
   onRemove?: () => void
-  nameError?: string
-  pkError?: string
+  errors?: IndexRowErrors
+  localPk?: { name: string; type: KeyType }
 }) {
   return (
     <div className="relative grid grid-cols-1 gap-3 rounded-md border p-3 md:grid-cols-3">
-      <Field label="Index name" error={nameError}>
+      <Field label="Index name" error={errors.name}>
         <Input value={row.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="e.g. by-status" className="h-8 font-mono" aria-label="Index name" />
       </Field>
-      <Field label="Partition key" error={pkError}>
-        <div className="flex gap-2">
-          <Input
-            value={row.pkName}
-            onChange={(e) => onChange({ pkName: e.target.value })}
-            placeholder="attribute"
-            className="h-8 min-w-0 flex-1 font-mono"
-            aria-label="Index partition key name"
-          />
-          <KeyTypeSelect value={row.pkType} onChange={(v) => onChange({ pkType: v })} className="w-24" />
-        </div>
+      <Field label="Partition key" error={errors.pk} help={localPk ? "Same as the table" : undefined}>
+        {localPk ? (
+          <div className="flex gap-2">
+            <Input value={localPk.name || "(table partition key)"} disabled className="h-8 min-w-0 flex-1 font-mono" aria-label="Index partition key name" />
+            <KeyTypeSelect value={localPk.type} onChange={() => {}} className="w-24" disabled />
+          </div>
+        ) : (
+          <div className="flex gap-2">
+            <Input
+              value={row.pkName}
+              onChange={(e) => onChange({ pkName: e.target.value })}
+              placeholder="attribute"
+              className="h-8 min-w-0 flex-1 font-mono"
+              aria-label="Index partition key name"
+            />
+            <KeyTypeSelect value={row.pkType} onChange={(v) => onChange({ pkType: v })} className="w-24" />
+          </div>
+        )}
       </Field>
-      <Field label="Sort key" optional>
+      <Field label="Sort key" optional={!localPk} error={errors.sk}>
         <div className="flex gap-2">
           <Input
             value={row.skName}
@@ -329,6 +436,20 @@ export function IndexRowEditor({
           )}
         </div>
       </Field>
+      <Field label="Projected attributes" help="Attributes copied into the index and returned by index reads.">
+        <ProjectionTypeSelect value={row.projType} onChange={(v) => onChange({ projType: v })} />
+      </Field>
+      {row.projType === "INCLUDE" && (
+        <Field label="Included attributes" error={errors.include} help="Comma-separated. Key attributes are always included." className="md:col-span-2">
+          <Input
+            value={row.include}
+            onChange={(e) => onChange({ include: e.target.value })}
+            placeholder="e.g. status, total"
+            className="h-8 font-mono"
+            aria-label="Included attributes"
+          />
+        </Field>
+      )}
     </div>
   )
 }

@@ -110,6 +110,7 @@ export function ParametersList() {
         value: (p) => p.name,
       },
       { id: "type", header: "Type", cell: (p) => <TypeBadge type={p.type} />, value: (p) => p.type },
+      { id: "tier", header: "Tier", cell: (p) => <span className="whitespace-nowrap">{p.tier || "Standard"}</span>, value: (p) => p.tier || "Standard", hideBelow: "lg" },
       { id: "version", header: "Version", cell: (p) => <span className="tabular-nums">{p.version}</span>, value: (p) => p.version, hideBelow: "sm" },
       { id: "modified", header: "Last modified", cell: (p) => <TimeAgo value={p.last_modified} />, value: (p) => p.last_modified, hideBelow: "sm" },
       {

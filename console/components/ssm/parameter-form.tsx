@@ -22,10 +22,25 @@ import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-e
 import { KeyPicker, keyHref, keyIdFromArn, keyLabel, useKmsKeys } from "@/components/kms/shared"
 import { errorMessage, api } from "@/lib/api"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
-import type { PutSsmParameterInput, PutSsmParameterResult, SsmParameterType, SsmParameterValue } from "@/lib/types"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import type { PutSsmParameterInput, PutSsmParameterResult, SsmDataType, SsmParameterTier, SsmParameterType, SsmParameterValue } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { DEFAULT_KEY_ALIAS, MAX_VALUE, PARAMETER_PATH, SSM_PATH, TypeBadge, listItems, nameError, parameterHref, useParameter } from "./shared"
+import {
+  DATA_TYPES,
+  DEFAULT_KEY_ALIAS,
+  DEFAULT_KEY_ALIASES,
+  PARAMETER_PATH,
+  SSM_PATH,
+  TIERS,
+  TierBadge,
+  TypeBadge,
+  listItems,
+  maxForTier,
+  nameError,
+  parameterHref,
+  useParameter,
+} from "./shared"
 
 const DEFAULT_KEY = "default"
 
@@ -96,6 +111,9 @@ export function ParameterForm() {
               value: current.data?.value ?? "",
               version: existing.param.version,
               valueError: current.error ? errorMessage(current.error) : null,
+              tier: (existing.param.tier as SsmParameterTier) || "Standard",
+              dataType: (existing.param.data_type as SsmDataType) || "text",
+              allowedPattern: existing.param.allowed_pattern ?? "",
             }
           : null
       }
@@ -110,6 +128,23 @@ interface Initial {
   value: string
   version: number
   valueError: string | null
+  tier: SsmParameterTier
+  dataType: SsmDataType
+  allowedPattern: string
+}
+
+/** patternError checks an AllowedPattern (JavaScript syntax; the server uses Go RE2, which is close for common patterns). */
+function patternError(pattern: string, value: string): string | null {
+  if (!pattern) return null
+  if (pattern.length > 1024) return "Patterns are at most 1024 characters."
+  let re: RegExp
+  try {
+    re = new RegExp(pattern)
+  } catch (e) {
+    return `Invalid regular expression: ${e instanceof Error ? e.message : String(e)}`
+  }
+  if (value && !re.test(value)) return "The value doesn't match the allowed pattern."
+  return null
 }
 
 function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href?: string }[]; editName: string; initial: Initial | null }) {
@@ -125,13 +160,16 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
   const [masked, setMasked] = useState(true)
   const [overwrite, setOverwrite] = useState(true)
   const [tags, setTags] = useState<TagRow[]>([])
+  const [tier, setTier] = useState<SsmParameterTier>(initial?.tier ?? "Standard")
+  const [dataType, setDataType] = useState<SsmDataType>(initial?.dataType ?? "text")
+  const [pattern, setPattern] = useState(initial?.allowedPattern ?? "")
   const [submitted, setSubmitted] = useState(false)
   const [pending, setPending] = useState(false)
   const [apiError, setApiError] = useState<string | null>(null)
 
   // Resolve the current KMS key (an ARN) to a picker value once the keys are loaded.
   const keyInit = useRef(false)
-  const defaultKey = keys.data?.find((k) => k.aliases?.includes(DEFAULT_KEY_ALIAS))
+  const defaultKey = keys.data?.find((k) => k.aliases?.some((a) => DEFAULT_KEY_ALIASES.includes(a)))
   useEffect(() => {
     if (keyInit.current || !keys.data) return
     keyInit.current = true
@@ -141,11 +179,24 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
   }, [keys.data, initial, defaultKey])
 
   const nameErr = editing ? null : nameError(name)
-  const valueErr = !value ? "Enter a value." : value.length > MAX_VALUE ? `Values are at most ${MAX_VALUE} characters.` : null
+  const wasAdvanced = initial?.tier === "Advanced"
+  const maxValue = maxForTier(tier)
+  const valueErr = !value
+    ? "Enter a value."
+    : value.length > maxValue
+      ? tier === "Standard"
+        ? `Standard parameters are at most ${maxValue} characters. Choose the Advanced or Intelligent-Tiering tier for larger values.`
+        : `Values are at most ${maxValue} characters.`
+      : dataType === "aws:ec2:image" && !/^ami-[0-9a-f]{8,17}$/.test(value)
+        ? "The aws:ec2:image data type needs an AMI ID such as ami-0123456789abcdef0."
+        : null
+  const patternErr = patternError(pattern, value)
+  const dataTypeErr = dataType === "aws:ssm:integration" && type !== "SecureString" ? "aws:ssm:integration parameters must be SecureString." : null
+  const effectiveTier = tier === "Intelligent-Tiering" ? (wasAdvanced || value.length > 4096 ? "Advanced" : "Standard") : tier
   const chosenKey = keySel === DEFAULT_KEY ? defaultKey : keys.data?.find((k) => k.id === keySel)
   const keyErr = type === "SecureString" && chosenKey && chosenKey.state !== "Enabled" ? "This key can't encrypt because it isn't enabled." : null
   const overwriteErr = editing && !overwrite ? "Updating an existing parameter requires overwrite." : null
-  const valid = !nameErr && !valueErr && !keyErr && !overwriteErr
+  const valid = !nameErr && !valueErr && !keyErr && !overwriteErr && !patternErr && !dataTypeErr
   const secure = type === "SecureString"
 
   const submit = async (e: React.FormEvent) => {
@@ -167,6 +218,9 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
       key_id: keyId,
       description: description.trim(),
       overwrite: editing ? overwrite : false,
+      tier,
+      data_type: dataType,
+      allowed_pattern: pattern || undefined,
       tags: editing ? undefined : rowsToTags(tags),
     }
     setPending(true)
@@ -261,20 +315,21 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
                   help={
                     keySel === DEFAULT_KEY ? (
                       <>
-                        The HomeCloud managed key <span className="font-mono">{DEFAULT_KEY_ALIAS}</span>
+                        The managed key <span className="font-mono">{DEFAULT_KEY_ALIAS}</span>
                         {defaultKey ? "" : " (created automatically on first use)"}.
                       </>
                     ) : (
-                      "The value is encrypted with this key; decrypting it requires kms:Decrypt on the key."
+                      "The value is encrypted with this key; decrypting it requires kms:Decrypt on the key. Only symmetric keys can be used."
                     )
                   }
                 >
                   <KeyPicker
                     id="ssm-key"
-                    keys={keys.data}
+                    keys={keys.data?.filter((k) => k.id !== defaultKey?.id)}
                     value={keySel}
                     onChange={setKeySel}
                     onlyEnabled
+                    symmetricOnly
                     extra={[{ value: DEFAULT_KEY, label: DEFAULT_KEY_ALIAS, hint: "default" }]}
                   />
                 </Field>
@@ -303,8 +358,8 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
               <Field
                 label="Value"
                 htmlFor="ssm-value"
-                error={submitted ? valueErr : value.length > MAX_VALUE ? valueErr : undefined}
-                help={`${value.length} / ${MAX_VALUE} characters${type === "StringList" ? ". Separate items with commas." : ""}`}
+                error={submitted ? valueErr : value.length > maxValue ? valueErr : undefined}
+                help={`${value.length} / ${maxValue} characters${type === "StringList" ? ". Separate items with commas." : ""}`}
               >
                 <Textarea
                   id="ssm-value"
@@ -328,6 +383,74 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
                   ))}
                 </div>
               )}
+            </div>
+          </Section>
+
+          <Section title="Tier and validation">
+            <div className="flex max-w-2xl flex-col gap-4">
+              <div className="flex flex-col gap-1.5">
+                <span className="text-sm font-medium">Tier</span>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Parameter tier">
+                  {TIERS.map((t) => {
+                    const active = tier === t.tier
+                    const blocked = wasAdvanced && t.tier === "Standard"
+                    return (
+                      <button
+                        key={t.tier}
+                        type="button"
+                        role="radio"
+                        aria-checked={active}
+                        disabled={blocked}
+                        title={blocked ? "Advanced parameters can't be moved back to the Standard tier." : undefined}
+                        onClick={() => setTier(t.tier)}
+                        className={cn(
+                          "flex flex-col gap-0.5 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50",
+                          active ? "border-primary bg-primary/5 ring-primary/30 dark:bg-primary/10 ring-1" : "hover:bg-muted/40",
+                        )}
+                      >
+                        <span className="text-sm font-medium">{t.title}</span>
+                        <span className="text-muted-foreground text-xs">{t.blurb}</span>
+                      </button>
+                    )
+                  })}
+                </div>
+              </div>
+              <Field label="Data type" htmlFor="ssm-data-type" error={dataTypeErr} help={DATA_TYPES.find((d) => d.type === dataType)?.blurb}>
+                <Select value={dataType} onValueChange={(v) => setDataType(v as SsmDataType)}>
+                  <SelectTrigger id="ssm-data-type" className="w-full font-mono text-[13px] sm:w-72">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {DATA_TYPES.map((d) => (
+                      <SelectItem key={d.type} value={d.type} className="font-mono text-[13px]">
+                        {d.type}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </Field>
+              <Field
+                label="Allowed pattern"
+                htmlFor="ssm-pattern"
+                optional
+                error={submitted || pattern ? patternErr : undefined}
+                help={
+                  editing && initial?.allowedPattern
+                    ? "A regular expression every new value must match. Leaving it empty keeps the current pattern."
+                    : "A regular expression every value must match, e.g. ^\\d+$ for digits only."
+                }
+              >
+                <Input
+                  id="ssm-pattern"
+                  value={pattern}
+                  onChange={(e) => setPattern(e.target.value)}
+                  autoComplete="off"
+                  spellCheck={false}
+                  placeholder="^[a-z0-9-]+$"
+                  className="font-mono text-[13px]"
+                  aria-invalid={(submitted || !!pattern) && !!patternErr}
+                />
+              </Field>
             </div>
           </Section>
 
@@ -360,7 +483,15 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
                   </SummaryItem>
                 )}
                 <SummaryItem label="Value">{value ? `${value.length} characters` : <span className="text-muted-foreground">empty</span>}</SummaryItem>
-                <SummaryItem label="Tier">Standard</SummaryItem>
+                <SummaryItem label="Tier">
+                  <span className="inline-flex items-center gap-1.5">
+                    <TierBadge tier={effectiveTier} />
+                    {tier === "Intelligent-Tiering" && <span className="text-muted-foreground text-xs">(Intelligent-Tiering)</span>}
+                  </span>
+                </SummaryItem>
+                <SummaryItem label="Data type">
+                  <span className="font-mono text-[13px]">{dataType}</span>
+                </SummaryItem>
               </dl>
               {editing && (
                 <div className="flex items-start gap-2">

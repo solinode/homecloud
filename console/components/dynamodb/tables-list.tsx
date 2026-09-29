@@ -2,10 +2,11 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { Plus, Table2, Trash2 } from "lucide-react"
+import { Plus, ShieldAlert, Table2, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
@@ -16,7 +17,7 @@ import { api, seg } from "@/lib/api"
 import { formatBytes, formatNumber, pluralize } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { DynamoTable } from "@/lib/types"
-import { TABLES_PATH, indexes, tableHref } from "./common"
+import { DELETION_PROTECTED_MESSAGE, TABLES_PATH, allIndexes, tableHref } from "./common"
 
 const columns: Column<DynamoTable>[] = [
   {
@@ -54,7 +55,7 @@ const columns: Column<DynamoTable>[] = [
     value: (t) => t.sort_key?.name ?? "",
     hideBelow: "md",
   },
-  { id: "indexes", header: "Indexes", cell: (t) => indexes(t).length, value: (t) => indexes(t).length, hideBelow: "md" },
+  { id: "indexes", header: "Indexes", cell: (t) => allIndexes(t).length, value: (t) => allIndexes(t).length, hideBelow: "md" },
   { id: "items", header: "Item count", cell: (t) => <span className="tabular-nums">{formatNumber(t.item_count)}</span>, value: (t) => t.item_count },
   { id: "size", header: "Size", cell: (t) => <span className="tabular-nums">{formatBytes(t.size_bytes)}</span>, value: (t) => t.size_bytes, hideBelow: "sm" },
   { id: "created", header: "Created", cell: (t) => <TimeAgo value={t.created_at} />, value: (t) => t.created_at, hideBelow: "lg" },
@@ -121,6 +122,30 @@ export function TablesList() {
 
 /** DeleteTableDialog deletes a table and all of its items after typing its name. */
 export function DeleteTableDialog({ table, onClose, onDeleted }: { table: DynamoTable | null; onClose: () => void; onDeleted?: () => void }) {
+  if (table?.deletion_protection) {
+    return (
+      <Dialog open onOpenChange={(o) => !o && onClose()}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <ShieldAlert className="size-5 text-amber-600 dark:text-amber-400" /> Table {table.name} is protected
+            </DialogTitle>
+            <DialogDescription>{DELETION_PROTECTED_MESSAGE}</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={onClose}>
+              Close
+            </Button>
+            <Button asChild>
+              <Link href={tableHref(table.name, "settings")} onClick={onClose}>
+                Open settings
+              </Link>
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    )
+  }
   return (
     <ConfirmDialog
       open={!!table}

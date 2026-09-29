@@ -2,8 +2,8 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
-import { FileJson, Loader2, Pencil, Plus, ShieldCheck, Trash2, UsersRound } from "lucide-react"
+import { useMemo, useState } from "react"
+import { Plus, ShieldCheck, Trash2, UsersRound } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -19,16 +19,17 @@ import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
-import { TagList, TagsEditor, rowsToTags, tagsToRows, type TagRow } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
-import { api, errorMessage, seg } from "@/lib/api"
+import { api, seg } from "@/lib/api"
 import { formatDate, pluralize } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
-import type { IamGroup, IamUser, PolicyDocument, PolicySummary } from "@/lib/types"
+import type { IamGroup, IamUser, PolicySummary } from "@/lib/types"
 
 import { AttachPoliciesDialog, PickDialog, runEach } from "./dialogs"
 import { IAM, LINK, PolicyTypeBadge, groupHref, policyHref } from "./common"
-import { InlinePolicyDialog } from "./inline-policy-dialog"
+import { PermissionsBoundarySection } from "./boundary"
+import { InlinePoliciesSection } from "./inline-policies-section"
+import { TagsSection } from "./tags-section"
 import { UserCredentials } from "./user-credentials"
 
 interface PermRow {
@@ -133,7 +134,14 @@ export function UserDetail() {
           <UserCredentials user={user} onChanged={() => mutate()} />
         </TabsContent>
         <TabsContent value="tags">
-          <UserTags user={user} onChanged={refresh} />
+          <TagsSection
+            tags={user.tags}
+            noun="users"
+            onSave={async (tags) => {
+              await api.put(`${IAM}/users/${seg(user.name)}/tags`, { tags })
+              refresh()
+            }}
+          />
         </TabsContent>
       </Tabs>
 
@@ -170,8 +178,6 @@ function PermissionsTab({
   const [selected, setSelected] = useState<string[]>([])
   const [attachOpen, setAttachOpen] = useState(false)
   const [confirmDetach, setConfirmDetach] = useState(false)
-  const [inline, setInline] = useState<{ open: boolean; initial: { name: string; doc: PolicyDocument } | null; readOnly?: boolean }>({ open: false, initial: null })
-  const [deleteInline, setDeleteInline] = useState<string | null>(null)
   const base = `${IAM}/users/${seg(user.name)}`
 
   const rows = useMemo<PermRow[]>(() => {
@@ -199,7 +205,7 @@ function PermissionsTab({
         </Link>
       ),
     },
-    { id: "type", header: "Type", value: (r) => (r.managed ? "HomeCloud managed" : "Customer managed"), cell: (r) => (r.managed === undefined ? "-" : <PolicyTypeBadge managed={r.managed} />) },
+    { id: "type", header: "Type", value: (r) => (r.managed ? "AWS managed" : "Customer managed"), cell: (r) => (r.managed === undefined ? "-" : <PolicyTypeBadge managed={r.managed} />) },
     {
       id: "via",
       header: "Attached via",
@@ -218,8 +224,6 @@ function PermissionsTab({
     },
     { id: "desc", header: "Description", value: (r) => r.description, cell: (r) => <span className="text-muted-foreground">{r.description || "-"}</span>, hideBelow: "lg" },
   ]
-
-  const inlineNames = Object.keys(user.inline_policies ?? {}).sort()
 
   return (
     <div className="flex flex-col gap-6">
@@ -268,46 +272,13 @@ function PermissionsTab({
         }
       />
 
-      <Section
-        title={`Inline policies (${inlineNames.length})`}
-        description="Policies embedded in this user only."
-        flush
-        actions={
-          <Button size="sm" variant="outline" onClick={() => setInline({ open: true, initial: null })}>
-            <Plus /> Create inline policy
-          </Button>
-        }
-      >
-        {!inlineNames.length ? (
-          <p className="text-muted-foreground p-6 text-center text-sm">No inline policies.</p>
-        ) : (
-          <ul>
-            {inlineNames.map((n) => {
-              const doc = user.inline_policies![n]
-              return (
-                <li key={n} className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5 last:border-0">
-                  <span className="flex items-center gap-2 text-sm">
-                    <FileJson className="text-muted-foreground size-4" />
-                    <span className="font-medium">{n}</span>
-                    <span className="text-muted-foreground text-xs">{pluralize(doc?.Statement?.length ?? 0, "statement")}</span>
-                  </span>
-                  <span className="flex gap-1">
-                    <Button size="sm" variant="ghost" onClick={() => setInline({ open: true, initial: { name: n, doc }, readOnly: true })}>
-                      View
-                    </Button>
-                    <Button size="sm" variant="ghost" onClick={() => setInline({ open: true, initial: { name: n, doc } })}>
-                      Edit
-                    </Button>
-                    <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setDeleteInline(n)}>
-                      Delete
-                    </Button>
-                  </span>
-                </li>
-              )
-            })}
-          </ul>
-        )}
-      </Section>
+      <InlinePoliciesSection kind="user" owner={user.name} policies={user.inline_policies} onChanged={onChanged} />
+
+      <PermissionsBoundarySection
+        kind="user"
+        arn={user.permissions_boundary}
+        readOnlyNote="A permissions boundary can be chosen when the user is created. Changing it later needs the AWS API (PutUserPermissionsBoundary / DeleteUserPermissionsBoundary)."
+      />
 
       <AttachPoliciesDialog
         open={attachOpen}
@@ -344,27 +315,7 @@ function PermissionsTab({
         }}
       />
 
-      <InlinePolicyDialog
-        open={inline.open}
-        onOpenChange={(o) => setInline((s) => ({ ...s, open: o }))}
-        owner={user.name}
-        initial={inline.initial}
-        readOnly={inline.readOnly}
-        existing={inlineNames}
-        onSaved={onChanged}
-      />
 
-      <ConfirmDialog
-        open={!!deleteInline}
-        onOpenChange={(o) => !o && setDeleteInline(null)}
-        title={`Delete inline policy ${deleteInline}?`}
-        description="The user loses the permissions this policy grants. Inline policies cannot be recovered."
-        onConfirm={async () => {
-          await api.del(`${base}/inline-policies/${seg(deleteInline!)}`)
-          toast.success(`Inline policy ${deleteInline} deleted`)
-          onChanged()
-        }}
-      />
     </div>
   )
 }
@@ -480,70 +431,5 @@ function GroupsTab({
         }}
       />
     </>
-  )
-}
-
-/** UserTags shows the user's tags and edits them with PUT /iam/users/{name}/tags. */
-function UserTags({ user, onChanged }: { user: IamUser; onChanged: () => void }) {
-  const [editing, setEditing] = useState(false)
-  const [rows, setRows] = useState<TagRow[]>([])
-  const [pending, setPending] = useState(false)
-  const [err, setErr] = useState<string | null>(null)
-
-  useEffect(() => {
-    if (editing) {
-      setRows(tagsToRows(user.tags))
-      setErr(null)
-    }
-  }, [editing, user.tags])
-
-  const save = async () => {
-    const keys = rows.map((r) => r.key.trim()).filter(Boolean)
-    if (rows.some((r) => !r.key.trim() && r.value.trim())) return setErr("Every tag needs a key.")
-    if (new Set(keys).size !== keys.length) return setErr("Tag keys must be unique.")
-    setPending(true)
-    try {
-      await api.put(`${IAM}/users/${seg(user.name)}/tags`, { tags: rowsToTags(rows) ?? {} })
-      toast.success(`Saved tags for ${user.name}`)
-      setEditing(false)
-      onChanged()
-    } catch (e) {
-      toast.error(errorMessage(e))
-    } finally {
-      setPending(false)
-    }
-  }
-
-  return (
-    <Section
-      title="Tags"
-      description="Key-value pairs to organize and find users."
-      actions={
-        editing ? (
-          <>
-            <Button variant="outline" size="sm" onClick={() => setEditing(false)} disabled={pending}>
-              Cancel
-            </Button>
-            <Button size="sm" onClick={save} disabled={pending}>
-              {pending && <Loader2 className="animate-spin" />}
-              Save tags
-            </Button>
-          </>
-        ) : (
-          <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
-            <Pencil /> Manage tags
-          </Button>
-        )
-      }
-    >
-      {editing ? (
-        <div className="flex flex-col gap-2">
-          <TagsEditor rows={rows} onChange={(r) => (setRows(r), setErr(null))} />
-          {err && <p className="text-destructive text-xs">{err}</p>}
-        </div>
-      ) : (
-        <TagList tags={user.tags} />
-      )}
-    </Section>
   )
 }

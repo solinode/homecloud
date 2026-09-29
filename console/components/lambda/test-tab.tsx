@@ -21,6 +21,7 @@ import type { InvokeResult, LambdaFunction } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 import { LAMBDA_PATH, fnPath } from "./common"
+import { aliasTargets, useAliases, useVersions } from "./versions"
 
 const pretty = (v: unknown) => JSON.stringify(v, null, 2)
 
@@ -102,6 +103,11 @@ export function TestTab({ fn }: { fn: LambdaFunction }) {
   const [result, setResult] = useState<InvokeResult | null>(null)
   const [invokeError, setInvokeError] = useState<unknown>(null)
   const [deleting, setDeleting] = useState(false)
+  const [qualifier, setQualifier] = useState("$LATEST")
+  const [invocationType, setInvocationType] = useState<"RequestResponse" | "Event">("RequestResponse")
+  const [queued, setQueued] = useState<{ request_id: string; qualifier: string } | null>(null)
+  const versions = useVersions(fn.name)
+  const aliases = useAliases(fn.name)
 
   useEffect(() => {
     const s = loadSaved(fn.name)
@@ -169,10 +175,15 @@ export function TestTab({ fn }: { fn: LambdaFunction }) {
     }
     setPending(true)
     setInvokeError(null)
+    setQueued(null)
+    const query = { qualifier: qualifier === "$LATEST" ? undefined : qualifier, invocation_type: invocationType === "Event" ? "Event" : undefined }
     try {
       // Send the event text verbatim: the API expects the raw event as the body.
-      const r = await request<InvokeResult>("POST", `${fnPath(fn.name)}/invoke`, { body, headers: { "Content-Type": "application/json" } })
-      setResult(r)
+      const r = await request<InvokeResult>("POST", `${fnPath(fn.name)}/invoke`, { body, query, headers: { "Content-Type": "application/json" } })
+      if (invocationType === "Event") {
+        setResult(null)
+        setQueued({ request_id: r.request_id, qualifier })
+      } else setResult(r)
     } catch (e) {
       setResult(null)
       setInvokeError(e)
@@ -187,7 +198,7 @@ export function TestTab({ fn }: { fn: LambdaFunction }) {
     <div className="flex flex-col gap-4">
       <Section
         title="Test event"
-        description="Invoke the function synchronously with a JSON event. Saved events are kept in this browser."
+        description="Invoke the function with a JSON event. Saved events are kept in this browser."
         actions={
           <Button size="sm" onClick={invoke} disabled={pending || !!bodyErr}>
             {pending ? <Loader2 className="animate-spin" /> : <Play />} Test
@@ -237,6 +248,54 @@ export function TestTab({ fn }: { fn: LambdaFunction }) {
               </Button>
             </div>
           </div>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:max-w-2xl">
+            <Field label="Version or alias" htmlFor="test-qualifier">
+              <Select value={qualifier} onValueChange={setQualifier}>
+                <SelectTrigger id="test-qualifier" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="$LATEST">
+                    <span className="font-mono">$LATEST</span>
+                  </SelectItem>
+                  {(aliases.data ?? []).length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>Aliases</SelectLabel>
+                      {(aliases.data ?? []).map((a) => (
+                        <SelectItem key={`a-${a.name}`} value={a.name}>
+                          {a.name} <span className="text-muted-foreground font-mono text-xs">→ {aliasTargets(a)}</span>
+                        </SelectItem>
+                      ))}
+                    </SelectGroup>
+                  )}
+                  {(versions.data ?? []).filter((v) => v.version !== "$LATEST").length > 0 && (
+                    <SelectGroup>
+                      <SelectLabel>Versions</SelectLabel>
+                      {(versions.data ?? [])
+                        .filter((v) => v.version !== "$LATEST")
+                        .reverse()
+                        .map((v) => (
+                          <SelectItem key={`v-${v.version}`} value={v.version!}>
+                            Version <span className="font-mono">{v.version}</span>
+                          </SelectItem>
+                        ))}
+                    </SelectGroup>
+                  )}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Invocation type" htmlFor="test-type">
+              <Select value={invocationType} onValueChange={(v) => setInvocationType(v as typeof invocationType)}>
+                <SelectTrigger id="test-type" className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="RequestResponse">Synchronous (RequestResponse)</SelectItem>
+                  <SelectItem value="Event">Asynchronous (Event)</SelectItem>
+                </SelectContent>
+              </Select>
+            </Field>
+          </div>
           <div className="flex flex-wrap items-center gap-2 text-sm">
             <span className="text-muted-foreground">Templates:</span>
             {tpls.map((t) => (
@@ -251,6 +310,28 @@ export function TestTab({ fn }: { fn: LambdaFunction }) {
 
       {invokeError ? <ErrorState error={invokeError} onRetry={invoke} /> : null}
       {result && <InvokeResultView result={result} />}
+      {queued && (
+        <Section
+          title={
+            <span className="flex items-center gap-2 text-sky-700 dark:text-sky-400">
+              <CheckCircle2 className="size-4" /> Event queued (202 Accepted)
+            </span>
+          }
+          className="border-sky-600/30 dark:border-sky-400/30"
+        >
+          <KeyValueGrid
+            columns={3}
+            items={[
+              { label: "Request ID", value: <span className="font-mono text-[13px] break-all">{queued.request_id}</span>, wide: true },
+              { label: "Qualifier", value: <span className="font-mono text-[13px]">{queued.qualifier}</span> },
+            ]}
+          />
+          <p className="text-muted-foreground mt-3 text-xs">
+            The function runs in the background and is retried per the asynchronous invocation settings. See the Logs tab for its output; results go to the
+            configured destinations.
+          </p>
+        </Section>
+      )}
 
       <ConfirmDialog
         open={deleting}
@@ -289,6 +370,7 @@ export function InvokeResultView({ result }: { result: InvokeResult }) {
           { label: "Duration", value: `${formatNumber(result.duration_ms, 2)} ms` },
           { label: "Billed duration", value: `${formatNumber(result.billed_duration_ms, 0)} ms` },
           { label: "Cold start", value: result.cold_start ? "Yes (new execution environment)" : "No" },
+          { label: "Executed version", value: <span className="font-mono text-[13px]">{result.executed_version ?? "$LATEST"}</span> },
           { label: "Function error", value: result.function_error ?? "" },
           { label: "Request ID", value: <span className="font-mono text-[13px] break-all">{result.request_id}</span>, wide: true },
         ]}
@@ -306,7 +388,14 @@ export function InvokeResultView({ result }: { result: InvokeResult }) {
           {result.logs && <CopyButton value={result.logs} label="Copy logs" />}
         </div>
         {result.logs ? (
-          <pre className="bg-muted/50 max-h-80 overflow-auto rounded-md border p-3 font-mono text-[12.5px] leading-5 whitespace-pre-wrap break-all">{result.logs}</pre>
+          <pre className="bg-muted/50 max-h-80 overflow-auto rounded-md border p-3 font-mono text-[12.5px] leading-5 whitespace-pre-wrap break-all">
+            {result.logs.split("\n").map((line, i) => (
+              <span key={i} className={cn(/^(START|END|REPORT|INIT_START) /.test(line) && "text-muted-foreground font-semibold")}>
+                {line}
+                {"\n"}
+              </span>
+            ))}
+          </pre>
         ) : (
           <p className="text-muted-foreground text-sm">The function wrote nothing to stdout or stderr.</p>
         )}

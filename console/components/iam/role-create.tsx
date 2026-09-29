@@ -23,7 +23,8 @@ import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { IamRole, IamUser, PolicySummary, TrustPolicyDocument } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { CheckList, IAM, PolicyPicker, PolicyTypeBadge, nameError, policyHref, policyJson } from "./common"
+import { BoundaryHelp, BoundarySelect } from "./boundary"
+import { CheckList, IAM, PolicyPicker, PolicyTypeBadge, nameError, policyHref, policyJson, policyNameFromArn } from "./common"
 import { SERVICE_PRINCIPALS, SESSION_DURATIONS, TrustedEntitiesList, accountTrust, roleHref, serviceTrust, validateTrustPolicy } from "./role-common"
 
 const STEPS = ["Select trusted entity", "Add permissions", "Name, review, and create"]
@@ -83,6 +84,7 @@ export function RoleCreate() {
   const [description, setDescription] = useState("")
   const [maxSession, setMaxSession] = useState(3600)
   const [tags, setTags] = useState<TagRow[]>([])
+  const [boundary, setBoundary] = useState("")
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
 
@@ -149,6 +151,7 @@ export function RoleCreate() {
         max_session_duration: maxSession,
         policies: selectedPolicies,
         tags: rowsToTags(tags),
+        permissions_boundary: boundary || undefined,
       })
       toast.success(`Role ${r.name} created`)
       revalidate(IAM)
@@ -291,6 +294,13 @@ export function RoleCreate() {
               <PolicyPicker policies={policies.data} loading={policies.isLoading} selected={selectedPolicies} onChange={setSelectedPolicies} maxHeight="max-h-[28rem]" />
             </Section>
           )}
+          {step === 1 && (
+            <Section title="Set permissions boundary" description={<BoundaryHelp kind="role" />}>
+              <Field label="Permissions boundary" optional htmlFor="role-boundary">
+                <BoundarySelect id="role-boundary" value={boundary} onChange={setBoundary} />
+              </Field>
+            </Section>
+          )}
 
           {step === 2 && (
             <>
@@ -344,6 +354,10 @@ export function RoleCreate() {
                     <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" /> No policies selected. The role cannot do anything until you add permissions.
                   </p>
                 )}
+                <p className="border-t px-4 py-2 text-sm">
+                  <span className="text-muted-foreground">Permissions boundary: </span>
+                  {boundary ? policyNameFromArn(boundary) : "Not set"}
+                </p>
               </Section>
 
               <Section title="Step 3: Add tags" description="Optional key-value pairs to organize and find roles.">

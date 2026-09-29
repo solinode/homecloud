@@ -20,18 +20,196 @@ import { TagsEditor, rowsToTags, tagsToRows, type TagRow } from "@/components/co
 import { api, errorMessage } from "@/lib/api"
 import { formatMemoryMB } from "@/lib/format"
 import { revalidate } from "@/lib/hooks"
-import type { FunctionConfigInput, FunctionUrlConfig, LambdaFunction } from "@/lib/types"
+import type { FunctionConfigInput, FunctionDetail, FunctionUrlConfig, LambdaFunction } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { HANDLER_RE, LAMBDA_PATH, MEMORY_PRESETS, fnPath, formatTimeout, useRuntimes } from "./common"
-import { envErrors } from "./create-function"
+import { RolePicker } from "@/components/iam/role-picker"
+import { roleHref } from "@/components/iam/role-common"
 
-export function ConfigurationTab({ fn }: { fn: LambdaFunction }) {
+import { ARCHITECTURES, FunctionStateBadge, LAMBDA_PATH, MEMORY_PRESETS, UpdateStatusBadge, fnPath, formatTimeout, handlerError, handlerHelp, layerHref, splitLayerArn, useRuntimes } from "./common"
+import { AsyncConfig, ConcurrencyConfig } from "./config-advanced"
+import { envErrors } from "./create-function"
+import { LayersPicker } from "./pickers"
+
+export function ConfigurationTab({ fn, detail }: { fn: LambdaFunction; detail: FunctionDetail }) {
   return (
     <div className="flex flex-col gap-4">
       <GeneralConfig fn={fn} />
+      <PermissionsConfig fn={fn} />
       <EnvironmentConfig fn={fn} />
+      {fn.package_type !== "Image" && <LayersConfig fn={fn} />}
+      <ConcurrencyConfig fn={fn} detail={detail} />
+      <AsyncConfig fn={fn} />
     </div>
+  )
+}
+
+function PermissionsConfig({ fn }: { fn: LambdaFunction }) {
+  const [editing, setEditing] = useState(false)
+  const [role, setRole] = useState("")
+  const [pending, setPending] = useState(false)
+  const roleName = fn.role ? fn.role.split("/").pop()! : ""
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPending(true)
+    try {
+      await api.patch(fnPath(fn.name), { role })
+      toast.success(role ? `Execution role set to ${role.split("/").pop()}` : "Removed the execution role")
+      await revalidate(LAMBDA_PATH)
+      setEditing(false)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Section
+      title="Execution role"
+      description="The function's code receives temporary credentials for this role."
+      actions={
+        !editing && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setRole(fn.role ?? "")
+              setEditing(true)
+            }}
+          >
+            Edit
+          </Button>
+        )
+      }
+    >
+      {editing ? (
+        <form onSubmit={save} className="flex flex-col gap-4">
+          <Field label="Execution role" htmlFor="cfg-role">
+            <RolePicker id="cfg-role" value={role} onChange={(v) => setRole(v)} service="lambda.amazonaws.com" allowNone placeholder="No execution role" className="max-w-xl" />
+          </Field>
+          <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+            <Button type="button" variant="outline" onClick={() => setEditing(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending || role === (fn.role ?? "")}>
+              {pending && <Loader2 className="animate-spin" />}
+              Save
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <KeyValueGrid
+          columns={2}
+          items={[
+            {
+              label: "Role name",
+              value: roleName ? (
+                <Link href={roleHref(roleName)} className="text-primary hover:underline">
+                  {roleName}
+                </Link>
+              ) : (
+                <span className="text-muted-foreground">None: the function runs without AWS credentials</span>
+              ),
+            },
+            { label: "Role ARN", value: fn.role ? <span className="font-mono text-[13px] break-all">{fn.role}</span> : "" },
+          ]}
+        />
+      )}
+    </Section>
+  )
+}
+
+function LayersConfig({ fn }: { fn: LambdaFunction }) {
+  const [editing, setEditing] = useState(false)
+  const [layers, setLayers] = useState<string[]>([])
+  const [pending, setPending] = useState(false)
+  const current = fn.layers ?? []
+  const same = layers.length === current.length && layers.every((l, i) => l === current[i])
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPending(true)
+    try {
+      await api.patch(fnPath(fn.name), { layers })
+      toast.success(`Saved the layers of ${fn.name}`)
+      await revalidate(LAMBDA_PATH)
+      setEditing(false)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Section
+      title={`Layers (${current.length})`}
+      description="Extracted to /opt in this order before the function starts; later layers overwrite files from earlier ones."
+      actions={
+        !editing && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              setLayers(current)
+              setEditing(true)
+            }}
+          >
+            Edit
+          </Button>
+        )
+      }
+      flush={!editing && current.length > 0}
+    >
+      {editing ? (
+        <form onSubmit={save} className="flex flex-col gap-4">
+          <LayersPicker value={layers} onChange={setLayers} runtime={fn.runtime} architecture={fn.architectures?.[0]} />
+          <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
+            <Button type="button" variant="outline" onClick={() => setEditing(false)} disabled={pending}>
+              Cancel
+            </Button>
+            <Button type="submit" disabled={pending || same}>
+              {pending && <Loader2 className="animate-spin" />}
+              Save
+            </Button>
+          </div>
+        </form>
+      ) : current.length === 0 ? (
+        <p className="text-muted-foreground text-sm">No layers.</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="bg-muted/40 border-b">
+                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Order</th>
+                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Layer</th>
+                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Version</th>
+                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">ARN</th>
+              </tr>
+            </thead>
+            <tbody>
+              {current.map((a, i) => {
+                const p = splitLayerArn(a)
+                return (
+                  <tr key={a} className="border-b last:border-0">
+                    <td className="px-4 py-2">{i + 1}</td>
+                    <td className="px-4 py-2">
+                      <Link href={layerHref(p.name)} className="text-primary hover:underline">
+                        {p.name}
+                      </Link>
+                    </td>
+                    <td className="px-4 py-2">{p.version}</td>
+                    <td className="px-4 py-2 font-mono text-xs break-all">{a}</td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Section>
   )
 }
 
@@ -43,7 +221,10 @@ function GeneralConfig({ fn }: { fn: LambdaFunction }) {
   const [handler, setHandler] = useState("")
   const [memory, setMemory] = useState("")
   const [timeout, setTimeoutValue] = useState("")
+  const [arch, setArch] = useState("")
   const [pending, setPending] = useState(false)
+  const isImage = fn.package_type === "Image"
+  const curArch = fn.architectures?.[0] ?? "x86_64"
 
   const reset = () => {
     setDescription(fn.description)
@@ -51,6 +232,7 @@ function GeneralConfig({ fn }: { fn: LambdaFunction }) {
     setHandler(fn.handler)
     setMemory(String(fn.memory_mb))
     setTimeoutValue(String(fn.timeout_seconds))
+    setArch(curArch)
   }
   useEffect(() => {
     if (!editing) reset()
@@ -62,7 +244,8 @@ function GeneralConfig({ fn }: { fn: LambdaFunction }) {
   const errors: Record<string, string> = {}
   if (!Number.isInteger(mem) || mem < 128 || mem > 10240) errors.memory = "128-10240 MB"
   if (!Number.isInteger(to) || to < 1 || to > 900) errors.timeout = "1-900 seconds"
-  if (!HANDLER_RE.test(handler)) errors.handler = "Use the form file.function"
+  const hErr = isImage ? null : handlerError(runtime, handler)
+  if (hErr) errors.handler = hErr
   const valid = Object.keys(errors).length === 0
   const rtLabel = (name: string) => runtimes.data?.find((r) => r.name === name)?.label ?? name
 
@@ -75,6 +258,7 @@ function GeneralConfig({ fn }: { fn: LambdaFunction }) {
     if (handler !== fn.handler) body.handler = handler
     if (mem !== fn.memory_mb) body.memory_mb = mem
     if (to !== fn.timeout_seconds) body.timeout_seconds = to
+    if (arch && arch !== curArch) body.architectures = [arch]
     if (Object.keys(body).length === 0) {
       setEditing(false)
       return
@@ -106,10 +290,39 @@ function GeneralConfig({ fn }: { fn: LambdaFunction }) {
           columns={3}
           items={[
             { label: "Description", value: fn.description, wide: true },
-            { label: "Runtime", value: rtLabel(fn.runtime) },
-            { label: "Handler", value: <span className="font-mono text-[13px]">{fn.handler}</span> },
+            { label: "Package type", value: isImage ? "Container image" : "Zip" },
+            ...(isImage
+              ? [{ label: "Image URI", value: <span className="font-mono text-[13px] break-all">{fn.image_uri}</span>, wide: true }]
+              : [
+                  { label: "Runtime", value: rtLabel(fn.runtime) },
+                  { label: "Handler", value: <span className="font-mono text-[13px]">{fn.handler}</span> },
+                ]),
+            { label: "Architecture", value: <span className="font-mono text-[13px]">{(fn.architectures ?? []).join(", ") || "x86_64"}</span> },
             { label: "Memory", value: formatMemoryMB(fn.memory_mb) },
             { label: "Timeout", value: formatTimeout(fn.timeout_seconds) },
+            {
+              label: "State",
+              value: (
+                <span className="flex flex-col gap-0.5">
+                  <FunctionStateBadge fn={fn} />
+                  {fn.state_reason && (
+                    <span className="text-muted-foreground text-xs">
+                      {fn.state_reason}
+                      {fn.state_reason_code && <span className="font-mono"> ({fn.state_reason_code})</span>}
+                    </span>
+                  )}
+                </span>
+              ),
+            },
+            {
+              label: "Last update status",
+              value: (
+                <span className="flex flex-col gap-0.5">
+                  <UpdateStatusBadge status={fn.last_update_status} />
+                  {fn.last_update_status_reason && <span className="text-muted-foreground text-xs">{fn.last_update_status_reason}</span>}
+                </span>
+              ),
+            },
           ]}
         />
       </Section>
@@ -123,6 +336,7 @@ function GeneralConfig({ fn }: { fn: LambdaFunction }) {
           <Textarea id="cfg-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={256} className="max-w-xl" />
         </Field>
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
+          {!isImage && (
           <Field label="Runtime" htmlFor="cfg-runtime" help="Changing the runtime does not convert your code.">
             <Select value={runtime} onValueChange={setRuntime}>
               <SelectTrigger id="cfg-runtime" className="w-full max-w-xs">
@@ -137,8 +351,25 @@ function GeneralConfig({ fn }: { fn: LambdaFunction }) {
               </SelectContent>
             </Select>
           </Field>
-          <Field label="Handler" htmlFor="cfg-handler" error={errors.handler} help="file.function, e.g. lambda_function.lambda_handler or index.handler">
-            <Input id="cfg-handler" value={handler} onChange={(e) => setHandler(e.target.value)} className="max-w-xs font-mono" spellCheck={false} />
+          )}
+          {!isImage && (
+            <Field label="Handler" htmlFor="cfg-handler" error={errors.handler} help={handlerHelp(runtime)}>
+              <Input id="cfg-handler" value={handler} onChange={(e) => setHandler(e.target.value)} className="max-w-xs font-mono" spellCheck={false} />
+            </Field>
+          )}
+          <Field label="Architecture" htmlFor="cfg-arch">
+            <Select value={arch} onValueChange={setArch}>
+              <SelectTrigger id="cfg-arch" className="w-full max-w-xs font-mono">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ARCHITECTURES.map((a) => (
+                  <SelectItem key={a} value={a} className="font-mono">
+                    {a}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </Field>
           <Field label="Memory (MB)" htmlFor="cfg-memory" error={errors.memory} help="128-10240 MB; CPU scales with memory.">
             <div className="flex flex-wrap items-center gap-1.5">

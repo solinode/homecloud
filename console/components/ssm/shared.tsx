@@ -2,15 +2,38 @@
 
 import { StatusBadge } from "@/components/console/status-badge"
 import { useApi } from "@/lib/hooks"
-import type { SsmParameter, SsmParameterType } from "@/lib/types"
+import type { SsmDataType, SsmParameter, SsmParameterTier, SsmParameterType } from "@/lib/types"
 
 export const SSM_PATH = "/api/v1/ssm"
 export const PARAMETERS_PATH = `${SSM_PATH}/parameters`
 /** Single-parameter routes take the name in ?name= because names contain "/". */
 export const PARAMETER_PATH = `${SSM_PATH}/parameter`
 
-export const DEFAULT_KEY_ALIAS = "alias/hc/ssm"
+/** The Parameter Store default key (AWS name); it resolves to the HomeCloud managed alias/hc/ssm key. */
+export const DEFAULT_KEY_ALIAS = "alias/aws/ssm"
+export const DEFAULT_KEY_ALIASES = ["alias/aws/ssm", "alias/hc/ssm"]
 export const MAX_VALUE = 8192
+export const MAX_STANDARD = 4096
+
+export const TIERS: { tier: SsmParameterTier; title: string; blurb: string }[] = [
+  { tier: "Standard", title: "Standard", blurb: "Values up to 4 KB." },
+  { tier: "Advanced", title: "Advanced", blurb: "Values up to 8 KB. Can't be changed back to Standard." },
+  { tier: "Intelligent-Tiering", title: "Intelligent-Tiering", blurb: "Standard when the value fits, Advanced otherwise." },
+]
+
+export const DATA_TYPES: { type: SsmDataType; blurb: string }[] = [
+  { type: "text", blurb: "Any value." },
+  { type: "aws:ec2:image", blurb: "Validated as an AMI ID (ami-...)." },
+  { type: "aws:ssm:integration", blurb: "Integration credentials; SecureString only." },
+]
+
+/** maxForTier is the largest value the chosen tier accepts. */
+export const maxForTier = (tier: string) => (tier === "Standard" ? MAX_STANDARD : MAX_VALUE)
+
+export function TierBadge({ tier }: { tier?: string }) {
+  const t = tier || "Standard"
+  return <StatusBadge status={t} label={t} tone={t === "Advanced" ? "info" : "neutral"} />
+}
 export const MAX_NAME = 1011
 
 export const parameterHref = (name: string, tab?: string) => `/ssm/parameter/?name=${encodeURIComponent(name)}${tab ? `&tab=${tab}` : ""}`

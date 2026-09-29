@@ -17,8 +17,39 @@ import { formatDate } from "@/lib/format"
 import { revalidate } from "@/lib/hooks"
 import type { Queue } from "@/lib/types"
 
-import { QUEUES_PATH, QueueTypeBadge, humanSeconds, queueHref, queuePath, useQueues } from "./common"
-import { ConfigurationFields, DeadLetterFields, configFromQueue, configToInput, validateConfig, type QueueConfig } from "./queue-config"
+import { QUEUES_PATH, QueueTypeBadge, humanSeconds, nameFromArn, queueHref, queuePath, useQueues } from "./common"
+import {
+  AccessPolicyFields,
+  ConfigurationFields,
+  DeadLetterFields,
+  EncryptionFields,
+  RedriveAllowFields,
+  configFromQueue,
+  configToInput,
+  parseRedriveAllow,
+  prettyJson,
+  sseMode,
+  validateConfig,
+  type QueueConfig,
+} from "./queue-config"
+
+function RedriveAllowSummary({ queue }: { queue: Queue }) {
+  const p = parseRedriveAllow(queue.redrive_allow_policy)
+  if (!p || p.redrivePermission === "allowAll") return <span>Allow all</span>
+  if (p.redrivePermission === "denyAll") return <span>Deny all</span>
+  return (
+    <span className="flex flex-col gap-0.5">
+      <span>By queue:</span>
+      <span className="flex flex-wrap gap-x-3 gap-y-1">
+        {(p.sourceQueueArns ?? []).map((a) => (
+          <Link key={a} href={queueHref(nameFromArn(a))} className="text-primary hover:underline" title={a}>
+            {nameFromArn(a)}
+          </Link>
+        ))}
+      </span>
+    </span>
+  )
+}
 
 export function QueueSettings({ queue, editing, onEditingChange }: { queue: Queue; editing: boolean; onEditingChange: (e: boolean) => void }) {
   const [tagging, setTagging] = useState(false)
@@ -50,7 +81,13 @@ export function QueueSettings({ queue, editing, onEditingChange }: { queue: Queu
                 value: queue.receive_wait_time_seconds ? `${humanSeconds(queue.receive_wait_time_seconds)} (long polling)` : "0 seconds (short polling)",
               },
               { label: "Maximum message size", value: `${Math.round(queue.max_message_size / 1024)} KB` },
-              ...(queue.fifo ? [{ label: "Content-based deduplication", value: queue.content_based_deduplication ? "Enabled" : "Disabled" }] : []),
+              ...(queue.fifo
+                ? [
+                    { label: "Content-based deduplication", value: queue.content_based_deduplication ? "Enabled" : "Disabled" },
+                    { label: "Deduplication scope", value: queue.deduplication_scope === "messageGroup" ? "Message group" : "Queue" },
+                    { label: "FIFO throughput limit", value: queue.fifo_throughput_limit === "perMessageGroupId" ? "Per message group ID" : "Per queue" },
+                  ]
+                : []),
               { label: "URL", value: <CopyableText value={queue.url} />, wide: true },
               { label: "ARN", value: <CopyableText value={queue.arn} />, wide: true },
             ]}
@@ -91,8 +128,42 @@ export function QueueSettings({ queue, editing, onEditingChange }: { queue: Queu
                   "No queues"
                 ),
               },
+              { label: "Redrive allow policy", value: <RedriveAllowSummary queue={queue} /> },
             ]}
           />
+        </Section>
+      )}
+
+      {!editing && (
+        <Section title="Encryption">
+          <KeyValueGrid
+            columns={3}
+            items={[
+              {
+                label: "Server-side encryption",
+                value: { sqs: "Enabled (SSE-SQS)", kms: "Enabled (SSE-KMS)", none: "Disabled" }[sseMode(queue)],
+              },
+              ...(queue.kms_master_key_id
+                ? [
+                    { label: "KMS key", value: <CopyableText value={queue.kms_master_key_id} /> },
+                    { label: "Data key reuse period", value: humanSeconds(queue.kms_data_key_reuse_period_seconds ?? 300) },
+                  ]
+                : []),
+            ]}
+          />
+        </Section>
+      )}
+
+      {!editing && (
+        <Section
+          title="Access policy"
+          description={queue.policy ? "Stored with the queue and returned by GetQueueAttributes; HomeCloud authorizes requests with IAM identity policies." : undefined}
+        >
+          {queue.policy ? (
+            <pre className="bg-muted/50 max-h-80 overflow-auto rounded-md border p-3 font-mono text-xs">{prettyJson(queue.policy)}</pre>
+          ) : (
+            <p className="text-muted-foreground text-sm">No access policy.</p>
+          )}
         </Section>
       )}
 
@@ -141,8 +212,17 @@ function EditForm({ queue, onDone }: { queue: Queue; onDone: () => void }) {
       <Section title="Edit configuration" description="Changes apply to messages already in the queue as well as new ones.">
         <ConfigurationFields config={config} onChange={onChange} errors={errors} fifo={queue.fifo} />
       </Section>
+      <Section title="Encryption" description="Server-side encryption of messages at rest.">
+        <EncryptionFields config={config} onChange={onChange} errors={errors} />
+      </Section>
       <Section title="Dead-letter queue">
         <DeadLetterFields config={config} onChange={onChange} errors={errors} fifo={queue.fifo} queues={queues.data} self={queue.name} />
+      </Section>
+      <Section title="Redrive allow policy" description="Which source queues can use this queue as their dead-letter queue.">
+        <RedriveAllowFields config={config} onChange={onChange} errors={errors} fifo={queue.fifo} queues={queues.data} self={queue.name} />
+      </Section>
+      <Section title="Access policy" description="Optional resource policy document.">
+        <AccessPolicyFields config={config} onChange={onChange} errors={errors} arn={queue.arn} />
       </Section>
       <div className="flex flex-wrap justify-end gap-2">
         <Button type="button" variant="outline" onClick={onDone} disabled={pending}>
