@@ -15,13 +15,14 @@ import type { PolicyDocument } from "@/lib/types"
 import { IAM, POLICY_TEMPLATE, PolicyStatementsTable, nameError, policyJson, validatePolicy } from "./common"
 
 /**
- * InlinePolicyDialog creates, views or edits an inline policy of a user.
- * `initial` null = create.
+ * InlinePolicyDialog creates, views or edits an inline policy of a user or
+ * role (`kind`). `initial` null = create.
  */
 export function InlinePolicyDialog({
   open,
   onOpenChange,
-  user,
+  owner,
+  kind = "user",
   initial,
   existing,
   readOnly,
@@ -29,7 +30,9 @@ export function InlinePolicyDialog({
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
-  user: string
+  /** Name of the user or role the policy is embedded in. */
+  owner: string
+  kind?: "user" | "role"
   initial: { name: string; doc: PolicyDocument } | null
   existing: string[]
   readOnly?: boolean
@@ -57,7 +60,7 @@ export function InlinePolicyDialog({
     if (nErr || docErr) return
     setPending(true)
     try {
-      await api.put(`${IAM}/users/${seg(user)}/inline-policies/${seg(name)}`, JSON.parse(text))
+      await api.put(`${IAM}/${kind}s/${seg(owner)}/inline-policies/${seg(name)}`, JSON.parse(text))
       toast.success(creating ? `Inline policy ${name} created` : `Inline policy ${name} updated`)
       onSaved()
       onOpenChange(false)
@@ -83,7 +86,7 @@ export function InlinePolicyDialog({
         <DialogHeader>
           <DialogTitle>{creating ? "Create inline policy" : readOnly ? `Inline policy ${initial?.name}` : `Edit inline policy ${initial?.name}`}</DialogTitle>
           <DialogDescription>
-            An inline policy is embedded in the user <span className="text-foreground font-medium">{user}</span> and is deleted with it.
+            An inline policy is embedded in the {kind} <span className="text-foreground font-medium">{owner}</span> and is deleted with it.
           </DialogDescription>
         </DialogHeader>
         {creating && (
