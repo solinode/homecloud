@@ -57,7 +57,7 @@ func startMinIO(t *testing.T) string {
 			return
 		}
 		name := "s3awstest-" + strings.ToLower(core.RandHex(6))
-		out, err := exec.Command("docker", "run", "-d", "--name", name, "-p", "127.0.0.1::9000",
+		out, err := exec.Command("docker", "run", "-d", "--name", name, "--user", "0", "-p", "127.0.0.1::9000",
 			"-e", "MINIO_ROOT_USER="+minioUser, "-e", "MINIO_ROOT_PASSWORD="+minioPass,
 			minioImage, "server", "/data").CombinedOutput()
 		if err != nil {
