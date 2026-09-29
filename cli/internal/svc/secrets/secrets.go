@@ -1,5 +1,10 @@
-// Package secrets implements Secrets Manager: versioned secret values encrypted
-// at rest with AES-256-GCM under a per-installation master key.
+// Package secrets implements Secrets Manager: versioned secret values with
+// staging labels, encrypted at rest with AES-256-GCM under a per-installation
+// master key (or with a customer KMS key), rotation through Lambda functions and
+// scheduled deletion with a recovery window.
+//
+// The same operations are served by the native API (Routes) and the AWS
+// awsJson1.1 protocol (RegisterAWS); both call the methods in ops.go.
 package secrets
 
 import (
@@ -13,27 +18,42 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"slices"
+	"strings"
 	"sync"
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
-	"github.com/homecloudhq/homecloud/cli/internal/httpx"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
 )
 
 const (
 	cSecrets     = "secrets"
-	maxVersions  = 10
+	maxVersions  = 100 // versions without a staging label beyond this are dropped, oldest first
+	maxValue     = 65536
 	stageCurrent = "AWSCURRENT"
 	stagePrev    = "AWSPREVIOUS"
+	stagePending = "AWSPENDING"
 )
 
 type Version struct {
-	ID         string    `json:"id"`
-	Stages     []string  `json:"stages"`
-	Ciphertext string    `json:"ciphertext,omitempty"`
-	CreatedAt  time.Time `json:"created_at"`
+	ID     string   `json:"id"`
+	Stages []string `json:"stages"`
+	// Ciphertext is the sealed value; empty for the placeholder version a
+	// rotation creates before its function stores the new value.
+	Ciphertext   string     `json:"ciphertext,omitempty"`
+	Binary       bool       `json:"binary,omitempty"`  // the value is SecretBinary
+	KMSKey       string     `json:"kms_key,omitempty"` // ARN of the customer KMS key that sealed the value
+	CreatedAt    time.Time  `json:"created_at"`
+	LastAccessed *time.Time `json:"last_accessed,omitempty"`
+}
+
+// RotationRules is the rotation schedule of a secret.
+type RotationRules struct {
+	AutomaticallyAfterDays int64  `json:"AutomaticallyAfterDays,omitempty"`
+	Duration               string `json:"Duration,omitempty"`
+	ScheduleExpression     string `json:"ScheduleExpression,omitempty"`
 }
 
 type Secret struct {
@@ -41,12 +61,22 @@ type Secret struct {
 	ARN          string     `json:"arn"`
 	Description  string     `json:"description"`
 	ManagedBy    string     `json:"managed_by,omitempty"` // e.g. "rds" for generated database credentials
-	Versions     []Version  `json:"versions"`
+	KMSKeyID     string     `json:"kms_key_id,omitempty"` // customer key ARN; empty for the default key
+	Versions     []Version  `json:"versions"`             // newest first
 	CreatedAt    time.Time  `json:"created_at"`
 	UpdatedAt    time.Time  `json:"updated_at"`
 	LastAccessed *time.Time `json:"last_accessed,omitempty"`
-	DeletionDate *time.Time `json:"deletion_date,omitempty"`
+	DeletedAt    *time.Time `json:"deleted_at,omitempty"`    // when DeleteSecret was called
+	DeletionDate *time.Time `json:"deletion_date,omitempty"` // when the secret is purged
 	Tags         core.Tags  `json:"tags,omitempty"`
+	Policy       string     `json:"resource_policy,omitempty"`
+
+	RotationEnabled   bool           `json:"rotation_enabled,omitempty"`
+	RotationLambdaARN string         `json:"rotation_lambda_arn,omitempty"`
+	RotationRules     *RotationRules `json:"rotation_rules,omitempty"`
+	LastRotated       *time.Time     `json:"last_rotated,omitempty"`
+	NextRotation      *time.Time     `json:"next_rotation,omitempty"`
+	RotationError     string         `json:"rotation_error,omitempty"` // why the last rotation failed
 }
 
 func (s Secret) view() Secret {
@@ -59,25 +89,65 @@ func (s Secret) view() Secret {
 	return s
 }
 
+// version returns the index of the version with the given ID, or -1.
+func (s Secret) version(id string) int {
+	return slices.IndexFunc(s.Versions, func(v Version) bool { return v.ID == id })
+}
+
+// staged returns the index of the version carrying stage, or -1.
+func (s Secret) staged(stage string) int {
+	return slices.IndexFunc(s.Versions, func(v Version) bool { return slices.Contains(v.Stages, stage) })
+}
+
+// KeyService is the part of KMS that Secrets Manager uses for secrets
+// protected by a customer key (implemented by kms.Service).
+type KeyService interface {
+	Encrypt(ref string, plaintext []byte, ctx map[string]string) (blob, keyARN string, err error)
+	Decrypt(blob string, ctx map[string]string) ([]byte, string, error)
+	KeyARN(ref string) (string, error)
+}
+
 type Service struct {
 	env  *svc.Env
 	aead cipher.AEAD
 	mu   sync.Mutex // serialises creation
+
+	// Now is the clock (tests replace it); nil means time.Now.
+	Now func() time.Time
+	// KMS seals secrets that name a KmsKeyId; nil disables customer keys.
+	KMS KeyService
+	// Lambda runs rotation functions; nil disables rotation.
+	Lambda Invoker
+
+	rotMu    sync.Mutex
+	rotating map[string]bool
+	rotWG    sync.WaitGroup
+}
+
+func (s *Service) now() time.Time {
+	if s.Now != nil {
+		return s.Now().UTC().Truncate(time.Second)
+	}
+	return core.Now()
 }
 
 // managed rejects API changes to secrets that a service owns (RDS master
 // credentials, the S3 root keys); they change through that service.
 func managed(sec Secret) error {
 	if sec.ManagedBy != "" {
-		return core.Errf(http.StatusConflict, "ManagedSecret", "secret %q is managed by %s and cannot be changed directly", sec.Name, sec.ManagedBy)
+		return core.Errf(http.StatusBadRequest, "InvalidRequestException", "secret %q is managed by %s and cannot be changed directly", sec.Name, sec.ManagedBy)
 	}
 	return nil
 }
 
+// Authz checks the caller may perform an IAM action on a resource
+// (httpx.Ctx.Authorize or awsapi.Req.Authorize).
+type Authz func(action, resource string) error
+
 // readCheck adds the service-level permission some managed secrets need.
-func readCheck(c *httpx.Ctx, sec Secret) error {
+func readCheck(az Authz, sec Secret) error {
 	if sec.ManagedBy == "s3" { // MinIO root keys are as powerful as s3:AdministerServiceCredentials
-		return c.Authorize("s3:AdministerServiceCredentials", "*")
+		return az("s3:AdministerServiceCredentials", "*")
 	}
 	return nil
 }
@@ -95,7 +165,7 @@ func New(env *svc.Env) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Service{env: env, aead: aead}, nil
+	return &Service{env: env, aead: aead, rotating: map[string]bool{}}, nil
 }
 
 func loadKey(path string) ([]byte, error) {
@@ -116,6 +186,7 @@ func loadKey(path string) ([]byte, error) {
 	return b, os.WriteFile(path, b, 0o600)
 }
 
+// Encrypt seals plain under the installation's master key.
 func (s *Service) Encrypt(plain []byte) string {
 	nonce := make([]byte, s.aead.NonceSize())
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
@@ -133,239 +204,202 @@ func (s *Service) Decrypt(ct string) ([]byte, error) {
 	return s.aead.Open(nil, b[:n], b[n:], nil)
 }
 
+// seal encrypts a version's value with the secret's key.
+func (s *Service) seal(sec Secret, v *Version, value []byte) error {
+	v.KMSKey = ""
+	if sec.KMSKeyID == "" {
+		v.Ciphertext = s.Encrypt(value)
+		return nil
+	}
+	if s.KMS == nil {
+		return core.Errf(http.StatusBadRequest, "EncryptionFailure", "KMS is not available")
+	}
+	blob, arn, err := s.KMS.Encrypt(sec.KMSKeyID, value, map[string]string{"SecretARN": sec.ARN, "SecretVersionId": v.ID})
+	if err != nil {
+		return core.Errf(http.StatusBadRequest, "EncryptionFailure", "Secrets Manager can't encrypt the secret value with KMS key %s: %s", sec.KMSKeyID, errMessage(err))
+	}
+	v.Ciphertext, v.KMSKey = blob, arn
+	return nil
+}
+
+// open decrypts a version's value.
+func (s *Service) open(sec Secret, v Version) ([]byte, error) {
+	if v.Ciphertext == "" {
+		return nil, core.Errf(http.StatusNotFound, "ResourceNotFound", "Secrets Manager can't find the specified secret value for VersionId: %s", v.ID)
+	}
+	if v.KMSKey == "" {
+		return s.Decrypt(v.Ciphertext)
+	}
+	if s.KMS == nil {
+		return nil, core.Errf(http.StatusBadRequest, "DecryptionFailure", "KMS is not available")
+	}
+	p, _, err := s.KMS.Decrypt(v.Ciphertext, map[string]string{"SecretARN": sec.ARN, "SecretVersionId": v.ID})
+	if err != nil {
+		return nil, core.Errf(http.StatusBadRequest, "DecryptionFailure", "Secrets Manager can't decrypt the protected secret text using the provided KMS key: %s", errMessage(err))
+	}
+	return p, nil
+}
+
+func errMessage(err error) string {
+	var ce *core.Error
+	if errors.As(err, &ce) {
+		return ce.Message
+	}
+	return err.Error()
+}
+
 var nameRe = regexp.MustCompile(`^[\w/+=.@!-]{1,512}$`)
+
+func validName(name string) error {
+	if !nameRe.MatchString(name) || strings.HasPrefix(name, "arn:") {
+		return core.BadRequest("secret name %q is invalid: use 1-512 letters, digits and /_+=.@-", name)
+	}
+	return nil
+}
+
+// newARN returns an ARN for a new secret, with the random suffix AWS adds.
+func (s *Service) newARN(name string) string {
+	return s.env.ARN("secretsmanager", "secret:"+name+"-"+core.NewSecret(6))
+}
+
+// find looks a secret up by name, full ARN or partial ARN (without the suffix).
+func (s *Service) find(ref string) (Secret, error) {
+	notFound := core.Errf(http.StatusNotFound, "ResourceNotFound", "Secrets Manager can't find the specified secret.")
+	if ref == "" {
+		return Secret{}, core.BadRequest("SecretId is required")
+	}
+	if !strings.HasPrefix(ref, "arn:") {
+		return s.get(ref)
+	}
+	_, rest, ok := strings.Cut(ref, ":secret:")
+	if !ok || rest == "" {
+		return Secret{}, notFound
+	}
+	// Full ARN: name + "-" + 6 random characters.
+	if n := len(rest); n > 7 && rest[n-7] == '-' {
+		if sec, err := s.get(rest[:n-7]); err == nil && sec.ARN == core.CanonicalARN(ref) {
+			return sec, nil
+		}
+	}
+	// Partial ARN, or the ARN of a secret created before ARNs had a suffix.
+	sec, err := s.get(rest)
+	if err != nil {
+		return sec, notFound
+	}
+	if arnPrefix(sec.ARN) != arnPrefix(ref) { // another account or region
+		return Secret{}, notFound
+	}
+	return sec, nil
+}
+
+func arnPrefix(arn string) string {
+	p, _, _ := strings.Cut(core.CanonicalARN(arn), ":secret:")
+	return p
+}
+
+// get reads a secret by name.
+func (s *Service) get(name string) (Secret, error) {
+	sec, err := store.Get[Secret](s.env.Store, cSecrets, name)
+	if err != nil {
+		return sec, core.Errf(http.StatusNotFound, "ResourceNotFound", "Secrets Manager can't find the specified secret.")
+	}
+	sec.ARN = core.CanonicalARN(sec.ARN)
+	return sec, nil
+}
+
+// refARN is the ARN to authorize for a reference that may not exist.
+func (s *Service) refARN(ref string) string {
+	if strings.HasPrefix(ref, "arn:") {
+		return ref
+	}
+	return s.env.ARN("secretsmanager", "secret:"+ref)
+}
+
+// lookup finds the secret and authorizes action on it. For a missing secret it
+// authorizes against the reference so callers without access learn nothing.
+func (s *Service) lookup(az Authz, action, ref string) (Secret, error) {
+	sec, err := s.find(ref)
+	if err != nil {
+		if aerr := az(action, s.refARN(ref)); aerr != nil {
+			return sec, aerr
+		}
+		return sec, err
+	}
+	return sec, az(action, sec.ARN)
+}
+
+func deletedErr(sec Secret, what string) error {
+	return core.Errf(http.StatusBadRequest, "InvalidRequestException",
+		"You can't perform this operation on the secret because it was marked for deletion.%s", what)
+}
+
+// ---- internal API used by other services (no IAM checks) ----
 
 // Put creates the secret or adds a new current version; used by other services.
 func (s *Service) Put(name, value, description, managedBy string) (Secret, error) {
-	if !nameRe.MatchString(name) {
-		return Secret{}, core.BadRequest("secret name %q is invalid", name)
+	if err := validName(name); err != nil {
+		return Secret{}, err
 	}
-	v := Version{ID: core.RandHex(32), Stages: []string{stageCurrent}, Ciphertext: s.Encrypt([]byte(value)), CreatedAt: core.Now()}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if store.Has(s.env.Store, cSecrets, name) {
-		return store.Update(s.env.Store, cSecrets, name, func(sec *Secret) error {
+		sec, _, err := s.addVersion(name, []byte(value), false, "", nil, func(sec Secret) error {
 			if sec.DeletionDate != nil {
-				return core.Errf(http.StatusBadRequest, "InvalidRequest", "secret %q is scheduled for deletion; restore it first", name)
+				return core.Errf(http.StatusBadRequest, "InvalidRequestException", "secret %q is scheduled for deletion; restore it first", name)
 			}
-			for i := range sec.Versions {
-				switch {
-				case contains(sec.Versions[i].Stages, stageCurrent):
-					sec.Versions[i].Stages = []string{stagePrev}
-				case contains(sec.Versions[i].Stages, stagePrev):
-					sec.Versions[i].Stages = []string{}
-				}
-			}
-			sec.Versions = append([]Version{v}, sec.Versions...)
-			if len(sec.Versions) > maxVersions {
-				sec.Versions = sec.Versions[:maxVersions]
-			}
-			sec.UpdatedAt = core.Now()
 			return nil
 		})
+		return sec, err
 	}
-	sec := Secret{Name: name, ARN: s.env.ARN("secretsmanager", "secret:"+name), Description: description, ManagedBy: managedBy,
-		Versions: []Version{v}, CreatedAt: core.Now(), UpdatedAt: core.Now()}
+	sec := Secret{Name: name, ARN: s.newARN(name), Description: description, ManagedBy: managedBy, CreatedAt: s.now(), UpdatedAt: s.now()}
+	v := Version{ID: uuid(), Stages: []string{stageCurrent}, CreatedAt: s.now()}
+	if err := s.seal(sec, &v, []byte(value)); err != nil {
+		return sec, err
+	}
+	sec.Versions = []Version{v}
 	return sec, store.Put(s.env.Store, cSecrets, name, sec)
 }
 
-// Value returns the plaintext of the version with the given stage (AWSCURRENT when empty) or ID.
+// Value returns the plaintext of the version with the given stage (AWSCURRENT
+// when empty) or ID. The secret may be named by name or ARN.
 func (s *Service) Value(name, stage, versionID string) (string, Version, error) {
-	sec, err := store.Get[Secret](s.env.Store, cSecrets, name)
+	sec, err := s.find(name)
 	if err != nil {
 		return "", Version{}, core.NotFound("secret", name)
 	}
-	if sec.DeletionDate != nil {
-		return "", Version{}, core.Errf(http.StatusBadRequest, "InvalidRequest", "secret %q is scheduled for deletion", name)
-	}
-	if stage == "" && versionID == "" {
-		stage = stageCurrent
-	}
-	for _, v := range sec.Versions {
-		if (versionID != "" && v.ID == versionID) || (versionID == "" && contains(v.Stages, stage)) {
-			p, err := s.Decrypt(v.Ciphertext)
-			if err != nil {
-				return "", v, err
-			}
-			_, _ = store.Update(s.env.Store, cSecrets, name, func(sec *Secret) error { n := core.Now(); sec.LastAccessed = &n; return nil })
-			v.Ciphertext = ""
-			return string(p), v, nil
-		}
-	}
-	return "", Version{}, core.NotFound("secret version", name)
+	_, v, p, err := s.value(sec, versionID, stage)
+	return string(p), v, err
 }
 
 // Remove deletes a secret immediately (used when its owning resource is deleted).
 func (s *Service) Remove(name string) { _ = store.Delete(s.env.Store, cSecrets, name) }
 
-func contains(list []string, v string) bool {
-	for _, x := range list {
-		if x == v {
-			return true
+// PurgeExpired permanently deletes secrets whose recovery window has passed
+// and starts scheduled rotations that are due. The server calls it hourly.
+func (s *Service) PurgeExpired() {
+	s.purgeDeleted()
+	now := s.now()
+	for _, sec := range store.List[Secret](s.env.Store, cSecrets) {
+		if s.Lambda != nil && sec.DeletionDate == nil && sec.RotationEnabled && sec.NextRotation != nil && !now.Before(*sec.NextRotation) && !s.pendingRotation(sec) {
+			_, _ = s.startRotation(sec.Name, "")
 		}
 	}
-	return false
 }
 
-// PurgeExpired permanently deletes secrets whose recovery window has passed.
-func (s *Service) PurgeExpired() {
+func (s *Service) purgeDeleted() {
+	now := s.now()
 	for _, sec := range store.List[Secret](s.env.Store, cSecrets) {
-		if sec.DeletionDate != nil && time.Now().After(*sec.DeletionDate) {
+		if sec.DeletionDate != nil && !now.Before(*sec.DeletionDate) {
 			_ = store.Delete(s.env.Store, cSecrets, sec.Name)
 		}
 	}
 }
 
-func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:aws:secretsmanager:{region}:{account}:secret:{name}")
-	r.Handle("GET /api/v1/secrets", "secretsmanager:ListSecrets", s.list)
-	r.Handle("POST /api/v1/secrets", "secretsmanager:CreateSecret", s.create)
-	r.Handle("GET /api/v1/secrets/{name}", "secretsmanager:DescribeSecret", s.describe, res)
-	r.Handle("PATCH /api/v1/secrets/{name}", "secretsmanager:UpdateSecret", s.update, res)
-	r.Handle("GET /api/v1/secrets/{name}/value", "secretsmanager:GetSecretValue", s.getValue, res)
-	r.Handle("PUT /api/v1/secrets/{name}/value", "secretsmanager:PutSecretValue", s.putValue, res)
-	r.Handle("DELETE /api/v1/secrets/{name}", "secretsmanager:DeleteSecret", s.delete, res)
-	r.Handle("POST /api/v1/secrets/{name}/restore", "secretsmanager:RestoreSecret", s.restore, res)
-	r.Handle("POST /api/v1/secrets/random-password", "secretsmanager:GetRandomPassword", s.randomPassword)
-}
-
-func (s *Service) list(c *httpx.Ctx) (any, error) {
-	s.PurgeExpired()
-	out := []Secret{}
-	for _, sec := range store.List[Secret](s.env.Store, cSecrets) {
-		out = append(out, sec.view())
-	}
-	return out, nil
-}
-
-func (s *Service) create(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Name        string    `json:"name"`
-		Description string    `json:"description"`
-		Value       string    `json:"value"`
-		Tags        core.Tags `json:"tags"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if store.Has(s.env.Store, cSecrets, in.Name) {
-		return nil, core.Conflict("secret %q already exists", in.Name)
-	}
-	sec, err := s.Put(in.Name, in.Value, in.Description, "")
-	if err != nil {
-		return nil, err
-	}
-	if in.Tags != nil {
-		sec, err = store.Update(s.env.Store, cSecrets, in.Name, func(x *Secret) error { x.Tags = in.Tags; return nil })
-	}
-	return sec.view(), err
-}
-
-func (s *Service) describe(c *httpx.Ctx) (any, error) {
-	sec, err := store.Get[Secret](s.env.Store, cSecrets, c.Param("name"))
-	if err != nil {
-		return nil, core.NotFound("secret", c.Param("name"))
-	}
-	return sec.view(), nil
-}
-
-func (s *Service) update(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Description *string   `json:"description"`
-		Tags        core.Tags `json:"tags"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	sec, err := store.Update(s.env.Store, cSecrets, c.Param("name"), func(x *Secret) error {
-		if err := managed(*x); err != nil {
-			return err
-		}
-		if in.Description != nil {
-			x.Description = *in.Description
-		}
-		if in.Tags != nil {
-			x.Tags = in.Tags
-		}
-		x.UpdatedAt = core.Now()
-		return nil
-	})
-	if err == store.ErrNotFound {
-		return nil, core.NotFound("secret", c.Param("name"))
-	}
-	return sec.view(), err
-}
-
-func (s *Service) getValue(c *httpx.Ctx) (any, error) {
-	if sec, err := store.Get[Secret](s.env.Store, cSecrets, c.Param("name")); err == nil {
-		if err := readCheck(c, sec); err != nil {
-			return nil, err
-		}
-	}
-	val, v, err := s.Value(c.Param("name"), c.Query("version_stage"), c.Query("version_id"))
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"name": c.Param("name"), "value": val, "version_id": v.ID, "stages": v.Stages, "created_at": v.CreatedAt}, nil
-}
-
-func (s *Service) putValue(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Value string `json:"value"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	cur, err := store.Get[Secret](s.env.Store, cSecrets, c.Param("name"))
-	if err != nil {
-		return nil, core.NotFound("secret", c.Param("name"))
-	}
-	if err := managed(cur); err != nil {
-		return nil, err
-	}
-	sec, err := s.Put(c.Param("name"), in.Value, "", "")
-	if err != nil {
-		return nil, err
-	}
-	return sec.view(), nil
-}
-
-func (s *Service) delete(c *httpx.Ctx) (any, error) {
-	name := c.Param("name")
-	cur, err := store.Get[Secret](s.env.Store, cSecrets, name)
-	if err != nil {
-		return nil, core.NotFound("secret", name)
-	}
-	if err := managed(cur); err != nil {
-		return nil, err
-	}
-	if c.Query("force") == "true" {
-		return nil, store.Delete(s.env.Store, cSecrets, name)
-	}
-	days := c.QueryInt("recovery_days", 7)
-	if days < 1 || days > 30 {
-		return nil, core.BadRequest("recovery_days must be between 1 and 30")
-	}
-	sec, err := store.Update(s.env.Store, cSecrets, name, func(x *Secret) error {
-		d := core.Now().Add(time.Duration(days) * 24 * time.Hour)
-		x.DeletionDate = &d
-		return nil
-	})
-	return sec.view(), err
-}
-
-func (s *Service) restore(c *httpx.Ctx) (any, error) {
-	sec, err := store.Update(s.env.Store, cSecrets, c.Param("name"), func(x *Secret) error { x.DeletionDate = nil; return nil })
-	if err == store.ErrNotFound {
-		return nil, core.NotFound("secret", c.Param("name"))
-	}
-	return sec.view(), err
-}
-
-func (s *Service) randomPassword(c *httpx.Ctx) (any, error) {
-	n := c.QueryInt("length", 32)
-	if n < 8 || n > 4096 {
-		return nil, core.BadRequest("length must be between 8 and 4096")
-	}
-	return map[string]string{"password": core.NewSecret(n)}, nil
+func uuid() string {
+	b := make([]byte, 16)
+	_, _ = rand.Read(b)
+	b[6] = (b[6] & 0x0f) | 0x40
+	b[8] = (b[8] & 0x3f) | 0x80
+	h := fmt.Sprintf("%x", b)
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }

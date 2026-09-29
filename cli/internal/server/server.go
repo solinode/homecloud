@@ -178,6 +178,15 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	defer ddb.Close()
 	kmsSvc := kms.New(env, secSvc)
 	ssmSvc := ssm.New(env, kmsSvc)
+	secSvc.KMS, ssmSvc.Secrets = kmsSvc, secSvc
+	// Secrets Manager runs rotation functions through Lambda.
+	secSvc.Lambda = secrets.InvokerFunc(func(ctx context.Context, name string, payload []byte) ([]byte, string, error) {
+		r, err := lambdaSvc.Invoke(ctx, name, payload)
+		if err != nil {
+			return nil, "", err
+		}
+		return r.Payload, r.FunctionError, nil
+	})
 	ecrSvc := ecr.New(env)
 	elbSvc := elb.New(env, vpcSvc)
 	acmSvc := acm.New(env, secSvc)
@@ -242,6 +251,9 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		s.Routes(rt)
 	}
 	iamSvc.RegisterAWS()
+	secSvc.RegisterAWS()
+	kmsSvc.RegisterAWS()
+	ssmSvc.RegisterAWS()
 	awsHandler := &awsapi.Handler{Creds: iamSvc, Account: account, Audit: trailSvc.Record}
 	if len(httpx.Unscoped) > 0 {
 		return fmt.Errorf("internal error: routes without a resource ARN: %v", httpx.Unscoped)
