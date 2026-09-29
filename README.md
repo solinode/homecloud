@@ -29,6 +29,7 @@ No third parties. No vendor lock-in. No surprise billing.
 | Service | AWS equivalent | What you get |
 | --- | --- | --- |
 | **Compute** | EC2, EBS, AMIs | Instances with CPU/memory limits from `t3.nano` to `r5.large`, 10 base images (Ubuntu, Debian, Amazon Linux, Rocky, Fedora, Alpine, …), user-data scripts, start/stop/reboot/resize, persistent volumes, capture an instance as a new image, run-command, and a shell in the browser |
+| **Auto Scaling** | EC2 Auto Scaling | Groups that keep a desired number of instances across subnets, replace unhealthy ones, register them with load balancers and scale on CPU or memory targets |
 | **Shared files** | EFS | File systems that any number of instances mount at the same time |
 | **Containers** | ECS (Fargate), ECR | Versioned task definitions with secrets injected from Secrets Manager, services that keep N tasks running with rolling deployments and load-balancer registration, one-off tasks, and a private image registry you `docker push` to |
 | **Networking** | VPC, ELB | VPCs and subnets with real private IP addressing, private DNS (`ip-10-88-0-4.internal`, `mydb.rds.internal`), security groups that decide which ports are published; application load balancers with listeners, path/host routing rules, target groups and health checks |
@@ -148,7 +149,7 @@ aws --endpoint-url http://localhost:9500 s3 ls
 * ✅ **Containers:** ECS services and tasks, ECR registry, load balancers, shared file systems
 * ✅ **Workflows:** Step Functions
 * ✅ **Infrastructure as code:** CloudFormation-style stacks
-* 🔄 **Next:** VM-backed instances (QEMU/KVM), TLS certificates (ACM), DNS (Route 53), Auto Scaling, multi-node clusters
+* 🔄 **Next:** VM-backed instances (QEMU/KVM), TLS certificates (ACM), DNS (Route 53), multi-node clusters
 * 🔄 **Phase 4:** Edge compute and hardware integrations
 
 📍 **[Explore the full roadmap](https://github.com/orgs/homecloudhq/projects/1/views/1)**

@@ -207,7 +207,8 @@ func (s *Service) getRoute(c *httpx.Ctx) (any, error) { return s.get(c.Param("id
 
 func (s *Service) listTypes(c *httpx.Ctx) (any, error) { return instanceTypes, nil }
 
-type runInput struct {
+// RunInput describes instances to launch (the RunInstances request body).
+type RunInput struct {
 	Name             string    `json:"name"`
 	ImageID          string    `json:"image_id"`
 	InstanceType     string    `json:"instance_type"`
@@ -240,10 +241,15 @@ func (s *Service) image(id string) (Image, error) {
 }
 
 func (s *Service) run(c *httpx.Ctx) (any, error) {
-	var in runInput
+	var in RunInput
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	return s.Launch(in)
+}
+
+// Launch validates and starts instances; the containers boot in the background.
+func (s *Service) Launch(in RunInput) ([]Instance, error) {
 	if in.Count == 0 {
 		in.Count = 1
 	}
@@ -486,11 +492,13 @@ func (s *Service) reboot(c *httpx.Ctx) (any, error) {
 	return s.transition(c.Param("id"), []string{"running"}, func(i Instance) error { return s.env.Docker.Restart(i.ContainerID) }, "running", "running")
 }
 
-func (s *Service) terminate(c *httpx.Ctx) (any, error) {
-	id := c.Param("id")
+func (s *Service) terminate(c *httpx.Ctx) (any, error) { return s.Terminate(c.Param("id")) }
+
+// Terminate removes an instance and its container.
+func (s *Service) Terminate(id string) (Instance, error) {
 	i, err := s.get(id)
 	if err != nil {
-		return nil, err
+		return i, err
 	}
 	if i.State == "terminated" {
 		return i, nil
@@ -498,7 +506,7 @@ func (s *Service) terminate(c *httpx.Ctx) (any, error) {
 	_, _ = store.Update(s.env.Store, cInstances, id, func(x *Instance) error { x.State = "shutting-down"; return nil })
 	if i.ContainerID != "" {
 		if err := s.env.Docker.Remove(i.ContainerID); err != nil {
-			return nil, err
+			return i, err
 		}
 	}
 	s.releaseVolumes(i)
@@ -765,3 +773,6 @@ func (s *Service) PrivateIP(id string) (string, string, bool) {
 	}
 	return i.PrivateIP, i.VpcID, true
 }
+
+// Instances returns every instance with its state reconciled against Docker.
+func (s *Service) Instances() []Instance { return s.list() }

@@ -485,3 +485,51 @@ func init() {
 	login.Flags().StringVar(&clientID, "client", "", "app client ID (required)")
 	_ = login.MarkFlagRequired("client")
 }
+
+func init() {
+	a := group("autoscaling", "EC2 Auto Scaling groups")
+	a.Aliases = []string{"asg"}
+	sub(a, "ls", "List groups", cobra.NoArgs, func([]string) error {
+		return call("GET", "/api/v1/autoscaling/groups", nil, cols("NAME=name", "MIN=min_size", "DESIRED=desired_capacity", "MAX=max_size", "IMAGE=launch.image_id", "TYPE=launch.instance_type", "STATUS=status"))
+	})
+	var in struct {
+		Image, Type       string
+		Min, Max, Desired int
+		SGs, Subnets, TGs []string
+		CPUTarget         float64
+	}
+	c := sub(a, "create NAME", "Create a group", cobra.ExactArgs(1), func(args []string) error {
+		body := map[string]any{"name": args[0], "launch": map[string]any{"image_id": in.Image, "instance_type": in.Type, "security_group_ids": in.SGs},
+			"min_size": in.Min, "max_size": in.Max, "desired_capacity": in.Desired, "subnet_ids": in.Subnets, "target_groups": in.TGs}
+		if in.CPUTarget > 0 {
+			body["policies"] = []map[string]any{{"metric": "CPUUtilization", "target_value": in.CPUTarget}}
+		}
+		return call("POST", "/api/v1/autoscaling/groups", body, nil)
+	})
+	f := c.Flags()
+	f.StringVar(&in.Image, "image", "ami-nginx", "image (AMI) id")
+	f.StringVar(&in.Type, "type", "t3.micro", "instance type")
+	f.IntVar(&in.Min, "min", 1, "minimum size")
+	f.IntVar(&in.Max, "max", 3, "maximum size")
+	f.IntVar(&in.Desired, "desired", 1, "desired capacity")
+	f.StringSliceVar(&in.SGs, "sg", nil, "security group ids")
+	f.StringSliceVar(&in.Subnets, "subnet", nil, "subnets to spread instances across")
+	f.StringSliceVar(&in.TGs, "target-group", nil, "load balancer target groups to register instances with")
+	f.Float64Var(&in.CPUTarget, "cpu-target", 0, "target-tracking policy: keep average CPU near this percent")
+	var desired int
+	sc := sub(a, "scale NAME", "Set the desired capacity", cobra.ExactArgs(1), func(args []string) error {
+		return call("PATCH", "/api/v1/autoscaling/groups/"+args[0], map[string]any{"desired_capacity": desired}, nil)
+	})
+	sc.Flags().IntVar(&desired, "desired", 1, "desired capacity")
+	sub(a, "activities NAME", "Show scaling activity", cobra.ExactArgs(1), func(args []string) error {
+		var g map[string]any
+		if err := api().Do("GET", "/api/v1/autoscaling/groups/"+args[0], nil, &g); err != nil {
+			return err
+		}
+		printList(g["activities"], cols("TIME=time", "STATUS=status", "DESCRIPTION=description", "CAUSE=cause"))
+		return nil
+	})
+	sub(a, "delete NAME", "Terminate the group's instances and delete it", cobra.ExactArgs(1), func(args []string) error {
+		return call("DELETE", "/api/v1/autoscaling/groups/"+args[0], nil, nil)
+	})
+}

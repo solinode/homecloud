@@ -38,6 +38,7 @@ var types = map[string]typeSpec{
 	"HC::EFS::FileSystem":             {Create: "POST /api/v1/efs/file-systems", IDField: "id", Get: "/api/v1/efs/file-systems/{id}", Delete: "DELETE /api/v1/efs/file-systems/{id}"},
 	"HC::EC2::Instance": {Create: "POST /api/v1/ec2/instances", IDField: "id", ArrayFirst: true, Get: "/api/v1/ec2/instances/{id}", Delete: "DELETE /api/v1/ec2/instances/{id}",
 		WaitField: "state", Ready: []string{"running"}, Failed: []string{"terminated"}},
+	"HC::AutoScaling::AutoScalingGroup": {Create: "POST /api/v1/autoscaling/groups", IDField: "name", Get: "/api/v1/autoscaling/groups/{id}", Delete: "DELETE /api/v1/autoscaling/groups/{id}"},
 	"HC::RDS::DBInstance": {Create: "POST /api/v1/rds/instances", IDField: "id", Get: "/api/v1/rds/instances/{id}", Delete: "DELETE /api/v1/rds/instances/{id}",
 		WaitField: "status", Ready: []string{"available"}, Failed: []string{"failed"}},
 	"HC::ELB::TargetGroup": {Create: "POST /api/v1/elb/target-groups", IDField: "name", Get: "/api/v1/elb/target-groups/{id}", Delete: "DELETE /api/v1/elb/target-groups/{id}"},

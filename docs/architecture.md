@@ -69,6 +69,8 @@ The data directory defaults to `~/.homecloud` (override with `--data-dir` or `HO
 
 **EventBridge.** Scheduled rules use AWS `rate()` and six-field `cron()` expressions, checked every minute. Pattern rules match published events using exact values, `prefix`, `anything-but`, `exists` and `numeric` operators. Targets are Lambda functions, SQS queues and SNS topics, addressed by ARN.
 
+**Auto Scaling.** A group owns instances tagged `hc:autoscaling:groupName`. Every 10 s it terminates members that stopped (and launches replacements), launches or terminates (newest first) to reach the desired capacity, spreading launches across its subnets, and registers running members with its target groups. Target-tracking policies compare the group's average `HC/EC2` CPU or memory utilization over the last three minutes with the target, scale out proportionally and scale in one instance at a time, within min/max and after a cooldown.
+
 **EFS.** A file system is a named Docker volume that any number of instances mount at launch (`file_systems` in RunInstances), so they share files like an NFS mount.
 
 **ECR.** HomeCloud runs a Docker Distribution registry (`homecloud-ecr`, loopback port 5500 by default) and manages repositories, tags and deletions through its API. Images pushed with `docker push localhost:5500/...` can be used by ECS task definitions and registered as AMIs.
