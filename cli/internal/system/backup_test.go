@@ -3,8 +3,8 @@ package system
 import (
 	"archive/tar"
 	"bytes"
-	"io"
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"testing"
