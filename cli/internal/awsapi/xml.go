@@ -178,9 +178,13 @@ func (q *Req) writeQueryError(e *Error) {
 		if e.Status >= 500 {
 			typ = "Receiver"
 		}
+		code := e.Code
+		if e.QueryCode != "" {
+			code = e.QueryCode // services that also speak awsJson keep their legacy awsQuery codes
+		}
 		fmt.Fprintf(&b, `<ErrorResponse xmlns="%s"><Error>`, q.Svc.XMLNS)
 		WriteXML(&b, "Type", typ)
-		WriteXML(&b, "Code", e.Code)
+		WriteXML(&b, "Code", code)
 		WriteXML(&b, "Message", e.Message)
 		b.WriteString("</Error>")
 		WriteXML(&b, "RequestId", q.RequestID)
