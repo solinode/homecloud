@@ -167,6 +167,9 @@ type Error struct {
 	QueryCode string
 	// Resource is echoed in S3 errors.
 	Resource string
+	// Fields are extra members of an awsJson error body (e.g. DynamoDB's
+	// CancellationReasons or the Item of a failed condition check).
+	Fields map[string]any
 }
 
 func (e *Error) Error() string { return e.Code + ": " + e.Message }
@@ -293,6 +296,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 		q.Region = sig.Region
 		q.Svc = lookup(sig.Service)
+		if target != "" {
+			// Services sharing a signing name (DynamoDB and DynamoDB Streams both
+			// sign as "dynamodb") are told apart by their target prefix.
+			prefix, _, _ := strings.Cut(target, ".")
+			if ts := lookupTarget(prefix); ts != nil {
+				q.Svc = ts
+			}
+		}
 		if q.Svc == nil {
 			q.fail(Errorf(http.StatusBadRequest, "UnknownService", "HomeCloud does not implement the AWS %q API yet", sig.Service))
 			return
@@ -461,7 +472,11 @@ func (q *Req) writeJSONError(e *Error) {
 	}
 	q.W.Header().Set("Content-Type", "application/x-amz-json-"+ver)
 	q.W.WriteHeader(e.Status)
-	_ = json.NewEncoder(q.W).Encode(map[string]string{"__type": e.Code, "message": e.Message})
+	body := map[string]any{"__type": e.Code, "message": e.Message}
+	for k, v := range e.Fields {
+		body[k] = v
+	}
+	_ = json.NewEncoder(q.W).Encode(body)
 }
 
 func (q *Req) writeRESTJSONError(e *Error) {
