@@ -79,6 +79,8 @@ The data directory defaults to `~/.homecloud` (override with `--data-dir` or `HO
 
 **KMS & Parameter Store.** KMS keys hold versioned AES-256 key material encrypted under the master key; ciphertext blobs embed the key ID and version, so rotated keys still decrypt old data, and the encryption context is bound as AEAD associated data. SecureString parameters are encrypted with a service-managed key (`alias/hc/ssm`) or a customer key, bound to the parameter's ARN.
 
+**Step Functions.** Definitions are Amazon States Language JSON, validated on create. Each execution runs in the server as an interpreter over the state graph with InputPath → Parameters → task → ResultSelector → ResultPath → OutputPath processing, `States.Format`/`JsonToString`/`StringToJson`/`Array` intrinsics, the `$$` context object, retries with exponential backoff, catchers, concurrent Parallel branches and Map iterations. Task resources are Lambda functions (direct ARN or `arn:hc:states:::lambda:invoke`), `arn:hc:states:::sqs:sendMessage` and `arn:hc:states:::sns:publish`. Every transition is recorded in the execution history (`sfn/<execution>.json`); executions interrupted by a restart are marked ABORTED. State machines can be EventBridge targets.
+
 **CloudWatch.** A collector samples every managed container every 30 s (CPU, memory, network, disk I/O, processes) into namespaces `HC/EC2`, `HC/RDS`, `HC/ElastiCache`; Lambda publishes `HC/Lambda` invocations, errors and duration. Alarms evaluate on each cycle and notify SNS topics or webhooks on state changes.
 
 ## Limits and differences from AWS

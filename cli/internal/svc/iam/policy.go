@@ -143,4 +143,5 @@ var builtinPolicies = []struct {
 	{"ElasticLoadBalancingFullAccess", "Full access to load balancers and target groups.", doc("Allow", "elasticloadbalancing:*")},
 	{"EFSFullAccess", "Full access to shared file systems.", doc("Allow", "elasticfilesystem:*")},
 	{"APIGatewayFullAccess", "Full access to HTTP APIs.", doc("Allow", "apigateway:*")},
+	{"StepFunctionsFullAccess", "Full access to state machines and executions.", doc("Allow", "states:*")},
 }

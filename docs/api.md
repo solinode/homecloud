@@ -287,6 +287,21 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/events/events` | `events:PutEvents` |
 | POST | `/api/v1/events/test-pattern` | `events:TestEventPattern` |
 
+## Step Functions
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/sfn/state-machines` | `states:ListStateMachines` |
+| POST | `/api/v1/sfn/state-machines` | `states:CreateStateMachine` |
+| GET | `/api/v1/sfn/state-machines/{name}` | `states:DescribeStateMachine` |
+| PUT | `/api/v1/sfn/state-machines/{name}` | `states:UpdateStateMachine` |
+| DELETE | `/api/v1/sfn/state-machines/{name}` | `states:DeleteStateMachine` |
+| POST | `/api/v1/sfn/state-machines/{name}/executions` | `states:StartExecution` |
+| GET | `/api/v1/sfn/state-machines/{name}/executions` | `states:ListExecutions` |
+| GET | `/api/v1/sfn/executions/{id}` | `states:DescribeExecution` |
+| POST | `/api/v1/sfn/executions/{id}/stop` | `states:StopExecution` |
+| POST | `/api/v1/sfn/validate` | `states:ValidateStateMachineDefinition` |
+
 ## Secrets Manager
 
 | Method | Path | IAM action |
