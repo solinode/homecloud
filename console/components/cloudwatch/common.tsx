@@ -4,7 +4,7 @@ import { useMemo } from "react"
 
 import { StatusBadge } from "@/components/console/status-badge"
 import { useApi } from "@/lib/hooks"
-import type { Alarm, AlarmState, ComparisonOperator, Instance, Statistic } from "@/lib/types"
+import type { Alarm, AlarmState, ComparisonOperator, Instance, Statistic, TreatMissingData } from "@/lib/types"
 
 export const STATISTICS: Statistic[] = ["Average", "Sum", "Minimum", "Maximum", "SampleCount"]
 export const PERIODS: { value: number; label: string }[] = [
@@ -31,10 +31,20 @@ export function periodLabel(seconds: number): string {
   return `${seconds} seconds`
 }
 
+export const TREAT_MISSING: { value: TreatMissingData; label: string }[] = [
+  { value: "missing", label: "Treat missing data as missing" },
+  { value: "notBreaching", label: "Treat missing data as good (not breaching threshold)" },
+  { value: "breaching", label: "Treat missing data as bad (breaching threshold)" },
+  { value: "ignore", label: "Ignore (maintain the alarm state)" },
+]
+
 /** alarmCondition renders "CPUUtilization > 80 for 3 datapoints within 3 minutes". */
-export function alarmCondition(a: Pick<Alarm, "metric" | "comparison_operator" | "threshold" | "evaluation_periods" | "period" | "statistic">): string {
+export function alarmCondition(
+  a: Pick<Alarm, "metric" | "comparison_operator" | "threshold" | "evaluation_periods" | "period" | "statistic"> & { datapoints_to_alarm?: number },
+): string {
   const within = periodLabel(a.period * a.evaluation_periods)
-  const dp = a.evaluation_periods === 1 ? "1 datapoint" : `${a.evaluation_periods} datapoints`
+  const m = a.datapoints_to_alarm || a.evaluation_periods
+  const dp = m === a.evaluation_periods ? (m === 1 ? "1 datapoint" : `${m} datapoints`) : `${m} out of ${a.evaluation_periods} datapoints`
   const stat = a.statistic && a.statistic !== "Average" ? ` (${a.statistic})` : ""
   return `${a.metric}${stat} ${operatorSymbol(a.comparison_operator)} ${a.threshold} for ${dp} within ${within}`
 }

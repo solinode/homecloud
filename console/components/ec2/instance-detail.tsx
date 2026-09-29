@@ -28,6 +28,7 @@ import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks
 import { ASG_GROUP_TAG } from "@/lib/types"
 import type { Instance } from "@/lib/types"
 import { INSTANCES_PATH, PublicPorts, instanceLabel, isTransitional, pollInterval, useInstanceActions } from "./instance-actions"
+import { instanceProfileHref } from "@/components/iam/common"
 import { InstanceConsoleOutput } from "./instance-console-output"
 import { InstanceMonitoring } from "./instance-monitoring"
 import { InstanceRunCommand } from "./instance-run-command"
@@ -301,6 +302,33 @@ function DetailsTab({ inst }: { inst: Instance }) {
                 />
               ),
             },
+          ]}
+        />
+      </Section>
+
+      <Section title="Security">
+        <KeyValueGrid
+          columns={3}
+          items={[
+            { label: "Key pair assigned at launch", value: inst.key_name ?? "" },
+            {
+              label: "IAM instance profile",
+              value: inst.iam_profile_arn ? (
+                <Link href={instanceProfileHref(inst.iam_profile_arn.split("/").pop() ?? "")} className="text-primary hover:underline">
+                  {inst.iam_profile_arn.split("/").pop()}
+                </Link>
+              ) : (
+                ""
+              ),
+            },
+            { label: "Instance profile ARN", value: inst.iam_profile_arn ? <CopyableText value={inst.iam_profile_arn} /> : "" },
+            {
+              label: "IMDSv2",
+              value: inst.metadata_options?.http_endpoint === "disabled" ? "-" : inst.metadata_options?.http_tokens === "required" ? "Required" : "Optional",
+            },
+            { label: "Metadata accessible", value: inst.metadata_options?.http_endpoint === "disabled" ? "Disabled" : "Enabled" },
+            { label: "Metadata response hop limit", value: String(inst.metadata_options?.hop_limit ?? 1) },
+            { label: "Allow tags in metadata", value: inst.metadata_options?.instance_metadata_tags === "enabled" ? "Enabled" : "Disabled" },
           ]}
         />
       </Section>

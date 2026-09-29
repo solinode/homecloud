@@ -17,9 +17,11 @@ import { JsonEditor, jsonError } from "@/components/console/json-editor"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { TagList, TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { RolePicker } from "@/components/iam/role-picker"
 import { ApiError, api, errorMessage } from "@/lib/api"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
-import type { AslMachine, LambdaFunction, StateMachine, StateMachineDetail, StateMachineSummary, ValidateDefinitionResult } from "@/lib/types"
+import type { AslMachine, CreateStateMachineInput, LambdaFunction, StateMachineType, StateMachine, StateMachineDetail, StateMachineSummary, ValidateDefinitionResult } from "@/lib/types"
 import { MACHINES_PATH, SFN_PATH, lambdaSample, machineHref, machinePath, nameError, parallelSample, sampleDefinition } from "./common"
 import { StateMachineGraph } from "./graph"
 
@@ -40,6 +42,8 @@ export function StateMachineEditor() {
   const [name, setName] = useState("")
   const [text, setText] = useState(() => fmt(sampleDefinition()))
   const [tags, setTags] = useState<TagRow[]>([])
+  const [type, setType] = useState<StateMachineType>("STANDARD")
+  const [role, setRole] = useState("")
   const [submitted, setSubmitted] = useState(false)
   const [pending, setPending] = useState(false)
   const loaded = useRef(false)
@@ -50,6 +54,8 @@ export function StateMachineEditor() {
       loaded.current = true
       setName(m.name)
       setText(fmt(m.definition))
+      setType(m.type || "STANDARD")
+      setRole(m.role_arn ?? "")
     }
   }, [existing.data])
 
@@ -116,10 +122,10 @@ export function StateMachineEditor() {
     try {
       const definition = JSON.parse(text) as AslMachine
       if (editing) {
-        await api.put<StateMachine>(machinePath(editName), { definition })
+        await api.put<StateMachine>(machinePath(editName), { definition, role_arn: role })
         toast.success(`Saved state machine ${editName}`)
       } else {
-        await api.post<StateMachine>(MACHINES_PATH, { name, definition, tags: rowsToTags(tags) })
+        await api.post<StateMachine>(MACHINES_PATH, { name, definition, type, role_arn: role || undefined, tags: rowsToTags(tags) } satisfies CreateStateMachineInput)
         toast.success(`Created state machine ${name}`)
       }
       await revalidate(SFN_PATH)
@@ -201,8 +207,35 @@ export function StateMachineEditor() {
                 className="max-w-md font-mono text-[13px]"
               />
             </Field>
-            <Field label="Type" help="HomeCloud runs standard workflows: every execution keeps a full event history.">
-              <Input value="Standard" disabled className="max-w-md" />
+            <Field
+              label="Type"
+              help={
+                editing
+                  ? "The type cannot be changed after creation."
+                  : type === "STANDARD"
+                    ? "Durable, auditable workflows: every execution keeps a full event history."
+                    : "High-volume, short-lived workflows (up to 5 minutes)."
+              }
+            >
+              <RadioGroup value={type} onValueChange={(v) => setType(v as StateMachineType)} disabled={editing} className="flex flex-wrap gap-4" aria-label="Type">
+                {(["STANDARD", "EXPRESS"] as const).map((t) => (
+                  <label key={t} className="flex items-center gap-2 text-sm">
+                    <RadioGroupItem value={t} />
+                    {t === "STANDARD" ? "Standard" : "Express"}
+                  </label>
+                ))}
+              </RadioGroup>
+            </Field>
+            <Field
+              label="Execution role"
+              htmlFor="sm-role"
+              optional
+              help="Executions assume this role to call Lambda, SQS, SNS and other services. Without one, executions act with the permissions of whoever created the state machine."
+              className="lg:col-span-2"
+            >
+              <div className="max-w-xl">
+                <RolePicker id="sm-role" value={role} onChange={(v) => setRole(v)} service="states.amazonaws.com" allowNone placeholder="No role" />
+              </div>
             </Field>
             {editing ? (
               existing.data?.state_machine.tags && Object.keys(existing.data.state_machine.tags).length > 0 ? (

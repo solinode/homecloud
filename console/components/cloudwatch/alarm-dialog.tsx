@@ -14,10 +14,10 @@ import { MetricChart } from "@/components/console/metric-chart"
 import { TagsEditor, rowsToTags, tagsToRows, type TagRow } from "@/components/console/tags-editor"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
-import type { Alarm, ComparisonOperator, MetricSeries, Statistic } from "@/lib/types"
+import type { Alarm, ComparisonOperator, MetricSeries, Statistic, TreatMissingData } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { alarmCondition, dimsText, friendlyDims, OPERATORS, PERIODS, STATISTICS, useInstanceNames } from "./common"
+import { alarmCondition, dimsText, friendlyDims, OPERATORS, PERIODS, STATISTICS, TREAT_MISSING, useInstanceNames } from "./common"
 
 const ACTION_RE = /^(https?:\/\/\S+|arn:\S+)$/
 
@@ -87,6 +87,8 @@ export function AlarmDialog({
   const [operator, setOperator] = useState<ComparisonOperator>("GreaterThanThreshold")
   const [threshold, setThreshold] = useState("80")
   const [evalPeriods, setEvalPeriods] = useState("3")
+  const [dpToAlarm, setDpToAlarm] = useState("3")
+  const [missing, setMissing] = useState<TreatMissingData>("missing")
   const [alarmActions, setAlarmActions] = useState<string[]>([])
   const [okActions, setOkActions] = useState<string[]>([])
   const [name, setName] = useState("")
@@ -111,6 +113,8 @@ export function AlarmDialog({
       setOperator(alarm.comparison_operator)
       setThreshold(String(alarm.threshold))
       setEvalPeriods(String(alarm.evaluation_periods))
+      setDpToAlarm(String(alarm.datapoints_to_alarm || alarm.evaluation_periods))
+      setMissing(alarm.treat_missing_data || "missing")
       setAlarmActions(alarm.alarm_actions ?? [])
       setOkActions(alarm.ok_actions ?? [])
       setName(alarm.name)
@@ -125,6 +129,8 @@ export function AlarmDialog({
       setOperator("GreaterThanThreshold")
       setThreshold("80")
       setEvalPeriods("3")
+      setDpToAlarm("3")
+      setMissing("missing")
       setAlarmActions([])
       setOkActions([])
       setName("")
@@ -166,16 +172,18 @@ export function AlarmDialog({
 
   const thresholdNum = Number(threshold)
   const evalNum = Number(evalPeriods)
+  const dpNum = Number(dpToAlarm)
   const errors = {
     namespace: !namespace.trim() ? "Namespace is required" : null,
     metric: !metric.trim() ? "Metric name is required" : null,
     dims: mode === "pick" && dimSets.length > 0 && !picked ? "Select a dimension set" : null,
     threshold: threshold.trim() === "" || !Number.isFinite(thresholdNum) ? "Enter a number" : null,
     eval: !Number.isInteger(evalNum) || evalNum < 1 || evalNum > 100 ? "Between 1 and 100" : null,
+    dp: !Number.isInteger(dpNum) || dpNum < 1 ? "At least 1" : Number.isInteger(evalNum) && dpNum > evalNum ? "Cannot exceed the evaluation periods" : null,
     name: !name.trim() ? "Name is required" : name.includes("/") ? "Name cannot contain /" : name.length > 255 ? "At most 255 characters" : !editing && existing?.some((a) => a.name === name.trim()) ? "An alarm with this name already exists" : null,
     actions: [...alarmActions, ...okActions].some((a) => actionError(a)),
   }
-  const valid = !errors.namespace && !errors.metric && !errors.dims && !errors.threshold && !errors.eval && !errors.name && !errors.actions
+  const valid = !errors.namespace && !errors.metric && !errors.dims && !errors.threshold && !errors.eval && !errors.dp && !errors.name && !errors.actions
 
   const previewRange = Math.min(1440, Math.max(60, (period * Math.max(1, evalNum || 1) * 4) / 60))
 
@@ -185,6 +193,16 @@ export function AlarmDialog({
     if (!valid) return
     setPending(true)
     const body = {
+      // keep settings this form does not edit (set through the CloudWatch API)
+      ...(alarm
+        ? {
+            unit: alarm.unit,
+            extended_statistic: alarm.extended_statistic,
+            metrics: alarm.metrics,
+            actions_enabled: alarm.actions_enabled,
+            insufficient_data_actions: alarm.insufficient_data_actions,
+          }
+        : {}),
       description: description.trim(),
       namespace: namespace.trim(),
       metric: metric.trim(),
@@ -192,6 +210,8 @@ export function AlarmDialog({
       statistic,
       period,
       evaluation_periods: evalNum,
+      datapoints_to_alarm: dpNum,
+      treat_missing_data: missing,
       threshold: thresholdNum,
       comparison_operator: operator,
       alarm_actions: alarmActions.map((a) => a.trim()),
@@ -381,11 +401,29 @@ export function AlarmDialog({
               </div>
               <Field
                 label="Datapoints to alarm"
-                htmlFor="alarm-eval"
-                error={t ? errors.eval : undefined}
-                help="The alarm goes to ALARM when this many consecutive periods breach the threshold."
+                htmlFor="alarm-dp"
+                error={t ? errors.dp || errors.eval : undefined}
+                help="The alarm goes to ALARM when M of the last N evaluation periods breach the threshold."
               >
-                <Input id="alarm-eval" inputMode="numeric" className="w-32" value={evalPeriods} onChange={(e) => setEvalPeriods(e.target.value.replace(/[^\d]/g, ""))} />
+                <div className="flex items-center gap-2 text-sm">
+                  <Input id="alarm-dp" inputMode="numeric" className="w-20" aria-label="Datapoints to alarm (M)" value={dpToAlarm} onChange={(e) => setDpToAlarm(e.target.value.replace(/[^\d]/g, ""))} aria-invalid={!!(t && errors.dp)} />
+                  <span className="text-muted-foreground">out of</span>
+                  <Input id="alarm-eval" inputMode="numeric" className="w-20" aria-label="Evaluation periods (N)" value={evalPeriods} onChange={(e) => setEvalPeriods(e.target.value.replace(/[^\d]/g, ""))} aria-invalid={!!(t && errors.eval)} />
+                </div>
+              </Field>
+              <Field label="Missing data treatment" htmlFor="alarm-missing" help="How to evaluate periods with no datapoints.">
+                <Select value={missing} onValueChange={(v) => setMissing(v as TreatMissingData)}>
+                  <SelectTrigger id="alarm-missing" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {TREAT_MISSING.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </Field>
             </div>
 
@@ -404,10 +442,10 @@ export function AlarmDialog({
                 ) : (
                   <div className="text-muted-foreground flex h-[200px] items-center justify-center rounded-md border border-dashed text-sm">Select a metric to preview it</div>
                 )}
-                {!errors.threshold && !errors.eval && metric && (
+                {!errors.threshold && !errors.eval && !errors.dp && metric && (
                   <p className="text-muted-foreground text-xs">
                     <span className="text-foreground font-medium">Condition:</span>{" "}
-                    {alarmCondition({ metric, comparison_operator: operator, threshold: thresholdNum, evaluation_periods: evalNum, period, statistic })}
+                    {alarmCondition({ metric, comparison_operator: operator, threshold: thresholdNum, evaluation_periods: evalNum, datapoints_to_alarm: dpNum, period, statistic })}
                     <span className="text-destructive"> (dashed line)</span>
                   </p>
                 )}

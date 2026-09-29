@@ -22,7 +22,7 @@ import { Section } from "@/components/console/section"
 import { ApiError, api, errorMessage, getSession, seg } from "@/lib/api"
 import { formatDate } from "@/lib/format"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
-import type { EventRule, LambdaFunction, PutRuleInput, Queue, StateMachineSummary, Topic } from "@/lib/types"
+import type { EventRule, LambdaFunction, PutRuleInput, Queue, RuleTarget, StateMachineSummary, Topic } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import {
   CRON_FIELDS,
@@ -45,12 +45,68 @@ import {
 
 type RuleType = "schedule" | "pattern"
 
+type InputMode = "event" | "constant" | "path" | "transformer"
+
 interface TargetRow {
   id?: string
   kind: TargetKind
   arn: string
+  mode: InputMode
   input: string
+  inputPath: string
+  pathsMap: string
+  template: string
+  retries: string
+  maxAge: string
+  dlq: string
+  /** fields this form does not edit, kept on save */
+  extra?: Pick<RuleTarget, "role_arn" | "message_group_id">
 }
+
+const newTarget = (): TargetRow => ({ kind: "lambda", arn: "", mode: "event", input: "", inputPath: "", pathsMap: "", template: "", retries: "", maxAge: "", dlq: "" })
+
+function rowOf(t: RuleTarget): TargetRow {
+  const it = t.input_transformer
+  return {
+    id: t.id,
+    kind: targetKind(t.arn) ?? "lambda",
+    arn: t.arn,
+    mode: it ? "transformer" : t.input_path ? "path" : t.input ? "constant" : "event",
+    input: t.input ?? "",
+    inputPath: t.input_path ?? "",
+    pathsMap: it?.input_paths_map && Object.keys(it.input_paths_map).length ? JSON.stringify(it.input_paths_map, null, 2) : "",
+    template: it?.input_template ?? "",
+    retries: t.retry_policy?.maximum_retry_attempts != null ? String(t.retry_policy.maximum_retry_attempts) : "",
+    maxAge: t.retry_policy?.maximum_event_age_in_seconds != null ? String(t.retry_policy.maximum_event_age_in_seconds) : "",
+    dlq: t.dead_letter_arn ?? "",
+    extra: { role_arn: t.role_arn, message_group_id: t.message_group_id },
+  }
+}
+
+function targetOf(t: TargetRow): NonNullable<PutRuleInput["targets"]>[number] {
+  const retry =
+    t.retries.trim() || t.maxAge.trim()
+      ? {
+          maximum_retry_attempts: t.retries.trim() ? Number(t.retries) : undefined,
+          maximum_event_age_in_seconds: t.maxAge.trim() ? Number(t.maxAge) : undefined,
+        }
+      : undefined
+  return {
+    ...t.extra,
+    id: t.id,
+    arn: t.arn,
+    input: t.mode === "constant" ? t.input.trim() : undefined,
+    input_path: t.mode === "path" ? t.inputPath.trim() : undefined,
+    input_transformer:
+      t.mode === "transformer"
+        ? { input_paths_map: t.pathsMap.trim() ? (JSON.parse(t.pathsMap) as Record<string, string>) : undefined, input_template: t.template }
+        : undefined,
+    retry_policy: retry,
+    dead_letter_arn: t.dlq || undefined,
+  }
+}
+
+const PATH_RE = /^\$(\.[A-Za-z0-9_\-]+|\[\d+\])*$/
 
 const PRESETS: [string, string][] = [
   ["Every minute", "rate(1 minute)"],
@@ -133,7 +189,7 @@ export function RuleWizard() {
   const [sample, setSample] = useState("")
   const [testResult, setTestResult] = useState<boolean | null>(null)
   const [testing, setTesting] = useState(false)
-  const [targets, setTargets] = useState<TargetRow[]>([{ kind: "lambda", arn: "", input: "" }])
+  const [targets, setTargets] = useState<TargetRow[]>([newTarget()])
   const [enabled, setEnabled] = useState(true)
   const [loaded, setLoaded] = useState(false)
   const [submitted, setSubmitted] = useState(false)
@@ -156,7 +212,7 @@ export function RuleWizard() {
       setType("pattern")
       setPattern(JSON.stringify(r.event_pattern ?? {}, null, 2))
     }
-    setTargets((r.targets ?? []).map((t) => ({ id: t.id, kind: targetKind(t.arn) ?? "lambda", arn: t.arn, input: t.input ?? "" })))
+    setTargets((r.targets ?? []).map(rowOf))
     setEnabled(r.state !== "DISABLED")
     setLoaded(true)
   }, [existing.data, loaded])
@@ -195,10 +251,25 @@ export function RuleWizard() {
       if (!t.arn) e[`t${i}arn`] = `Choose a ${TARGET_KINDS.find((k) => k.kind === t.kind)?.noun ?? "target"}`
       else if (seen.has(t.arn)) e[`t${i}arn`] = "This target is already added"
       seen.add(t.arn)
-      if (t.input.trim()) {
-        const je = jsonError(t.input)
-        if (je) e[`t${i}input`] = `Invalid JSON: ${je}`
+      if (t.mode === "constant") {
+        const je = t.input.trim() ? jsonError(t.input) : "Enter the JSON to send"
+        if (je) e[`t${i}input`] = t.input.trim() ? `Invalid JSON: ${je}` : je
+      } else if (t.mode === "path") {
+        if (!PATH_RE.test(t.inputPath.trim())) e[`t${i}input`] = "Enter a JSONPath such as $.detail"
+      } else if (t.mode === "transformer") {
+        if (t.pathsMap.trim()) {
+          const je = jsonError(t.pathsMap)
+          const m = je ? null : (JSON.parse(t.pathsMap) as unknown)
+          if (je) e[`t${i}paths`] = `Invalid JSON: ${je}`
+          else if (!m || typeof m !== "object" || Array.isArray(m) || Object.values(m).some((v) => typeof v !== "string" || !PATH_RE.test(v)))
+            e[`t${i}paths`] = 'Must be an object of JSONPaths, e.g. {"id": "$.detail.id"}'
+        }
+        if (!t.template.trim()) e[`t${i}template`] = "The input template is required"
       }
+      const r = Number(t.retries)
+      if (t.retries.trim() && (!Number.isInteger(r) || r < 0 || r > 185)) e[`t${i}retries`] = "0 to 185"
+      const a = Number(t.maxAge)
+      if (t.maxAge.trim() && (!Number.isInteger(a) || a < 60 || a > 86400)) e[`t${i}age`] = "60 to 86400 seconds"
     })
     return e
   }, [editing, name, allRules.data, description, type, schedule, pattern, targets])
@@ -243,7 +314,7 @@ export function RuleWizard() {
       schedule_expression: type === "schedule" ? schedule.trim() : undefined,
       event_pattern: type === "pattern" ? (JSON.parse(pattern) as Record<string, unknown>) : undefined,
       state: enabled ? "ENABLED" : "DISABLED",
-      targets: targets.map((t) => ({ id: t.id, arn: t.arn, input: t.input.trim() || undefined })),
+      targets: targets.map(targetOf),
     }
     setPending(true)
     try {
@@ -510,7 +581,7 @@ export function RuleWizard() {
           )}
 
           {/* ---- Targets ---- */}
-          <Section title="Targets" description="Each target receives the event JSON, or the constant input when one is set.">
+          <Section title="Targets" description="Each target receives the event JSON, part of it, a constant, or a transformed template. Failed deliveries are retried and can go to a dead-letter queue.">
             <div className="flex flex-col gap-3">
               {targets.length === 0 && (
                 <p className="text-muted-foreground text-sm">No targets: the rule will fire and count invocations but deliver nothing.</p>
@@ -523,8 +594,15 @@ export function RuleWizard() {
                   options={targetOpts[t.kind]}
                   onChange={(p) => setTarget(i, p)}
                   onRemove={() => setTargets(targets.filter((_, j) => j !== i))}
-                  arnError={err(`t${i}arn`)}
-                  inputError={err(`t${i}input`) ?? (t.input.trim() ? errors[`t${i}input`] : undefined)}
+                  queues={targetOpts.sqs}
+                  errors={{
+                    arn: err(`t${i}arn`),
+                    input: err(`t${i}input`),
+                    paths: err(`t${i}paths`) ?? errors[`t${i}paths`],
+                    template: err(`t${i}template`),
+                    retries: err(`t${i}retries`) ?? errors[`t${i}retries`],
+                    age: err(`t${i}age`) ?? errors[`t${i}age`],
+                  }}
                 />
               ))}
               <div className="flex flex-wrap items-center gap-3">
@@ -533,7 +611,7 @@ export function RuleWizard() {
                   variant="outline"
                   size="sm"
                   disabled={targets.length >= 5}
-                  onClick={() => setTargets([...targets, { kind: "lambda", arn: "", input: "" }])}
+                  onClick={() => setTargets([...targets, newTarget()])}
                 >
                   <Plus /> Add target
                 </Button>
@@ -604,29 +682,40 @@ export function RuleWizard() {
   )
 }
 
+const INPUT_MODES: { value: InputMode; label: string; help: string }[] = [
+  { value: "event", label: "Matched event", help: "The whole event JSON." },
+  { value: "path", label: "Part of the matched event", help: "The value at a JSONPath of the event." },
+  { value: "constant", label: "Constant (JSON text)", help: "Fixed JSON instead of the event." },
+  { value: "transformer", label: "Input transformer", help: "Extract values into variables, then fill a template." },
+]
+
+const NO_DLQ = "__none__"
+
 function TargetEditor({
   index,
   row,
   options,
+  queues,
   onChange,
   onRemove,
-  arnError,
-  inputError,
+  errors,
 }: {
   index: number
   row: TargetRow
   options: { data?: TargetOption[]; error?: unknown }
+  queues: { data?: TargetOption[]; error?: unknown }
   onChange: (p: Partial<TargetRow>) => void
   onRemove: () => void
-  arnError?: string
-  inputError?: string
+  errors: Partial<Record<"arn" | "input" | "paths" | "template" | "retries" | "age", string>>
 }) {
-  const [toggled, setShowInput] = useState(!!row.input)
-  // Rows are keyed by position, so also show the editor whenever the row has input.
-  const showInput = toggled || !!row.input
+  const [advanced, setAdvanced] = useState(false)
+  // Rows are keyed by position, so also show the settings whenever the row has some.
+  const showAdvanced = advanced || !!(row.retries || row.maxAge || row.dlq)
   const kind = TARGET_KINDS.find((k) => k.kind === row.kind)!
   const list = options.data ?? []
   const missing = row.arn && options.data && !list.some((o) => o.arn === row.arn)
+  const dlqs = queues.data ?? []
+  const mode = INPUT_MODES.find((m) => m.value === row.mode)!
 
   return (
     <div className="flex flex-col gap-3 rounded-md border p-3">
@@ -651,7 +740,7 @@ function TargetEditor({
             </SelectContent>
           </Select>
         </Field>
-        <Field label={kind.label} error={arnError ?? (options.error ? errorMessage(options.error) : undefined)} help={row.arn ? <span className="font-mono break-all">{row.arn}</span> : undefined}>
+        <Field label={kind.label} error={errors.arn ?? (options.error ? errorMessage(options.error) : undefined)} help={row.arn ? <span className="font-mono break-all">{row.arn}</span> : undefined}>
           <Select value={row.arn} onValueChange={(v) => onChange({ arn: v })} disabled={!options.data}>
             <SelectTrigger size="sm" className="w-full" aria-label={kind.label}>
               <SelectValue placeholder={!options.data ? "Loading..." : list.length ? `Choose a ${kind.noun}` : `No ${kind.noun}s found`} />
@@ -671,28 +760,83 @@ function TargetEditor({
           </Select>
         </Field>
       </div>
-      <label className="flex w-fit items-center gap-2 text-sm">
-        <Switch
-          checked={showInput}
-          onCheckedChange={(v) => {
-            setShowInput(v)
-            if (!v) onChange({ input: "" })
-          }}
-          aria-label="Constant input"
-        />
-        Send constant input (JSON) instead of the event
-      </label>
-      {showInput && (
-        <Field label="Constant input (JSON)" error={inputError}>
-          <Textarea
-            rows={3}
-            value={row.input}
-            onChange={(e) => onChange({ input: e.target.value })}
-            placeholder='{"task": "cleanup"}'
-            className="font-mono text-[13px]"
-            spellCheck={false}
-          />
+      <Field label="Configure target input" help={mode.help}>
+        <Select value={row.mode} onValueChange={(v) => onChange({ mode: v as InputMode })}>
+          <SelectTrigger size="sm" className="w-full sm:w-72" aria-label="Target input">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {INPUT_MODES.map((m) => (
+              <SelectItem key={m.value} value={m.value}>
+                {m.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </Field>
+      {row.mode === "constant" && (
+        <Field label="Constant input (JSON)" error={errors.input}>
+          <Textarea rows={3} value={row.input} onChange={(e) => onChange({ input: e.target.value })} placeholder='{"task": "cleanup"}' className="font-mono text-[13px]" spellCheck={false} />
         </Field>
+      )}
+      {row.mode === "path" && (
+        <Field label="Input path" error={errors.input} help="For example $.detail sends only the event's detail object.">
+          <Input value={row.inputPath} onChange={(e) => onChange({ inputPath: e.target.value })} placeholder="$.detail" className="h-8 font-mono text-[13px]" spellCheck={false} />
+        </Field>
+      )}
+      {row.mode === "transformer" && (
+        <>
+          <Field label="Input path" optional error={errors.paths} help="A JSON object mapping variable names to JSONPaths into the event.">
+            <Textarea
+              rows={3}
+              value={row.pathsMap}
+              onChange={(e) => onChange({ pathsMap: e.target.value })}
+              placeholder={'{\n  "order": "$.detail.order_id",\n  "source": "$.source"\n}'}
+              className="font-mono text-[13px]"
+              spellCheck={false}
+            />
+          </Field>
+          <Field label="Template" error={errors.template} help="Use <variable> placeholders. <aws.events.event> inserts the whole event, <aws.events.rule-name> the rule name.">
+            <Textarea
+              rows={3}
+              value={row.template}
+              onChange={(e) => onChange({ template: e.target.value })}
+              placeholder={'{"text": "Order <order> from <source>"}'}
+              className="font-mono text-[13px]"
+              spellCheck={false}
+            />
+          </Field>
+        </>
+      )}
+      <label className="flex w-fit items-center gap-2 text-sm">
+        <Switch checked={showAdvanced} onCheckedChange={(v) => { setAdvanced(v); if (!v) onChange({ retries: "", maxAge: "", dlq: "" }) }} aria-label="Retry policy and dead-letter queue" />
+        Retry policy and dead-letter queue
+      </label>
+      {showAdvanced && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <Field label="Maximum age of event" error={errors.age} help="Seconds, 60-86400 (default 86400).">
+            <Input inputMode="numeric" value={row.maxAge} onChange={(e) => onChange({ maxAge: e.target.value.replace(/[^\d]/g, "") })} placeholder="86400" className="h-8" />
+          </Field>
+          <Field label="Retry attempts" error={errors.retries} help="0-185 (default 185).">
+            <Input inputMode="numeric" value={row.retries} onChange={(e) => onChange({ retries: e.target.value.replace(/[^\d]/g, "") })} placeholder="185" className="h-8" />
+          </Field>
+          <Field label="Dead-letter queue" help="Undeliverable events go to this SQS queue." error={queues.error ? errorMessage(queues.error) : undefined}>
+            <Select value={row.dlq || NO_DLQ} onValueChange={(v) => onChange({ dlq: v === NO_DLQ ? "" : v })} disabled={!queues.data}>
+              <SelectTrigger size="sm" className="w-full" aria-label="Dead-letter queue">
+                <SelectValue placeholder="None" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={NO_DLQ}>None</SelectItem>
+                {row.dlq && !dlqs.some((q) => q.arn === row.dlq) && <SelectItem value={row.dlq}>{targetName(row.dlq)}</SelectItem>}
+                {dlqs.map((q) => (
+                  <SelectItem key={q.arn} value={q.arn}>
+                    {q.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </Field>
+        </div>
       )}
     </div>
   )

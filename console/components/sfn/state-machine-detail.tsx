@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
+import { roleHref } from "@/components/iam/role-common"
 import { useRouter } from "next/navigation"
 import { AlertCircle, ArrowLeft, Loader2, Pencil, Play, PlayCircle, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -126,7 +127,17 @@ export function StateMachineDetailPage() {
           items={[
             { label: "Name", value: sm.name },
             { label: "Status", value: <StatusBadge status={sm.status.toLowerCase()} /> },
-            { label: "Type", value: "Standard" },
+            { label: "Type", value: sm.type === "EXPRESS" ? "Express" : "Standard" },
+            {
+              label: "Execution role",
+              value: sm.role_arn ? (
+                <Link href={roleHref(sm.role_arn.split("/").pop() ?? "")} className="text-primary hover:underline">
+                  {sm.role_arn.split("/").pop()}
+                </Link>
+              ) : (
+                ""
+              ),
+            },
             { label: "Created", value: <span>{formatDate(sm.created_at)} (<TimeAgo value={sm.created_at} />)</span> },
             { label: "Last updated", value: <span>{formatDate(sm.updated_at)} (<TimeAgo value={sm.updated_at} />)</span> },
             { label: "Executions", value: <ExecutionCountsView counts={data.executions} /> },

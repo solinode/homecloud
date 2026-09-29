@@ -43,6 +43,8 @@ export type ComparisonOperator =
   | "LessThanThreshold"
   | "LessThanOrEqualToThreshold"
 
+export type TreatMissingData = "missing" | "ignore" | "breaching" | "notBreaching"
+
 export interface Alarm {
   name: string
   arn: string
@@ -53,10 +55,18 @@ export interface Alarm {
   statistic: Statistic
   period: number
   evaluation_periods: number
+  /** M of the N evaluation periods that must breach (default: evaluation_periods). */
+  datapoints_to_alarm?: number
+  treat_missing_data?: TreatMissingData
+  extended_statistic?: string
+  unit?: string
+  metrics?: unknown[]
+  actions_enabled?: boolean
   threshold: number
   comparison_operator: ComparisonOperator
   alarm_actions: string[]
   ok_actions: string[]
+  insufficient_data_actions?: string[]
   state: AlarmState
   state_reason: string
   state_updated_at: string

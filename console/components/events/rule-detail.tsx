@@ -18,7 +18,7 @@ import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, seg } from "@/lib/api"
 import { formatDate, formatNumber } from "@/lib/format"
 import { useApi, useQueryParam } from "@/lib/hooks"
-import type { EventRule } from "@/lib/types"
+import type { EventRule, RuleTarget } from "@/lib/types"
 import { RULES_PATH, describeSchedule, editRuleHref, hasNextRun, isSchedule, targetHref, targetKindLabel, targetName, useRuleActions } from "./common"
 
 export function RuleDetail() {
@@ -167,7 +167,8 @@ export function RuleDetail() {
                   <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Type</th>
                   <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Name</th>
                   <th className="text-muted-foreground hidden px-3 py-2 text-left text-xs font-semibold md:table-cell">ARN</th>
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Input</th>
+                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Input</th>
+                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Retry / DLQ</th>
                 </tr>
               </thead>
               <tbody>
@@ -188,13 +189,19 @@ export function RuleDetail() {
                       <td className="hidden max-w-md px-3 py-2 md:table-cell">
                         <CopyableText value={t.arn} />
                       </td>
-                      <td className="px-4 py-2">
-                        {t.input ? (
-                          <code className="bg-muted block max-w-xs truncate rounded px-1.5 py-0.5 font-mono text-[12.5px]" title={t.input}>
-                            {t.input}
-                          </code>
+                      <td className="px-3 py-2">
+                        <TargetInput t={t} />
+                      </td>
+                      <td className="px-4 py-2 text-xs whitespace-nowrap">
+                        <div>
+                          {t.retry_policy?.maximum_retry_attempts ?? 185} retries, {t.retry_policy?.maximum_event_age_in_seconds ?? 86400}s max age
+                        </div>
+                        {t.dead_letter_arn ? (
+                          <Link href={targetHref(t.dead_letter_arn) ?? "#"} className="text-primary hover:underline">
+                            DLQ: {targetName(t.dead_letter_arn)}
+                          </Link>
                         ) : (
-                          <span className="text-muted-foreground">Matched event</span>
+                          <span className="text-muted-foreground">No DLQ</span>
                         )}
                       </td>
                     </tr>
@@ -231,4 +238,25 @@ function BackButton() {
       </Link>
     </Button>
   )
+}
+
+function TargetInput({ t }: { t: RuleTarget }) {
+  const code = (label: string, v: string) => (
+    <div className="flex flex-col gap-0.5">
+      <span className="text-muted-foreground text-xs">{label}</span>
+      <code className="bg-muted block max-w-xs truncate rounded px-1.5 py-0.5 font-mono text-[12.5px]" title={v}>
+        {v}
+      </code>
+    </div>
+  )
+  if (t.input_transformer)
+    return (
+      <div className="flex flex-col gap-1">
+        {t.input_transformer.input_paths_map && code("Input transformer paths", JSON.stringify(t.input_transformer.input_paths_map))}
+        {code("Template", t.input_transformer.input_template)}
+      </div>
+    )
+  if (t.input_path) return code("Part of the event", t.input_path)
+  if (t.input) return code("Constant", t.input)
+  return <span className="text-muted-foreground">Matched event</span>
 }

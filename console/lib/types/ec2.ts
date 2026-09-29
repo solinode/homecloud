@@ -38,6 +38,19 @@ export interface Instance {
   launch_time: string
   terminated_at?: string
   tags?: Tags
+  key_name?: string
+  iam_profile_arn?: string
+  iam_profile_id?: string
+  metadata_options?: MetadataOptions
+}
+
+/** Instance metadata service (IMDS) options. */
+export interface MetadataOptions {
+  /** "required" = IMDSv2 only (session tokens); "optional" also allows IMDSv1. */
+  http_tokens?: "optional" | "required"
+  http_endpoint?: "enabled" | "disabled"
+  hop_limit?: number
+  instance_metadata_tags?: "enabled" | "disabled"
 }
 
 export interface InstanceType {
@@ -71,6 +84,9 @@ export interface Volume {
   availability_zone: string
   created_at: string
   tags?: Tags
+  volume_type?: string
+  snapshot_id?: string
+  device?: string
 }
 
 export interface RunInstancesInput {
@@ -84,6 +100,10 @@ export interface RunInstancesInput {
   tags?: Tags
   volumes?: { volume_id?: string; size_gb?: number; mount_path: string; delete_on_termination?: boolean }[]
   file_systems?: FileSystemMount[]
+  key_name?: string
+  /** instance profile name or ARN */
+  iam_instance_profile?: string
+  metadata_options?: MetadataOptions
 }
 
 export interface ConsoleOutput {

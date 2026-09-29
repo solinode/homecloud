@@ -47,6 +47,13 @@ const columns: Column<Volume>[] = [
       ),
     value: (v) => `${v.attached_to ?? ""} ${v.mount_path ?? ""}`,
   },
+  {
+    id: "snapshot",
+    header: "Snapshot",
+    cell: (v) => (v.snapshot_id ? <span className="font-mono text-[13px]">{v.snapshot_id}</span> : <span className="text-muted-foreground">-</span>),
+    value: (v) => v.snapshot_id ?? "",
+    hideBelow: "lg",
+  },
   { id: "az", header: "Availability zone", cell: (v) => v.availability_zone, value: (v) => v.availability_zone, hideBelow: "md" },
   { id: "created", header: "Created", cell: (v) => <TimeAgo value={v.created_at} />, value: (v) => v.created_at, hideBelow: "lg" },
 ]
@@ -136,6 +143,7 @@ function CreateVolumeDialog({ open, onOpenChange }: { open: boolean; onOpenChang
   const [name, setName] = useState("")
   const [size, setSize] = useState("8")
   const [az, setAz] = useState(ZONES[0])
+  const [snapshot, setSnapshot] = useState("")
   const [tags, setTags] = useState<TagRow[]>([])
   const [submitted, setSubmitted] = useState(false)
   const [pending, setPending] = useState(false)
@@ -145,22 +153,25 @@ function CreateVolumeDialog({ open, onOpenChange }: { open: boolean; onOpenChang
       setName("")
       setSize("8")
       setAz(ZONES[0])
+      setSnapshot("")
       setTags([])
       setSubmitted(false)
     }
   }, [open])
 
   const n = Number(size)
-  const sizeErr = !Number.isInteger(n) || n < 1 || n > 16384 ? "Enter a whole number from 1 to 16384" : undefined
+  const fromSnap = !!snapshot.trim() && !size.trim()
+  const sizeErr = fromSnap ? undefined : !Number.isInteger(n) || n < 1 || n > 16384 ? "Enter a whole number from 1 to 16384" : undefined
   const nameErr = name.length > 128 ? "At most 128 characters" : undefined
+  const snapErr = snapshot.trim() && !/^snap-[0-9a-f]+$/.test(snapshot.trim()) ? "Snapshot IDs look like snap-0123456789abcdef0" : undefined
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitted(true)
-    if (sizeErr || nameErr) return
+    if (sizeErr || nameErr || snapErr) return
     setPending(true)
     try {
-      const v = await api.post<Volume>(VOLUMES_PATH, { name: name.trim(), size_gb: n, availability_zone: az, tags: rowsToTags(tags) })
+      const v = await api.post<Volume>(VOLUMES_PATH, { name: name.trim(), size_gb: fromSnap ? undefined : n, availability_zone: az, snapshot_id: snapshot.trim() || undefined, tags: rowsToTags(tags) })
       toast.success(`Created ${v.id}`)
       await revalidate(VOLUMES_PATH)
       onOpenChange(false)
@@ -177,13 +188,13 @@ function CreateVolumeDialog({ open, onOpenChange }: { open: boolean; onOpenChang
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Create volume</DialogTitle>
-            <DialogDescription>A new, empty volume. Attach it to an instance at launch.</DialogDescription>
+            <DialogDescription>A new volume, empty or restored from a snapshot. Attach it to an instance at launch.</DialogDescription>
           </DialogHeader>
           <Field label="Name" htmlFor="vol-name" optional error={submitted ? nameErr : undefined}>
             <Input id="vol-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="db-data" autoFocus />
           </Field>
           <div className="grid grid-cols-2 gap-3">
-            <Field label="Size (GiB)" htmlFor="vol-size" error={submitted ? sizeErr : undefined} help="Advisory: Docker volumes are not capped.">
+            <Field label="Size (GiB)" htmlFor="vol-size" error={submitted ? sizeErr : undefined} help={snapshot.trim() ? "Leave empty to use the snapshot's size." : "Advisory: Docker volumes are not capped."}>
               <Input id="vol-size" type="number" min={1} value={size} onChange={(e) => setSize(e.target.value)} />
             </Field>
             <Field label="Availability zone" htmlFor="vol-az">
@@ -201,6 +212,15 @@ function CreateVolumeDialog({ open, onOpenChange }: { open: boolean; onOpenChang
               </Select>
             </Field>
           </div>
+          <Field
+            label="Snapshot ID"
+            htmlFor="vol-snap"
+            optional
+            error={submitted ? snapErr : undefined}
+            help="Restore the volume's data from an EBS snapshot (created with aws ec2 create-snapshot)."
+          >
+            <Input id="vol-snap" value={snapshot} onChange={(e) => setSnapshot(e.target.value)} placeholder="snap-0123456789abcdef0" className="font-mono" spellCheck={false} />
+          </Field>
           <Field label="Tags" optional>
             <TagsEditor rows={tags} onChange={setTags} />
           </Field>

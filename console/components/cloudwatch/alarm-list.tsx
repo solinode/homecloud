@@ -21,7 +21,7 @@ import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks
 import type { Alarm, AlarmState } from "@/lib/types"
 
 import { AlarmDialog } from "./alarm-dialog"
-import { ALARM_STATE_LABEL, alarmCondition, AlarmStateBadge, dimsText, friendlyDims, periodLabel, useInstanceNames } from "./common"
+import { ALARM_STATE_LABEL, alarmCondition, AlarmStateBadge, dimsText, friendlyDims, periodLabel, TREAT_MISSING, useInstanceNames } from "./common"
 
 const STATE_ORDER: Record<AlarmState, number> = { ALARM: 0, INSUFFICIENT_DATA: 1, OK: 2 }
 
@@ -171,7 +171,8 @@ export function AlarmList() {
                   ),
                 },
                 { label: "Dimensions", value: <span className="font-mono text-[13px]">{dimsText(a.dimensions)}</span> },
-                { label: "Statistic / period", value: `${a.statistic}, ${periodLabel(a.period)}` },
+                { label: "Statistic / period", value: `${a.extended_statistic || a.statistic}, ${periodLabel(a.period)}` },
+                { label: "Missing data treatment", value: TREAT_MISSING.find((t) => t.value === (a.treat_missing_data || "missing"))?.label },
                 { label: "Alarm actions", value: <ActionList values={a.alarm_actions} /> },
                 { label: "OK actions", value: <ActionList values={a.ok_actions} /> },
                 { label: "Created", value: formatDate(a.created_at) },

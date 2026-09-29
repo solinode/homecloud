@@ -50,7 +50,7 @@ export function RolePicker({ value, onChange, service, valueType = "arn", allowN
   }, [data, service, showAll, value, valueType])
 
   const selected = (data ?? []).find((r) => key(r) === value) ?? null
-  const unknown = !!value && !!data && !selected
+  const unknown = !!value && !selected
   const selectedDoesNotTrust = !!selected && !!service && !selected.trusted_services?.includes(service)
 
   return (
@@ -59,6 +59,8 @@ export function RolePicker({ value, onChange, service, valueType = "arn", allowN
         <Select
           value={value || (allowNone ? NONE : "")}
           onValueChange={(v) => {
+            // Radix's hidden native select reports "" while the value is not an option yet (roles loading); ignore it.
+            if (!v) return
             if (v === NONE) return onChange("", null)
             const r = (data ?? []).find((x) => key(x) === v) ?? null
             onChange(v, r)
