@@ -120,7 +120,7 @@ func (s *Service) put(c *httpx.Ctx) (any, error) {
 	}
 	for i, t := range in.Targets {
 		if s.Exists != nil && !s.Exists(t.ARN) {
-			return nil, core.BadRequest("target %s does not exist (use a Lambda function, SQS queue or SNS topic ARN)", t.ARN)
+			return nil, core.BadRequest("target %s does not exist (use a Lambda function, SQS queue, SNS topic or state machine ARN)", t.ARN)
 		}
 		if t.Input != "" && !json.Valid([]byte(t.Input)) {
 			return nil, core.BadRequest("target input must be JSON")

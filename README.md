@@ -38,6 +38,7 @@ No third parties. No vendor lock-in. No surprise billing.
 | **Queues** | SQS | Standard and FIFO queues, visibility timeouts, delays, long polling, dead-letter queues with redrive, batches |
 | **Pub/sub** | SNS | Topics fanning out to queues, functions and HTTP(S) webhooks, raw delivery, filter policies |
 | **Key-value** | DynamoDB | Tables with partition/sort keys, range queries, scans with filters, secondary indexes, conditional writes, atomic counters, TTL |
+| **Workflows** | Step Functions | State machines in Amazon States Language: Task (Lambda, SQS, SNS), Choice, Wait, Parallel, Map, Pass, Succeed, Fail, with Retry/Catch, JSONPath input/output processing, intrinsic functions and a full execution history |
 | **Events** | EventBridge | Scheduled rules (`rate(...)`, `cron(...)`), event buses with pattern matching, targets in Lambda/SQS/SNS |
 | **Identity** | IAM | Users, groups, managed and custom JSON policies with allow/deny and resource ARNs, access keys, console passwords, a policy simulator |
 | **Secrets & keys** | Secrets Manager, KMS, SSM Parameter Store | Versioned secrets, customer keys with encrypt/decrypt, data keys, rotation and encryption context, hierarchical configuration parameters with SecureString values |
@@ -139,7 +140,8 @@ aws --endpoint-url http://localhost:9500 s3 ls
 * ✅ **Phase 2:** Serverless and event-driven services: Lambda, API Gateway, SQS, SNS, EventBridge, DynamoDB
 * ✅ **Phase 3 (first cut):** Observability and governance: CloudWatch metrics/logs/alarms, CloudTrail, IAM, Secrets Manager
 * ✅ **Containers:** ECS services and tasks, ECR registry, load balancers, shared file systems
-* 🔄 **Next:** VM-backed instances (QEMU/KVM), TLS certificates (ACM), DNS (Route 53), Step Functions, infrastructure as code, multi-node clusters
+* ✅ **Workflows:** Step Functions
+* 🔄 **Next:** VM-backed instances (QEMU/KVM), TLS certificates (ACM), DNS (Route 53), infrastructure as code, multi-node clusters
 * 🔄 **Phase 4:** Edge compute and hardware integrations
 
 📍 **[Explore the full roadmap](https://github.com/orgs/homecloudhq/projects/1/views/1)**

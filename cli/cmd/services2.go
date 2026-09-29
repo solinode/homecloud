@@ -6,6 +6,7 @@ import (
 	"net/url"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 )
@@ -255,6 +256,72 @@ func elbCommands() {
 			return err
 		}
 		printList(out["targets"], cols("TARGET=id", "PORT=port", "IP=ip", "HEALTH=health", "REASON=reason"))
+		return nil
+	})
+}
+
+func init() {
+	s := group("sfn", "Step Functions state machines")
+	sub(s, "ls", "List state machines", cobra.NoArgs, func([]string) error {
+		return call("GET", "/api/v1/sfn/state-machines", nil, cols("NAME=name", "STATUS=status", "EXECUTIONS=executions", "UPDATED=updated_at"))
+	})
+	sub(s, "create NAME DEFINITION_FILE", "Create a state machine from an Amazon States Language file", cobra.ExactArgs(2), func(a []string) error {
+		def, err := jsonArg("@" + a[1])
+		if err != nil {
+			return err
+		}
+		return call("POST", "/api/v1/sfn/state-machines", map[string]any{"name": a[0], "definition": def}, nil)
+	})
+	sub(s, "update NAME DEFINITION_FILE", "Replace a state machine's definition", cobra.ExactArgs(2), func(a []string) error {
+		def, err := jsonArg("@" + a[1])
+		if err != nil {
+			return err
+		}
+		return call("PUT", "/api/v1/sfn/state-machines/"+a[0], map[string]any{"definition": def}, nil)
+	})
+	var input string
+	var wait bool
+	st := sub(s, "start NAME", "Start an execution", cobra.ExactArgs(1), func(a []string) error {
+		in, err := jsonArg(input)
+		if err != nil {
+			return err
+		}
+		c := api()
+		var out map[string]any
+		if err := c.Do("POST", "/api/v1/sfn/state-machines/"+a[0]+"/executions", map[string]any{"input": in}, &out); err != nil {
+			return err
+		}
+		if !wait {
+			printObject(out)
+			return nil
+		}
+		for {
+			var x map[string]any
+			if err := c.Do("GET", "/api/v1/sfn/executions/"+fmt.Sprint(out["id"]), nil, &x); err != nil {
+				return err
+			}
+			if x["status"] != "RUNNING" {
+				delete(x, "history")
+				printJSON(x)
+				if x["status"] != "SUCCEEDED" {
+					return fmt.Errorf("execution %v", x["status"])
+				}
+				return nil
+			}
+			time.Sleep(500 * time.Millisecond)
+		}
+	})
+	st.Flags().StringVar(&input, "input", "{}", "input JSON (or @file)")
+	st.Flags().BoolVar(&wait, "wait", true, "wait for the execution to finish")
+	sub(s, "executions NAME", "List executions", cobra.ExactArgs(1), func(a []string) error {
+		return call("GET", "/api/v1/sfn/state-machines/"+a[0]+"/executions", nil, cols("ID=id", "NAME=name", "STATUS=status", "STARTED=start_date", "STOPPED=stop_date"))
+	})
+	sub(s, "history EXECUTION_ID", "Show an execution's event history", cobra.ExactArgs(1), func(a []string) error {
+		var x map[string]any
+		if err := api().Do("GET", "/api/v1/sfn/executions/"+a[0], nil, &x); err != nil {
+			return err
+		}
+		printList(x["history"], cols("ID=id", "TIME=timestamp", "TYPE=type", "STATE=state"))
 		return nil
 	})
 }
