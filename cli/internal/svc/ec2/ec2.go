@@ -153,6 +153,8 @@ type Service struct {
 	mu      sync.Mutex // serialises state transitions
 	// OnTerminate is called after an instance is terminated (e.g. to deregister it from target groups).
 	OnTerminate func(id string)
+	// TemplateInUse names what still uses a launch template (an Auto Scaling group), or "".
+	TemplateInUse func(id string) string
 	// Roles resolves instance profiles and issues their role's credentials (IAM).
 	Roles Roles
 	imds  *imds

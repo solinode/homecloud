@@ -8,6 +8,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"regexp"
 	"slices"
@@ -37,6 +38,14 @@ type Rule struct {
 	PathPrefix  string `json:"path_prefix,omitempty"` // e.g. /api/
 	HostHeader  string `json:"host_header,omitempty"` // e.g. api.example.com
 	TargetGroup string `json:"target_group"`
+	// The remaining fields come from the AWS API (see aws.go).
+	Hosts      []string             `json:"hosts,omitempty"`
+	Paths      []string             `json:"paths,omitempty"`
+	Conditions []Condition          `json:"conditions,omitempty"`
+	Actions    []Action             `json:"actions,omitempty"`
+	Redirect   *RedirectConfig      `json:"redirect,omitempty"`
+	Fixed      *FixedResponseConfig `json:"fixed,omitempty"`
+	Tags       core.Tags            `json:"tags,omitempty"`
 }
 
 type Listener struct {
@@ -49,6 +58,14 @@ type Listener struct {
 	PublicPort         int    `json:"public_port,omitempty"` // requested host port (0 = any)
 	DefaultTargetGroup string `json:"default_target_group"`
 	Rules              []Rule `json:"rules"`
+	// The remaining fields come from the AWS API (see aws.go).
+	Actions    []Action             `json:"actions,omitempty"`
+	Redirect   *RedirectConfig      `json:"redirect,omitempty"`
+	Fixed      *FixedResponseConfig `json:"fixed,omitempty"`
+	SSLPolicy  string               `json:"ssl_policy,omitempty"`
+	ExtraCerts []string             `json:"extra_certs,omitempty"`
+	Attributes map[string]string    `json:"attributes,omitempty"`
+	Tags       core.Tags            `json:"tags,omitempty"`
 }
 
 type LoadBalancer struct {
@@ -67,6 +84,10 @@ type LoadBalancer struct {
 	PublicHost  string         `json:"public_host"`
 	CreatedAt   time.Time      `json:"created_at"`
 	Tags        core.Tags      `json:"tags,omitempty"`
+	// AWS API fields.
+	Subnets        []string          `json:"subnets,omitempty"`
+	SecurityGroups []string          `json:"security_groups,omitempty"`
+	Attributes     map[string]string `json:"attributes,omitempty"`
 }
 
 type HealthCheck struct {
@@ -74,6 +95,12 @@ type HealthCheck struct {
 	IntervalSeconds    int    `json:"interval_seconds"`
 	HealthyThreshold   int    `json:"healthy_threshold"`
 	UnhealthyThreshold int    `json:"unhealthy_threshold"`
+	// AWS API fields (kept and reported; probes use Path and the thresholds).
+	Protocol       string `json:"protocol,omitempty"`
+	Port           string `json:"port,omitempty"`
+	TimeoutSeconds int    `json:"timeout_seconds,omitempty"`
+	Matcher        string `json:"matcher,omitempty"`
+	Disabled       bool   `json:"disabled,omitempty"`
 }
 
 type Target struct {
@@ -95,6 +122,11 @@ type TargetGroup struct {
 	HealthCheck HealthCheck `json:"health_check"`
 	Targets     []Target    `json:"targets"`
 	CreatedAt   time.Time   `json:"created_at"`
+	// AWS API fields.
+	TargetType      string            `json:"target_type,omitempty"`
+	ProtocolVersion string            `json:"protocol_version,omitempty"`
+	Attributes      map[string]string `json:"attributes,omitempty"`
+	Tags            core.Tags         `json:"tags,omitempty"`
 }
 
 // Resolver maps a target ID (e.g. an instance) to its private IP and VPC.
@@ -111,6 +143,7 @@ type Service struct {
 	vpc     *vpc.Service
 	Resolve Resolver
 	Certs   Certificates
+	pmu     sync.Mutex         // serialises provisioning
 	mu      sync.Mutex         // serialises config pushes
 	health  map[string]*Target // tg/target -> live health state
 	hmu     sync.Mutex
@@ -168,7 +201,9 @@ func (s *Service) render(lb LoadBalancer) string {
 			used[l.DefaultTargetGroup] = true
 		}
 		for _, r := range l.Rules {
-			used[r.TargetGroup] = true
+			if r.TargetGroup != "" {
+				used[r.TargetGroup] = true
+			}
 		}
 	}
 	names := make([]string, 0, len(used))
@@ -197,7 +232,13 @@ func (s *Service) render(lb LoadBalancer) string {
 		}
 		b.WriteString("  keepalive 16;\n}\n")
 	}
-	proxy := func(tg string) string {
+	proxy := func(tg string, red *RedirectConfig, fx *FixedResponseConfig) string {
+		if red != nil {
+			return "    " + redirectDirective(*red, lb) + "\n"
+		}
+		if fx != nil {
+			return "    " + fixedDirective(*fx) + "\n"
+		}
 		return fmt.Sprintf(`    proxy_pass http://%s;
     proxy_http_version 1.1;
     proxy_set_header Host $host;
@@ -215,10 +256,12 @@ func (s *Service) render(lb LoadBalancer) string {
 		hosts := map[string][]Rule{}
 		var hostOrder []string
 		for _, r := range rules {
-			if _, seen := hosts[r.HostHeader]; !seen {
-				hostOrder = append(hostOrder, r.HostHeader)
+			for _, h := range r.hostList() {
+				if _, seen := hosts[h]; !seen {
+					hostOrder = append(hostOrder, h)
+				}
+				hosts[h] = append(hosts[h], r)
 			}
-			hosts[r.HostHeader] = append(hosts[r.HostHeader], r)
 		}
 		writeServer := func(serverName string, rs []Rule, def bool) {
 			fmt.Fprintf(&b, "server {\n  listen %d", l.Port)
@@ -249,21 +292,19 @@ func (s *Service) render(lb LoadBalancer) string {
 			hasRoot := false
 			seen := map[string]bool{}
 			for _, r := range rs {
-				p := r.PathPrefix
-				if p == "" {
-					p = "/"
+				for _, pm := range r.pathList() {
+					if seen[pm.mod+pm.path] { // first rule by priority wins; nginx rejects duplicates
+						continue
+					}
+					seen[pm.mod+pm.path] = true
+					if pm.path == "/" && pm.mod == "^~" {
+						hasRoot = true
+					}
+					fmt.Fprintf(&b, "  location %s %s {\n%s  }\n", pm.mod, pm.path, proxy(r.TargetGroup, r.Redirect, r.Fixed))
 				}
-				if seen[p] { // first rule by priority wins; nginx rejects duplicates
-					continue
-				}
-				seen[p] = true
-				if p == "/" {
-					hasRoot = true
-				}
-				fmt.Fprintf(&b, "  location ^~ %s {\n%s  }\n", p, proxy(r.TargetGroup))
 			}
 			if !hasRoot {
-				fmt.Fprintf(&b, "  location / {\n%s  }\n", proxy(l.DefaultTargetGroup))
+				fmt.Fprintf(&b, "  location / {\n%s  }\n", proxy(l.DefaultTargetGroup, l.Redirect, l.Fixed))
 			}
 			b.WriteString("}\n")
 		}
@@ -321,8 +362,8 @@ func (s *Service) push(ctx context.Context, name string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	lb, err := store.Get[LoadBalancer](s.env.Store, cLBs, name)
-	if err != nil || lb.ContainerID == "" {
-		return err
+	if err != nil || lb.ContainerID == "" || lb.State == "provisioning" {
+		return err // a load balancer being (re)provisioned picks the change up when it finishes
 	}
 	if err := s.env.Docker.CopyIn(ctx, lb.ContainerID, "/", s.files(lb), 0o600); err != nil {
 		return err
@@ -342,6 +383,13 @@ func (s *Service) push(ctx context.Context, name string) error {
 
 // provision (re)creates the load balancer container; listener ports are fixed at creation.
 func (s *Service) provision(lb LoadBalancer) {
+	s.pmu.Lock()
+	defer s.pmu.Unlock()
+	cur, err := store.Get[LoadBalancer](s.env.Store, cLBs, lb.Name)
+	if err != nil {
+		return // deleted while waiting
+	}
+	lb = cur
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 	fail := func(err error) {
@@ -388,11 +436,10 @@ func (s *Service) provision(lb LoadBalancer) {
 		x.State, x.StateReason, x.PublicPorts = "active", "", s.env.Docker.PublishedPorts(cid)
 		return nil
 	})
-	// Redirects point at published host ports, which are only known now.
-	if slices.ContainsFunc(lb.Listeners, func(l Listener) bool { return l.RedirectHTTPSPort > 0 }) {
-		if err := s.push(ctx, lb.Name); err != nil {
-			log.Printf("elb: %s: %v", lb.Name, err)
-		}
+	// Redirects point at published host ports, which are only known now, and
+	// changes made while provisioning were skipped by push.
+	if err := s.push(ctx, lb.Name); err != nil {
+		log.Printf("elb: %s: %v", lb.Name, err)
 	}
 }
 
@@ -589,7 +636,7 @@ func (s *Service) checkListener(l *Listener, vpcID string, taken []Listener) err
 		if l.RedirectHTTPSPort < 0 || l.RedirectHTTPSPort > 65535 {
 			return core.BadRequest("redirect_https_port must be a port number")
 		}
-		if l.RedirectHTTPSPort > 0 && l.DefaultTargetGroup != "" {
+		if l.RedirectHTTPSPort > 0 && (l.DefaultTargetGroup != "" || l.Redirect != nil) {
 			return core.BadRequest("a listener either redirects to HTTPS or forwards to a target group, not both")
 		}
 		if l.RedirectHTTPSPort > 0 {
@@ -604,6 +651,13 @@ func (s *Service) checkListener(l *Listener, vpcID string, taken []Listener) err
 		l.RedirectHTTPSPort = 0
 	default:
 		return core.BadRequest("protocol must be HTTP or HTTPS")
+	}
+	if l.Redirect != nil || l.Fixed != nil {
+		l.ID = core.RandHex(16)
+		if l.Rules == nil {
+			l.Rules = []Rule{}
+		}
+		return nil
 	}
 	tg, err := store.Get[TargetGroup](s.env.Store, cTGs, l.DefaultTargetGroup)
 	if err != nil {
@@ -630,59 +684,83 @@ func (s *Service) createLB(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	if len(in.Listeners) == 0 {
+		return nil, core.BadRequest("at least one listener is required")
+	}
+	return s.createLBIn(lbInput{Name: in.Name, Scheme: in.Scheme, Subnets: []string{in.SubnetID}, Listeners: in.Listeners, Tags: in.Tags})
+}
+
+type lbInput struct {
+	Name, Scheme   string
+	Subnets        []string
+	SecurityGroups []string
+	Listeners      []Listener
+	Tags           core.Tags
+}
+
+func (s *Service) createLBIn(in lbInput) (LoadBalancer, error) {
 	if !nameRe.MatchString(in.Name) {
-		return nil, core.BadRequest("load balancer names are up to 32 letters, digits and hyphens")
+		return LoadBalancer{}, core.BadRequest("load balancer names are up to 32 letters, digits and hyphens")
 	}
 	if store.Has(s.env.Store, cLBs, in.Name) {
-		return nil, core.Conflict("load balancer %q already exists", in.Name)
+		return LoadBalancer{}, core.Conflict("load balancer %q already exists", in.Name)
 	}
 	if in.Scheme == "" {
 		in.Scheme = "internet-facing"
 	}
 	if in.Scheme != "internet-facing" && in.Scheme != "internal" {
-		return nil, core.BadRequest("scheme must be internet-facing or internal")
+		return LoadBalancer{}, core.BadRequest("scheme must be internet-facing or internal")
 	}
-	if len(in.Listeners) == 0 {
-		return nil, core.BadRequest("at least one listener is required")
+	first := ""
+	if len(in.Subnets) > 0 {
+		first = in.Subnets[0]
 	}
-	pl, err := s.vpc.Place(in.SubnetID, "elb:"+in.Name)
+	pl, err := s.vpc.Place(first, "elb:"+in.Name)
 	if err != nil {
-		return nil, err
+		return LoadBalancer{}, err
 	}
 	var ls []Listener
 	for _, l := range in.Listeners {
 		if err := s.checkListener(&l, pl.VPC.ID, ls); err != nil {
 			s.vpc.Release("elb:" + in.Name)
-			return nil, err
+			return LoadBalancer{}, err
 		}
 		ls = append(ls, l)
 	}
 	if err := checkRedirects(ls); err != nil {
 		s.vpc.Release("elb:" + in.Name)
-		return nil, err
+		return LoadBalancer{}, err
 	}
-	lb := LoadBalancer{Name: in.Name, ARN: s.env.ARN("elasticloadbalancing", "loadbalancer/app/"+in.Name), DNSName: in.Name + ".elb.internal",
+	if ls == nil {
+		ls = []Listener{}
+	}
+	lb := LoadBalancer{Name: in.Name, ARN: s.LoadBalancerARN(in.Name), DNSName: in.Name + ".elb.internal",
 		Scheme: in.Scheme, VpcID: pl.VPC.ID, SubnetID: pl.Subnet.ID, PrivateIP: pl.IP, Listeners: ls, State: "provisioning",
-		PublicPorts: map[string]int{}, PublicHost: s.env.Cfg.PublicHost, CreatedAt: core.Now(), Tags: in.Tags}
+		PublicPorts: map[string]int{}, PublicHost: s.env.Cfg.PublicHost, CreatedAt: core.Now(), Tags: in.Tags,
+		Subnets: in.Subnets, SecurityGroups: in.SecurityGroups}
 	if err := store.Put(s.env.Store, cLBs, lb.Name, lb); err != nil {
-		return nil, err
+		return LoadBalancer{}, err
 	}
 	go s.provision(lb)
 	return lb, nil
 }
 
 func (s *Service) deleteLB(c *httpx.Ctx) (any, error) {
-	lb, err := store.Get[LoadBalancer](s.env.Store, cLBs, c.Param("name"))
+	return nil, s.deleteLBIn(c.Param("name"))
+}
+
+func (s *Service) deleteLBIn(name string) error {
+	lb, err := store.Get[LoadBalancer](s.env.Store, cLBs, name)
 	if err != nil {
-		return nil, core.NotFound("load balancer", c.Param("name"))
+		return core.NotFound("load balancer", name)
 	}
 	if lb.ContainerID != "" {
 		if err := s.env.Docker.Remove(lb.ContainerID); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	s.vpc.Release("elb:" + lb.Name)
-	return nil, store.Delete(s.env.Store, cLBs, lb.Name)
+	return store.Delete(s.env.Store, cLBs, lb.Name)
 }
 
 // changeListeners edits listeners; port changes need a new container.
@@ -727,13 +805,17 @@ func (s *Service) addListener(c *httpx.Ctx) (any, error) {
 }
 
 func (s *Service) deleteListener(c *httpx.Ctx) (any, error) {
-	return s.changeListeners(c.Param("name"), true, func(lb *LoadBalancer) error {
+	return s.removeListener(c.Param("name"), c.Param("id"), false)
+}
+
+func (s *Service) removeListener(name, id string, allowEmpty bool) (any, error) {
+	return s.changeListeners(name, true, func(lb *LoadBalancer) error {
 		n := len(lb.Listeners)
-		lb.Listeners = slices.DeleteFunc(lb.Listeners, func(l Listener) bool { return l.ID == c.Param("id") })
+		lb.Listeners = slices.DeleteFunc(lb.Listeners, func(l Listener) bool { return l.ID == id })
 		if len(lb.Listeners) == n {
-			return core.NotFound("listener", c.Param("id"))
+			return core.NotFound("listener", id)
 		}
-		if len(lb.Listeners) == 0 {
+		if len(lb.Listeners) == 0 && !allowEmpty {
 			return core.BadRequest("a load balancer needs at least one listener")
 		}
 		return checkRedirects(lb.Listeners) // don't strand a redirect
@@ -754,34 +836,63 @@ func (s *Service) addRule(c *httpx.Ctx) (any, error) {
 	if r.HostHeader != "" && !hostRe.MatchString(r.HostHeader) {
 		return nil, core.BadRequest("host_header must be a host name, optionally starting with *.")
 	}
-	return s.changeListeners(c.Param("name"), false, func(lb *LoadBalancer) error {
-		tg, err := store.Get[TargetGroup](s.env.Store, cTGs, r.TargetGroup)
-		if err != nil {
-			return core.NotFound("target group", r.TargetGroup)
-		}
-		if tg.VpcID != lb.VpcID {
-			return core.BadRequest("target group %s is in another VPC", tg.Name)
+	_, err := s.addRuleIn(c.Param("name"), c.Param("id"), &r)
+	if err != nil {
+		return nil, err
+	}
+	return s.getLB(c)
+}
+
+// addRuleIn adds a validated rule to a listener.
+func (s *Service) addRuleIn(lbName, listenerID string, r *Rule) (any, error) {
+	return s.changeListeners(lbName, false, func(lb *LoadBalancer) error {
+		if r.TargetGroup != "" {
+			tg, err := store.Get[TargetGroup](s.env.Store, cTGs, r.TargetGroup)
+			if err != nil {
+				return core.NotFound("target group", r.TargetGroup)
+			}
+			if tg.VpcID != lb.VpcID {
+				return core.BadRequest("target group %s is in another VPC", tg.Name)
+			}
 		}
 		for i := range lb.Listeners {
-			if lb.Listeners[i].ID == c.Param("id") {
+			if lb.Listeners[i].ID == listenerID {
 				for _, o := range lb.Listeners[i].Rules {
-					if o.PathPrefix == r.PathPrefix && o.HostHeader == r.HostHeader {
+					if len(r.Paths)+len(r.Hosts) == 0 && o.PathPrefix == r.PathPrefix && o.HostHeader == r.HostHeader {
 						return core.Conflict("listener already has a rule for host %q and path %q", r.HostHeader, r.PathPrefix)
 					}
 					if r.Priority != 0 && o.Priority == r.Priority {
-						return core.Conflict("listener already has a rule with priority %d", r.Priority)
+						return core.Errf(http.StatusConflict, "PriorityInUse", "listener already has a rule with priority %d", r.Priority)
 					}
 				}
-				r.ID = core.RandHex(12)
+				if r.ID == "" {
+					r.ID = core.RandHex(12)
+				}
 				if r.Priority == 0 {
 					r.Priority = len(lb.Listeners[i].Rules) + 1
 				}
-				lb.Listeners[i].Rules = append(lb.Listeners[i].Rules, r)
+				lb.Listeners[i].Rules = append(lb.Listeners[i].Rules, *r)
 				return nil
 			}
 		}
-		return core.NotFound("listener", c.Param("id"))
+		return core.NotFound("listener", listenerID)
 	})
+}
+
+// updateListener edits one listener in place (port changes need a new container).
+func (s *Service) updateListener(lbName, id string, recreate bool, fn func(l *Listener, lb *LoadBalancer) error) error {
+	_, err := s.changeListeners(lbName, recreate, func(lb *LoadBalancer) error {
+		for i := range lb.Listeners {
+			if lb.Listeners[i].ID == id {
+				if err := fn(&lb.Listeners[i], lb); err != nil {
+					return err
+				}
+				return checkRedirects(lb.Listeners)
+			}
+		}
+		return core.NotFound("listener", id)
+	})
+	return err
 }
 
 func (s *Service) deleteRule(c *httpx.Ctx) (any, error) {
@@ -819,6 +930,9 @@ func (s *Service) tgView(tg TargetGroup) TargetGroup {
 }
 
 func (s *Service) resolve(id string) (string, string, bool) {
+	if net.ParseIP(id) != nil { // target type ip
+		return id, "", true
+	}
 	if s.Resolve != nil {
 		if ip, v, ok := s.Resolve(id); ok {
 			return ip, v, true
@@ -870,27 +984,33 @@ func (s *Service) createTG(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	return s.createTGIn(in)
+}
+
+func (s *Service) createTGIn(in TargetGroup) (TargetGroup, error) {
 	if !nameRe.MatchString(in.Name) {
-		return nil, core.BadRequest("target group names are up to 32 letters, digits and hyphens")
+		return in, core.BadRequest("target group names are up to 32 letters, digits and hyphens")
 	}
 	if store.Has(s.env.Store, cTGs, in.Name) {
-		return nil, core.Conflict("target group %q already exists", in.Name)
+		return in, core.Conflict("target group %q already exists", in.Name)
 	}
-	if in.Port < 1 || in.Port > 65535 {
-		return nil, core.BadRequest("port must be 1-65535")
+	if in.TargetType != "lambda" && (in.Port < 1 || in.Port > 65535) {
+		return in, core.BadRequest("port must be 1-65535")
 	}
 	if in.VpcID == "" {
 		in.VpcID = s.vpc.DefaultVPCID()
 	}
 	if _, err := s.vpc.GetVPC(in.VpcID); err != nil {
-		return nil, core.NotFound("vpc", in.VpcID)
+		return in, core.NotFound("vpc", in.VpcID)
 	}
 	if err := normalizeHC(&in.HealthCheck); err != nil {
-		return nil, err
+		return in, err
 	}
-	tg := TargetGroup{Name: in.Name, ARN: s.env.ARN("elasticloadbalancing", "targetgroup/"+in.Name), Protocol: "HTTP", Port: in.Port,
-		VpcID: in.VpcID, HealthCheck: in.HealthCheck, Targets: []Target{}, CreatedAt: core.Now()}
-	return tg, store.Put(s.env.Store, cTGs, tg.Name, tg)
+	if in.Protocol == "" {
+		in.Protocol = "HTTP"
+	}
+	in.ARN, in.Targets, in.CreatedAt = s.TargetGroupARN(in.Name), []Target{}, core.Now()
+	return in, store.Put(s.env.Store, cTGs, in.Name, in)
 }
 
 func (s *Service) modifyTG(c *httpx.Ctx) (any, error) {
@@ -922,14 +1042,17 @@ func (s *Service) usedBy(tg string) []string {
 }
 
 func (s *Service) deleteTG(c *httpx.Ctx) (any, error) {
-	name := c.Param("name")
+	return nil, s.deleteTGIn(c.Param("name"))
+}
+
+func (s *Service) deleteTGIn(name string) error {
 	if !store.Has(s.env.Store, cTGs, name) {
-		return nil, core.NotFound("target group", name)
+		return core.NotFound("target group", name)
 	}
 	if u := s.usedBy(name); len(u) > 0 {
-		return nil, core.Errf(http.StatusConflict, "ResourceInUse", "target group %s is used by %s", name, strings.Join(u, ", "))
+		return core.Errf(http.StatusConflict, "ResourceInUse", "target group %s is used by %s", name, strings.Join(u, ", "))
 	}
-	return nil, store.Delete(s.env.Store, cTGs, name)
+	return store.Delete(s.env.Store, cTGs, name)
 }
 
 // pushUsers reloads every load balancer that routes to a target group.
@@ -948,52 +1071,70 @@ func (s *Service) register(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	tg, err := store.Update(s.env.Store, cTGs, c.Param("name"), func(tg *TargetGroup) error {
-		for _, t := range in.Targets {
+	tg, err := s.registerIn(c.Param("name"), in.Targets)
+	if err != nil {
+		return nil, err
+	}
+	return s.tgView(tg), nil
+}
+
+func (s *Service) registerIn(name string, targets []Target) (TargetGroup, error) {
+	tg, err := store.Update(s.env.Store, cTGs, name, func(tg *TargetGroup) error {
+		for _, t := range targets {
 			ip, vpcID, ok := s.resolve(t.ID)
 			if !ok {
 				return core.BadRequest("target %q is not a known instance or task", t.ID)
 			}
-			if vpcID != tg.VpcID {
+			if vpcID != "" && vpcID != tg.VpcID {
 				return core.BadRequest("target %s is in %s, not the target group's VPC %s", t.ID, vpcID, tg.VpcID)
 			}
 			if t.Port == 0 {
 				t.Port = tg.Port
 			}
-			t.IP = ip
 			tg.Targets = slices.DeleteFunc(tg.Targets, func(x Target) bool { return x.ID == t.ID && x.Port == t.Port })
 			tg.Targets = append(tg.Targets, Target{ID: t.ID, Port: t.Port, IP: ip})
 		}
 		return nil
 	})
 	if err == store.ErrNotFound {
-		return nil, core.NotFound("target group", c.Param("name"))
+		return tg, core.NotFound("target group", name)
 	}
 	if err != nil {
-		return nil, err
+		return tg, err
 	}
 	s.pushUsers(tg.Name)
-	return s.tgView(tg), nil
+	return tg, nil
 }
 
 func (s *Service) deregister(c *httpx.Ctx) (any, error) {
-	tg, err := store.Update(s.env.Store, cTGs, c.Param("name"), func(tg *TargetGroup) error {
+	tg, err := s.deregisterIn(c.Param("name"), c.Param("target"), 0)
+	if err != nil {
+		return nil, err
+	}
+	return s.tgView(tg), nil
+}
+
+// deregisterIn removes a target (port 0: on every port) from a target group.
+func (s *Service) deregisterIn(name, id string, port int) (TargetGroup, error) {
+	tg, err := store.Update(s.env.Store, cTGs, name, func(tg *TargetGroup) error {
 		n := len(tg.Targets)
-		tg.Targets = slices.DeleteFunc(tg.Targets, func(t Target) bool { return t.ID == c.Param("target") })
+		tg.Targets = slices.DeleteFunc(tg.Targets, func(t Target) bool { return t.ID == id && (port == 0 || t.Port == port) })
 		if len(tg.Targets) == n {
-			return core.NotFound("target", c.Param("target"))
+			return core.NotFound("target", id)
 		}
 		return nil
 	})
 	if err == store.ErrNotFound {
-		return nil, core.NotFound("target group", c.Param("name"))
+		return tg, core.NotFound("target group", name)
 	}
 	if err != nil {
-		return nil, err
+		return tg, err
 	}
-	s.forget(tg.Name, c.Param("target"))
+	if !slices.ContainsFunc(tg.Targets, func(t Target) bool { return t.ID == id }) {
+		s.forget(tg.Name, id)
+	}
 	s.pushUsers(tg.Name)
-	return s.tgView(tg), nil
+	return tg, nil
 }
 
 // Refresh re-resolves target IPs (e.g. after instances restart) and reloads balancers.

@@ -41,6 +41,8 @@ calls from inside them reach HomeCloud.
 | CloudWatch Logs | logs | awsJson 1.1 | Groups, streams, events, filter patterns, Logs Insights, metric and subscription filters |
 | EventBridge | events | awsJson 1.1 | Buses, rules with full pattern syntax, targets with transforms |
 | EventBridge Scheduler | scheduler | restJson1 | Schedules and groups |
+| Elastic Load Balancing v2 | elasticloadbalancing | awsQuery | Application load balancers, target groups (instance and ip), listeners (HTTP/HTTPS with ACM certificates), rules (path and host conditions; forward, redirect and fixed-response actions), attributes, tags |
+| EC2 Auto Scaling | autoscaling | awsQuery | Groups from EC2 launch templates, target-tracking policies (average CPU), target group attachment, tags, suspend/resume, scaling activities |
 | Step Functions | states | awsJson 1.0 | State machines, executions, task tokens, service integrations |
 
 Notes:
