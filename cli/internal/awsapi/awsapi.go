@@ -63,6 +63,10 @@ type Service struct {
 	// StreamBody leaves the request body unread (S3 object uploads); the payload
 	// hash is taken from X-Amz-Content-Sha256 and must be verified by the service.
 	StreamBody bool
+	// Unsigned reports whether an unsigned request belongs to this REST service
+	// (anonymous S3 access to public buckets). The service authorizes it itself;
+	// Req.P is nil.
+	Unsigned func(r *http.Request) bool
 }
 
 var (
@@ -88,6 +92,18 @@ func lookup(name string) *Service {
 	regMu.RLock()
 	defer regMu.RUnlock()
 	return services[name]
+}
+
+// lookupUnsigned finds the REST service that claims an unsigned request.
+func lookupUnsigned(r *http.Request) *Service {
+	regMu.RLock()
+	defer regMu.RUnlock()
+	for _, s := range services {
+		if s.Unsigned != nil && s.REST != nil && s.Unsigned(r) {
+			return s
+		}
+	}
+	return nil
 }
 
 func lookupTarget(prefix string) *Service {
@@ -120,6 +136,9 @@ type Req struct {
 	Secret    string     // the signing secret (to verify S3 streaming chunks); empty for public ops
 	Body      []byte     // the request body (nil when the service streams it)
 	Form      url.Values // awsQuery parameters
+	// Creds resolves access keys, for services that accept other signature
+	// schemes on unsigned-looking requests (S3 SigV2 presigned URLs).
+	Creds Credentials
 
 	action, resource string
 	status           int
@@ -250,14 +269,14 @@ func Match(r *http.Request) bool {
 		prefix, _, _ := strings.Cut(t, ".")
 		return lookupTarget(prefix) != nil
 	}
-	return false
+	return lookupUnsigned(r) != nil
 }
 
 const maxBody = 100 << 20
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
-	q := &Req{W: w, R: r, Account: h.Account, RequestID: RequestID(), status: 200}
+	q := &Req{W: w, R: r, Account: h.Account, RequestID: RequestID(), status: 200, Creds: h.Creds}
 	w.Header().Set("x-amzn-RequestId", q.RequestID)
 	w.Header().Set("x-amz-request-id", q.RequestID)
 	sw := &statusWriter{ResponseWriter: w, q: q}
@@ -300,6 +319,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	} else if target != "" {
 		prefix, _, _ := strings.Cut(target, ".")
 		q.Svc = lookupTarget(prefix)
+	} else {
+		q.Svc = lookupUnsigned(r)
 	}
 	if q.Svc == nil {
 		q.fail(Errorf(http.StatusForbidden, "MissingAuthenticationToken", "request is not signed"))
@@ -360,7 +381,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		q.Op = form.Get("Action")
 	}
 
-	public := q.Svc.PublicOps[q.Op] && q.Protocol != REST
+	public := (q.Svc.PublicOps[q.Op] && q.Protocol != REST) || (q.Protocol == REST && q.Svc.Unsigned != nil)
 	if sig != nil {
 		now := time.Now()
 		if h.Now != nil {
