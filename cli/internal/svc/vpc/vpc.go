@@ -39,7 +39,11 @@ type VPC struct {
 	Network        string    `json:"network"` // docker network name
 	Default        bool      `json:"default"`
 	InternetAccess bool      `json:"internet_access"`
-	State          string    `json:"state"`
+	// DNSHostnames and DNSSupportDisabled are the EC2 VPC attributes
+	// enableDnsHostnames / enableDnsSupport (recorded; DNS always works).
+	DNSHostnames       bool   `json:"dns_hostnames,omitempty"`
+	DNSSupportDisabled bool   `json:"dns_support_disabled,omitempty"`
+	State              string `json:"state"`
 	CreatedAt      time.Time `json:"created_at"`
 	Tags           core.Tags `json:"tags,omitempty"`
 }
@@ -51,16 +55,28 @@ type Subnet struct {
 	CIDR             string    `json:"cidr"`
 	AvailabilityZone string    `json:"availability_zone"`
 	Default          bool      `json:"default"`
-	CreatedAt        time.Time `json:"created_at"`
+	// MapPublicIP is the EC2 MapPublicIpOnLaunch attribute (recorded).
+	MapPublicIP bool      `json:"map_public_ip,omitempty"`
+	CreatedAt   time.Time `json:"created_at"`
+	Tags        core.Tags `json:"tags,omitempty"`
 }
 
+// Rule is a security group rule. Rules created through the native API are
+// always enforceable (tcp/udp from 0.0.0.0/0 or 127.0.0.1/32); rules created
+// through the EC2 API may use any protocol and source and are recorded, but
+// only enforceable ones publish ports (see Publishable).
 type Rule struct {
 	ID          string `json:"id"`
-	Protocol    string `json:"protocol"` // tcp | udp
+	Protocol    string `json:"protocol"` // tcp | udp (EC2 API: also icmp, icmpv6, -1 or a protocol number)
 	FromPort    int    `json:"from_port"`
 	ToPort      int    `json:"to_port"`
-	CIDR        string `json:"cidr"`
+	CIDR        string `json:"cidr,omitempty"`
 	Description string `json:"description,omitempty"`
+	// Other sources (EC2 API only): an IPv6 range, a security group or a prefix list.
+	CIDRv6      string    `json:"cidr_ipv6,omitempty"`
+	SourceGroup string    `json:"source_group,omitempty"`
+	PrefixList  string    `json:"prefix_list,omitempty"`
+	Tags        core.Tags `json:"tags,omitempty"`
 }
 
 type SecurityGroup struct {
@@ -69,7 +85,12 @@ type SecurityGroup struct {
 	Name        string    `json:"name"`
 	Description string    `json:"description"`
 	Ingress     []Rule    `json:"ingress"`
-	CreatedAt   time.Time `json:"created_at"`
+	// Egress rules are recorded, not enforced. Until EgressSet, a group has
+	// AWS's default rule allowing all outbound traffic.
+	Egress    []Rule    `json:"egress,omitempty"`
+	EgressSet bool      `json:"egress_set,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	Tags      core.Tags `json:"tags,omitempty"`
 }
 
 type allocation struct {
@@ -85,6 +106,12 @@ type Service struct {
 	InUse func(sgID string) bool
 	// AfterCreate is called with every new VPC.
 	AfterCreate func(v VPC)
+	// BeforeDelete is called before a VPC's network is removed (e.g. to drop
+	// its route tables and detach its internet gateway).
+	BeforeDelete func(v VPC)
+	// NetworkChanged is called after a VPC's network was recreated (its
+	// internet access changed); containers were reconnected with their addresses.
+	NetworkChanged func(v VPC)
 }
 
 func New(env *svc.Env) *Service { return &Service{env: env} }
@@ -224,6 +251,9 @@ func (s *Service) allocate(sn Subnet, owner string) (string, error) {
 	defer s.mu.Unlock()
 	p := netip.MustParsePrefix(sn.CIDR)
 	used := map[string]bool{}
+	if v, err := store.Get[VPC](s.env.Store, cVPCs, sn.VpcID); err == nil {
+		used[MetadataAddress(v.CIDR)] = true // the instance metadata service's next hop
+	}
 	for _, a := range store.List[allocation](s.env.Store, cIPs) {
 		used[a.IP] = true
 		if a.Owner == owner {
@@ -310,6 +340,9 @@ func (s *Service) PublishedPorts(ids []string) []runtime.Port {
 			continue
 		}
 		for _, r := range g.Ingress {
+			if !Publishable(r) {
+				continue
+			}
 			for p := r.FromPort; p <= r.ToPort; p++ {
 				k := fmt.Sprintf("%d/%s", p, r.Protocol)
 				if seen[k] {
@@ -335,6 +368,17 @@ func (s *Service) List() []VPC { return store.List[VPC](s.env.Store, cVPCs) }
 // DNSAddress is the VPC's resolver address: the base of its CIDR plus two, as in AWS.
 // The allocator never hands it out (the first four addresses of a subnet are reserved).
 func DNSAddress(cidr string) string { return reserved(cidr, 2) }
+
+// MetadataAddress is where the instance metadata service (169.254.169.254)
+// is reached in a VPC: the second-to-last address of the VPC CIDR, which the
+// allocator never hands out.
+func MetadataAddress(cidr string) string {
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return ""
+	}
+	return lastAddr(p).Prev().String()
+}
 
 // S3Address is where the shared S3 endpoint (s3.internal) sits in a VPC: base plus three.
 func S3Address(cidr string) string { return reserved(cidr, 3) }
@@ -436,53 +480,64 @@ func (s *Service) createVPCRoute(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	p, err := netip.ParsePrefix(in.CIDR)
-	if err != nil || !p.Addr().Is4() {
-		return nil, core.BadRequest("cidr %q is not a valid IPv4 CIDR block", in.CIDR)
-	}
-	p = p.Masked()
-	if p.Bits() < 16 || p.Bits() > 28 {
-		return nil, core.BadRequest("VPC CIDR must be between /16 and /28")
-	}
-	taken, err := s.env.Docker.NetworkSubnets()
-	if err != nil {
-		return nil, err
-	}
-	if n := s.overlapsAny(p, taken); n != "" {
-		return nil, core.Conflict("cidr %s overlaps existing network %s", p, n)
-	}
 	internet := true
 	if in.InternetAccess != nil {
 		internet = *in.InternetAccess
 	}
-	v, err := s.createVPC(in.Name, p, internet, false)
+	v, err := s.CreateVPC(in.Name, in.CIDR, internet, nil)
 	if err != nil {
 		return nil, err
 	}
 	return s.vpcView(v), nil
 }
 
-func (s *Service) deleteVPC(c *httpx.Ctx) (any, error) {
-	id := c.Param("id")
+// CreateVPC validates a CIDR block and creates a VPC with its network and
+// default security group.
+func (s *Service) CreateVPC(name, cidr string, internet bool, tags core.Tags) (VPC, error) {
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil || !p.Addr().Is4() {
+		return VPC{}, core.BadRequest("cidr %q is not a valid IPv4 CIDR block", cidr)
+	}
+	p = p.Masked()
+	if p.Bits() < 16 || p.Bits() > 28 {
+		return VPC{}, core.BadRequest("VPC CIDR must be between /16 and /28")
+	}
+	taken, err := s.env.Docker.NetworkSubnets()
+	if err != nil {
+		return VPC{}, err
+	}
+	if n := s.overlapsAny(p, taken); n != "" {
+		return VPC{}, core.Conflict("cidr %s overlaps existing network %s", p, n)
+	}
+	v, err := s.createVPC(name, p, internet, false)
+	if err != nil || len(tags) == 0 {
+		return v, err
+	}
+	return store.Update(s.env.Store, cVPCs, v.ID, func(x *VPC) error { x.Tags = tags; return nil })
+}
+
+func (s *Service) deleteVPC(c *httpx.Ctx) (any, error) { return nil, s.DeleteVPC(c.Param("id")) }
+
+// DeleteVPC removes a VPC with its subnets and security groups. It fails
+// while resources hold addresses in it.
+func (s *Service) DeleteVPC(id string) error {
 	v, err := store.Get[VPC](s.env.Store, cVPCs, id)
 	if err != nil {
-		return nil, core.NotFound("vpc", id)
+		return core.NotFound("vpc", id)
 	}
 	for _, sn := range store.List[Subnet](s.env.Store, cSubnets) {
 		if sn.VpcID == id && s.subnetView(sn).UsedIPs > 0 {
-			return nil, core.Errf(http.StatusConflict, "DependencyViolation", "vpc %s has resources in subnet %s; terminate them first", id, sn.ID)
+			return core.Errf(http.StatusConflict, "DependencyViolation", "vpc %s has resources in subnet %s; terminate them first", id, sn.ID)
 		}
 	}
-	// Shared service endpoints (e.g. s3.internal) are attached to every VPC; detach them first.
-	if info, err := s.env.Docker.C.NetworkInfo(v.Network); err == nil {
-		for cid := range info.Containers {
-			if c, err := s.env.Docker.Inspect(cid); err == nil && c.Config != nil && c.Config.Labels[core.LabelService] == "s3" {
-				_ = s.env.Docker.C.DisconnectNetwork(v.Network, docker.NetworkConnectionOptions{Container: cid, Force: true})
-			}
-		}
-	}
+	// HomeCloud's own endpoints (DNS, s3.internal, instance metadata) are
+	// attached to every VPC; detach them first.
+	s.detachInfra(v.Network)
 	if err := s.env.Docker.RemoveNetwork(v.Network); err != nil {
-		return nil, core.Errf(http.StatusConflict, "DependencyViolation", "remove network: %v", err)
+		return core.Errf(http.StatusConflict, "DependencyViolation", "remove network: %v", err)
+	}
+	if s.BeforeDelete != nil {
+		s.BeforeDelete(v)
 	}
 	for _, sn := range store.List[Subnet](s.env.Store, cSubnets) {
 		if sn.VpcID == id {
@@ -494,7 +549,26 @@ func (s *Service) deleteVPC(c *httpx.Ctx) (any, error) {
 			_ = store.Delete(s.env.Store, cSGs, g.ID)
 		}
 	}
-	return nil, store.Delete(s.env.Store, cVPCs, id)
+	return store.Delete(s.env.Store, cVPCs, id)
+}
+
+// infra reports whether a container is one of HomeCloud's shared endpoints
+// (homecloud-dns, homecloud-s3, homecloud-imds, ...) rather than a resource.
+func infra(c *docker.Container) bool {
+	return strings.HasPrefix(strings.TrimPrefix(c.Name, "/"), "homecloud-") ||
+		(c.Config != nil && c.Config.Labels[core.LabelResource] == "server")
+}
+
+func (s *Service) detachInfra(network string) {
+	info, err := s.env.Docker.C.NetworkInfo(network)
+	if err != nil {
+		return
+	}
+	for cid := range info.Containers {
+		if c, err := s.env.Docker.Inspect(cid); err == nil && infra(c) {
+			_ = s.env.Docker.C.DisconnectNetwork(network, docker.NetworkConnectionOptions{Container: cid, Force: true})
+		}
+	}
 }
 
 func (s *Service) listSubnets(c *httpx.Ctx) (any, error) {
@@ -517,40 +591,52 @@ func (s *Service) createSubnet(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	v, err := store.Get[VPC](s.env.Store, cVPCs, in.VpcID)
+	sn, err := s.CreateSubnet(in.VpcID, in.Name, in.CIDR, in.AvailabilityZone, nil)
 	if err != nil {
-		return nil, core.NotFound("vpc", in.VpcID)
+		return nil, err
 	}
-	p, err := netip.ParsePrefix(in.CIDR)
+	return s.subnetView(sn), nil
+}
+
+// CreateSubnet validates and records a subnet of a VPC.
+func (s *Service) CreateSubnet(vpcID, name, cidr, az string, tags core.Tags) (Subnet, error) {
+	v, err := store.Get[VPC](s.env.Store, cVPCs, vpcID)
+	if err != nil {
+		return Subnet{}, core.NotFound("vpc", vpcID)
+	}
+	p, err := netip.ParsePrefix(cidr)
 	if err != nil || !p.Addr().Is4() {
-		return nil, core.BadRequest("cidr %q is not a valid IPv4 CIDR block", in.CIDR)
+		return Subnet{}, core.BadRequest("cidr %q is not a valid IPv4 CIDR block", cidr)
 	}
 	p = p.Masked()
 	vp := netip.MustParsePrefix(v.CIDR)
 	if !vp.Contains(p.Addr()) || p.Bits() < vp.Bits() || p.Bits() > 28 {
-		return nil, core.BadRequest("subnet %s must be inside %s and no smaller than /28", p, vp)
+		return Subnet{}, core.BadRequest("subnet %s must be inside %s and no smaller than /28", p, vp)
 	}
 	for _, sn := range store.List[Subnet](s.env.Store, cSubnets) {
 		if sn.VpcID == v.ID && netip.MustParsePrefix(sn.CIDR).Overlaps(p) {
-			return nil, core.Conflict("cidr %s conflicts with subnet %s (%s)", p, sn.ID, sn.CIDR)
+			return Subnet{}, core.Conflict("cidr %s conflicts with subnet %s (%s)", p, sn.ID, sn.CIDR)
 		}
 	}
-	if in.AvailabilityZone == "" {
-		in.AvailabilityZone = s.env.Cfg.Region + "a"
+	if az == "" {
+		az = s.env.Cfg.Region + "a"
 	}
-	sn := Subnet{ID: core.NewID("subnet"), VpcID: v.ID, Name: in.Name, CIDR: p.String(), AvailabilityZone: in.AvailabilityZone, CreatedAt: core.Now()}
-	return s.subnetView(sn), store.Put(s.env.Store, cSubnets, sn.ID, sn)
+	sn := Subnet{ID: core.NewID("subnet"), VpcID: v.ID, Name: name, CIDR: p.String(), AvailabilityZone: az, CreatedAt: core.Now(), Tags: tags}
+	return sn, store.Put(s.env.Store, cSubnets, sn.ID, sn)
 }
 
-func (s *Service) deleteSubnet(c *httpx.Ctx) (any, error) {
-	sn, err := store.Get[Subnet](s.env.Store, cSubnets, c.Param("id"))
+func (s *Service) deleteSubnet(c *httpx.Ctx) (any, error) { return nil, s.DeleteSubnet(c.Param("id")) }
+
+// DeleteSubnet removes a subnet that no resource uses.
+func (s *Service) DeleteSubnet(id string) error {
+	sn, err := store.Get[Subnet](s.env.Store, cSubnets, id)
 	if err != nil {
-		return nil, core.NotFound("subnet", c.Param("id"))
+		return core.NotFound("subnet", id)
 	}
 	if s.subnetView(sn).UsedIPs > 0 {
-		return nil, core.Errf(http.StatusConflict, "DependencyViolation", "subnet %s still has resources", sn.ID)
+		return core.Errf(http.StatusConflict, "DependencyViolation", "subnet %s still has resources", sn.ID)
 	}
-	return nil, store.Delete(s.env.Store, cSubnets, sn.ID)
+	return store.Delete(s.env.Store, cSubnets, sn.ID)
 }
 
 func (s *Service) listSGs(c *httpx.Ctx) (any, error) {
@@ -581,32 +667,38 @@ func (s *Service) createSG(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	if in.VpcID == "" {
-		for _, v := range store.List[VPC](s.env.Store, cVPCs) {
-			if v.Default {
-				in.VpcID = v.ID
-			}
-		}
-	}
-	if !store.Has(s.env.Store, cVPCs, in.VpcID) {
-		return nil, core.NotFound("vpc", in.VpcID)
-	}
-	if strings.TrimSpace(in.Name) == "" || strings.HasPrefix(in.Name, "sg-") || len(in.Name) > 255 {
-		return nil, core.BadRequest("name is required, may not start with sg- and must be at most 255 characters")
-	}
-	for _, g := range store.List[SecurityGroup](s.env.Store, cSGs) {
-		if g.VpcID == in.VpcID && g.Name == in.Name {
-			return nil, core.Conflict("security group %q already exists in %s", in.Name, in.VpcID)
-		}
-	}
-	g := SecurityGroup{ID: core.NewID("sg"), VpcID: in.VpcID, Name: in.Name, Description: in.Description, Ingress: []Rule{}, CreatedAt: core.Now()}
+	rules := []Rule{}
 	for _, r := range in.Ingress {
 		nr, err := normalizeRule(r)
 		if err != nil {
 			return nil, err
 		}
-		g.Ingress = append(g.Ingress, nr)
+		rules = append(rules, nr)
 	}
+	return s.CreateSecurityGroup(in.VpcID, in.Name, in.Description, nil, rules)
+}
+
+// CreateSecurityGroup creates a group in a VPC (the default VPC when vpcID is
+// empty) with already-normalized ingress rules.
+func (s *Service) CreateSecurityGroup(vpcID, name, description string, tags core.Tags, ingress []Rule) (SecurityGroup, error) {
+	if vpcID == "" {
+		vpcID = s.DefaultVPCID()
+	}
+	if !store.Has(s.env.Store, cVPCs, vpcID) {
+		return SecurityGroup{}, core.NotFound("vpc", vpcID)
+	}
+	if strings.TrimSpace(name) == "" || strings.HasPrefix(name, "sg-") || len(name) > 255 {
+		return SecurityGroup{}, core.BadRequest("name is required, may not start with sg- and must be at most 255 characters")
+	}
+	for _, g := range store.List[SecurityGroup](s.env.Store, cSGs) {
+		if g.VpcID == vpcID && g.Name == name {
+			return SecurityGroup{}, core.Errf(http.StatusConflict, "InvalidGroup.Duplicate", "security group %q already exists in %s", name, vpcID)
+		}
+	}
+	if ingress == nil {
+		ingress = []Rule{}
+	}
+	g := SecurityGroup{ID: core.NewID("sg"), VpcID: vpcID, Name: name, Description: description, Ingress: ingress, CreatedAt: core.Now(), Tags: tags}
 	return g, store.Put(s.env.Store, cSGs, g.ID, g)
 }
 
@@ -678,16 +770,29 @@ func (s *Service) removeRule(c *httpx.Ctx) (any, error) {
 	return g, err
 }
 
-func (s *Service) deleteSG(c *httpx.Ctx) (any, error) {
-	g, err := store.Get[SecurityGroup](s.env.Store, cSGs, c.Param("id"))
+func (s *Service) deleteSG(c *httpx.Ctx) (any, error) { return nil, s.DeleteSecurityGroup(c.Param("id")) }
+
+// DeleteSecurityGroup removes a group that no resource or other group's rule uses.
+func (s *Service) DeleteSecurityGroup(id string) error {
+	g, err := store.Get[SecurityGroup](s.env.Store, cSGs, id)
 	if err != nil {
-		return nil, core.NotFound("security group", c.Param("id"))
+		return core.NotFound("security group", id)
 	}
 	if g.Name == "default" {
-		return nil, core.Errf(http.StatusConflict, "CannotDelete", "the default security group cannot be deleted")
+		return core.Errf(http.StatusConflict, "CannotDelete", "the default security group cannot be deleted")
 	}
 	if s.InUse != nil && s.InUse(g.ID) {
-		return nil, core.Errf(http.StatusConflict, "DependencyViolation", "security group %s is in use", g.ID)
+		return core.Errf(http.StatusConflict, "DependencyViolation", "security group %s is in use", g.ID)
 	}
-	return nil, store.Delete(s.env.Store, cSGs, g.ID)
+	for _, o := range store.List[SecurityGroup](s.env.Store, cSGs) {
+		if o.ID == g.ID {
+			continue
+		}
+		for _, r := range append(slices.Clone(o.Ingress), o.Egress...) {
+			if r.SourceGroup == g.ID {
+				return core.Errf(http.StatusConflict, "DependencyViolation", "security group %s is referenced by a rule of %s", g.ID, o.ID)
+			}
+		}
+	}
+	return store.Delete(s.env.Store, cSGs, g.ID)
 }

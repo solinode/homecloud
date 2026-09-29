@@ -34,6 +34,33 @@ type VolumeAttachment struct {
 	VolumeID            string `json:"volume_id"`
 	MountPath           string `json:"mount_path"`
 	DeleteOnTermination bool   `json:"delete_on_termination"`
+	// Device is the EC2 device name (/dev/sdf); the volume is mounted at MountPath.
+	Device     string    `json:"device,omitempty"`
+	AttachTime time.Time `json:"attach_time,omitempty"`
+}
+
+// MetadataOptions configure the instance metadata service for an instance.
+type MetadataOptions struct {
+	HttpTokens           string `json:"http_tokens,omitempty"`   // optional | required
+	HttpEndpoint         string `json:"http_endpoint,omitempty"` // enabled | disabled
+	HopLimit             int    `json:"hop_limit,omitempty"`
+	InstanceMetadataTags string `json:"instance_metadata_tags,omitempty"` // enabled | disabled
+}
+
+func (m MetadataOptions) withDefaults() MetadataOptions {
+	if m.HttpTokens == "" {
+		m.HttpTokens = "optional"
+	}
+	if m.HttpEndpoint == "" {
+		m.HttpEndpoint = "enabled"
+	}
+	if m.HopLimit == 0 {
+		m.HopLimit = 1
+	}
+	if m.InstanceMetadataTags == "" {
+		m.InstanceMetadataTags = "disabled"
+	}
+	return m
 }
 
 type Instance struct {
@@ -63,6 +90,31 @@ type Instance struct {
 	LaunchTime       time.Time          `json:"launch_time"`
 	TerminatedAt     *time.Time         `json:"terminated_at,omitempty"`
 	Tags             core.Tags          `json:"tags,omitempty"`
+
+	// KeyName is the key pair whose public key is in root's authorized_keys.
+	KeyName string `json:"key_name,omitempty"`
+	// IAMProfileARN is the instance profile whose role the metadata service
+	// hands out credentials for.
+	IAMProfileARN string          `json:"iam_profile_arn,omitempty"`
+	IAMProfileID  string          `json:"iam_profile_id,omitempty"`
+	Metadata      MetadataOptions `json:"metadata_options"`
+	// EC2 attributes (recorded; DisableAPITermination and DisableAPIStop are enforced).
+	DisableAPITermination bool   `json:"disable_api_termination,omitempty"`
+	DisableAPIStop        bool   `json:"disable_api_stop,omitempty"`
+	ShutdownBehavior      string `json:"shutdown_behavior,omitempty"`
+	SourceDestCheckOff    bool   `json:"source_dest_check_off,omitempty"`
+	CPUCredits            string `json:"cpu_credits,omitempty"`
+	Monitoring            bool   `json:"monitoring,omitempty"`
+	EBSOptimized          bool   `json:"ebs_optimized,omitempty"`
+	ReservationID         string `json:"reservation_id,omitempty"`
+	LaunchIndex           int    `json:"launch_index,omitempty"`
+	ClientToken           string `json:"client_token,omitempty"`
+	LaunchTemplateID      string `json:"launch_template_id,omitempty"`
+	LaunchTemplateVersion string `json:"launch_template_version,omitempty"`
+	// RootImage is the image the container was last created from when it
+	// differs from the AMI (a volume attach recreates the container from a
+	// snapshot of its disk).
+	RootImage string `json:"root_image,omitempty"`
 }
 
 type Volume struct {
@@ -75,6 +127,17 @@ type Volume struct {
 	AvailabilityZone string    `json:"availability_zone"`
 	CreatedAt        time.Time `json:"created_at"`
 	Tags             core.Tags `json:"tags,omitempty"`
+	// EBS attributes (recorded).
+	VolumeType string `json:"volume_type,omitempty"`
+	Iops       int    `json:"iops,omitempty"`
+	Throughput int    `json:"throughput,omitempty"`
+	Encrypted  bool   `json:"encrypted,omitempty"`
+	KMSKeyID   string `json:"kms_key_id,omitempty"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
+	// Device and AttachTime describe the current attachment.
+	Device              string    `json:"device,omitempty"`
+	AttachTime          time.Time `json:"attach_time,omitempty"`
+	DeleteOnTermination bool      `json:"delete_on_termination,omitempty"`
 }
 
 func volumeName(id string) string { return "hc-" + id }
@@ -88,6 +151,23 @@ type Service struct {
 	mu      sync.Mutex // serialises state transitions
 	// OnTerminate is called after an instance is terminated (e.g. to deregister it from target groups).
 	OnTerminate func(id string)
+	// Roles resolves instance profiles and issues their role's credentials (IAM).
+	Roles Roles
+	imds  *imds
+}
+
+// Roles is what EC2 needs from IAM for instance profiles.
+type Roles interface {
+	// InstanceProfile resolves a profile name or ARN to its ARN, ID and role name.
+	InstanceProfile(ref string) (arn, id, role string, err error)
+	// InstanceCredentials issues credentials for a role to ec2.amazonaws.com.
+	InstanceCredentials(role, session string, ttl time.Duration) (Credentials, error)
+}
+
+// Credentials are temporary credentials for an instance's role.
+type Credentials struct {
+	AccessKeyID, SecretAccessKey, SessionToken string
+	Expiration                                 time.Time
 }
 
 func New(env *svc.Env, v *vpc.Service) *Service {
@@ -224,13 +304,46 @@ type RunInput struct {
 	UserData         string    `json:"user_data"`
 	Count            int       `json:"count"`
 	Tags             core.Tags `json:"tags"`
-	Volumes          []struct {
-		VolumeID            string `json:"volume_id"` // attach an existing available volume
-		SizeGB              int    `json:"size_gb"`   // or create a new one
-		MountPath           string `json:"mount_path"`
-		DeleteOnTermination *bool  `json:"delete_on_termination"`
-	} `json:"volumes"`
-	FileSystems []FSMount `json:"file_systems"`
+	Volumes          []VolumeSpec `json:"volumes"`
+	FileSystems      []FSMount    `json:"file_systems"`
+	// KeyName puts a key pair's public key in root's authorized_keys.
+	KeyName string `json:"key_name"`
+	// IAMInstanceProfile (name or ARN) gives the instance its role's credentials
+	// through the metadata service. The caller must be allowed iam:PassRole.
+	IAMInstanceProfile string          `json:"iam_instance_profile"`
+	Metadata           MetadataOptions `json:"metadata_options"`
+	// Attrs are EC2 API attributes (RunInstances).
+	Attrs InstanceAttrs `json:"-"`
+	// VolumeTags are applied to volumes created at launch.
+	VolumeTags core.Tags `json:"-"`
+}
+
+// VolumeSpec is a volume to attach at launch: an existing one or a new one.
+type VolumeSpec struct {
+	VolumeID            string `json:"volume_id"` // attach an existing available volume
+	SizeGB              int    `json:"size_gb"`   // or create a new one
+	MountPath           string `json:"mount_path"`
+	DeleteOnTermination *bool  `json:"delete_on_termination"`
+	// EC2 block device mapping fields.
+	Device     string `json:"device,omitempty"`
+	SnapshotID string `json:"snapshot_id,omitempty"`
+	VolumeType string `json:"volume_type,omitempty"`
+	Iops       int    `json:"iops,omitempty"`
+	Throughput int    `json:"throughput,omitempty"`
+	Encrypted  bool   `json:"encrypted,omitempty"`
+	KMSKeyID   string `json:"kms_key_id,omitempty"`
+}
+
+// InstanceAttrs are the EC2 API's instance attributes.
+type InstanceAttrs struct {
+	DisableAPITermination, DisableAPIStop, SourceDestCheckOff, Monitoring, EBSOptimized bool
+	ShutdownBehavior, CPUCredits, ClientToken, ReservationID                          string
+	LaunchTemplateID, LaunchTemplateVersion                                           string
+}
+
+// devicePath is where an EBS device is mounted: /dev/sdf -> /mnt/sdf.
+func devicePath(device string) string {
+	return "/mnt/" + device[strings.LastIndexByte(device, '/')+1:]
 }
 
 func (s *Service) image(id string) (Image, error) {
