@@ -50,7 +50,7 @@ export function PolicyCreate() {
     <div className="flex flex-col gap-4 pb-20">
       <PageHeader
         title="Create policy"
-        description="Policies grant permissions to the users and groups they are attached to. Write the policy in JSON using the Version / Statement grammar."
+        description="Policies grant permissions to the users, groups and roles they are attached to. Write the policy in JSON using the Version / Statement grammar."
         breadcrumbs={[{ label: "IAM", href: "/iam/" }, { label: "Policies", href: "/iam/policies/" }, { label: "Create policy" }]}
       />
       <Section title="Policy details">

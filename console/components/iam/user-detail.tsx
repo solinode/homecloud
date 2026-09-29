@@ -347,7 +347,7 @@ function PermissionsTab({
       <InlinePolicyDialog
         open={inline.open}
         onOpenChange={(o) => setInline((s) => ({ ...s, open: o }))}
-        user={user.name}
+        owner={user.name}
         initial={inline.initial}
         readOnly={inline.readOnly}
         existing={inlineNames}
