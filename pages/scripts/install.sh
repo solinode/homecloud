@@ -1,6 +1,6 @@
 #!/bin/sh
 # HomeCloud installer for Linux and macOS.
-#   curl -fsSL https://raw.githubusercontent.com/homecloudhq/homecloud/main/scripts/install.sh | sh
+#   curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh
 # Set HOMECLOUD_VERSION (e.g. v0.1.0) to pin a release, INSTALL_DIR to change the target.
 set -eu
 

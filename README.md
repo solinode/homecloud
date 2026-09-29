@@ -65,13 +65,13 @@ You need **Docker** (Docker Engine on Linux, or Docker Desktop / OrbStack on mac
 **Linux / macOS**
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/homecloudhq/homecloud/main/scripts/install.sh | sh
+curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://raw.githubusercontent.com/homecloudhq/homecloud/main/scripts/install.ps1 | iex
+irm https://homecloud.pages.dev/scripts/install.ps1 | iex
 ```
 
 Or build from source with Go 1.25+ and Node.js 22+: `make` (the binary lands in `bin/homecloud`).
