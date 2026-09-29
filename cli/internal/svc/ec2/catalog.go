@@ -1,5 +1,7 @@
 package ec2
 
+import "github.com/homecloudhq/homecloud/cli/internal/core"
+
 // InstanceType is a named CPU/memory shape.
 type InstanceType struct {
 	Name     string  `json:"name"`
@@ -45,14 +47,25 @@ type Image struct {
 	State     string `json:"state"`
 	CreatedAt string `json:"created_at,omitempty"`
 	// SourceInstance is set for images captured from an instance.
-	SourceInstance string `json:"source_instance,omitempty"`
+	SourceInstance string    `json:"source_instance,omitempty"`
+	Tags           core.Tags `json:"tags,omitempty"`
+	// AWSName is the catalog image's name in the EC2 API, in the style of the
+	// real AMI ({deb}/{rpm} stand for the host architecture), so that the
+	// usual AMI lookups (Terraform aws_ami, SSM-less scripts) find it.
+	AWSName string `json:"-"`
+	// OwnerID is the catalog image's owner in the EC2 API (the vendor's AWS account).
+	OwnerID string `json:"-"`
 }
 
 var catalog = []Image{
-	{ID: "ami-ubuntu-24-04", Name: "Ubuntu Server 24.04 LTS", Description: "Canonical Ubuntu 24.04 (Noble Numbat)", Ref: "ubuntu:24.04", Platform: "linux", KeepAlive: true},
-	{ID: "ami-ubuntu-22-04", Name: "Ubuntu Server 22.04 LTS", Description: "Canonical Ubuntu 22.04 (Jammy Jellyfish)", Ref: "ubuntu:22.04", Platform: "linux", KeepAlive: true},
-	{ID: "ami-debian-12", Name: "Debian 12", Description: "Debian GNU/Linux 12 (bookworm)", Ref: "debian:12", Platform: "linux", KeepAlive: true},
-	{ID: "ami-amazonlinux-2023", Name: "Amazon Linux 2023", Description: "Amazon Linux 2023 base image", Ref: "amazonlinux:2023", Platform: "linux", KeepAlive: true},
+	{ID: "ami-ubuntu-24-04", Name: "Ubuntu Server 24.04 LTS", Description: "Canonical Ubuntu 24.04 (Noble Numbat)", Ref: "ubuntu:24.04", Platform: "linux", KeepAlive: true,
+		AWSName: "ubuntu/images/hvm-ssd-gp3/ubuntu-noble-24.04-{deb}-server-20240101", OwnerID: ownerCanonical},
+	{ID: "ami-ubuntu-22-04", Name: "Ubuntu Server 22.04 LTS", Description: "Canonical Ubuntu 22.04 (Jammy Jellyfish)", Ref: "ubuntu:22.04", Platform: "linux", KeepAlive: true,
+		AWSName: "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-{deb}-server-20240101", OwnerID: ownerCanonical},
+	{ID: "ami-debian-12", Name: "Debian 12", Description: "Debian GNU/Linux 12 (bookworm)", Ref: "debian:12", Platform: "linux", KeepAlive: true,
+		AWSName: "debian-12-{deb}-20240101-0000", OwnerID: ownerDebian},
+	{ID: "ami-amazonlinux-2023", Name: "Amazon Linux 2023", Description: "Amazon Linux 2023 base image", Ref: "amazonlinux:2023", Platform: "linux", KeepAlive: true,
+		AWSName: "al2023-ami-2023.0.20240101.0-kernel-6.1-{rpm}"},
 	{ID: "ami-rocky-9", Name: "Rocky Linux 9", Description: "Enterprise Linux compatible", Ref: "rockylinux:9", Platform: "linux", KeepAlive: true},
 	{ID: "ami-fedora-41", Name: "Fedora 41", Description: "Fedora Linux 41", Ref: "fedora:41", Platform: "linux", KeepAlive: true},
 	{ID: "ami-alpine-3-20", Name: "Alpine Linux 3.20", Description: "Minimal 5 MB Linux", Ref: "alpine:3.20", Platform: "linux", KeepAlive: true},
@@ -61,8 +74,18 @@ var catalog = []Image{
 	{ID: "ami-node-22", Name: "Node.js 22", Description: "Debian with Node.js 22 LTS", Ref: "node:22-slim", Platform: "linux", KeepAlive: true},
 }
 
+// Catalog image owners in the EC2 API. Others are owned by "amazon".
+const (
+	ownerAmazon    = "137112412989"
+	ownerCanonical = "099720109477"
+	ownerDebian    = "136693071363"
+)
+
 // bootScript runs user data once per instance, then idles until stopped.
+// It first waits briefly for HomeCloud to route the instance metadata service
+// (169.254.169.254, "FEA9FEA9" in /proc/net/route) so user data can use it.
 const bootScript = `mkdir -p /var/lib/homecloud
+n=0; while [ $n -lt 50 ] && ! grep -qi FEA9FEA9 /proc/net/route 2>/dev/null; do n=$((n+1)); sleep 0.2; done
 if [ -s /var/lib/homecloud/user-data ] && [ ! -f /var/lib/homecloud/.user-data-done ]; then
   echo "[homecloud] running user data"
   sh /var/lib/homecloud/user-data 2>&1 | tee /var/log/homecloud-user-data.log

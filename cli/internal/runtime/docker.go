@@ -92,6 +92,7 @@ type RunSpec struct {
 	Hostname   string
 	DNS        []string // upstream servers for Docker's embedded DNS
 	ExtraHosts []string // "name:ip" entries for /etc/hosts ("host-gateway" is the Docker host)
+	CapAdd     []string // extra Linux capabilities (e.g. NET_ADMIN)
 	Start      bool
 }
 
@@ -156,6 +157,7 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 		// Quota/period rather than NanoCPUs so limits can be changed later with docker update.
 		hc.CPUPeriod, hc.CPUQuota = 100000, s.NanoCPUs/10000
 	}
+	hc.CapAdd = s.CapAdd
 	if s.Restart != "" {
 		hc.RestartPolicy = docker.RestartPolicy{Name: s.Restart}
 	}

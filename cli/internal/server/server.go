@@ -164,7 +164,13 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	ec2Svc := ec2.New(env, vpcSvc)
 	ec2Svc.Recover()
 	s3Svc := s3.New(env, secSvc)
-	vpcSvc.AfterCreate = s3Svc.ConnectNetwork
+	vpcSvc.AfterCreate = func(v vpc.VPC) {
+		s3Svc.ConnectNetwork(v)
+		ec2Svc.VPCCreated(v)
+	}
+	vpcSvc.BeforeDelete = ec2Svc.VPCDeleted
+	vpcSvc.NetworkChanged = ec2Svc.NetworkChanged
+	ec2Svc.Roles = ec2Roles{iamSvc}
 	rdsSvc := rds.New(env, vpcSvc, secSvc)
 	rdsSvc.Recover()
 	lambdaSvc := lambda.New(env, cw, vpcSvc)
@@ -274,6 +280,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	cw.RegisterAWS()
 	eventsSvc.RegisterAWS()
 	sfnSvc.RegisterAWS()
+	ec2Svc.RegisterAWS()
 	awsHandler := &awsapi.Handler{Creds: iamSvc, Account: account, Audit: trailSvc.Record}
 	if len(httpx.Unscoped) > 0 {
 		return fmt.Errorf("internal error: routes without a resource ARN: %v", httpx.Unscoped)
@@ -282,6 +289,8 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, 200, map[string]any{"status": "ok", "version": Version, "region": cfg.Region, "uptime_seconds": int(time.Since(started).Seconds())})
 	})
+	// The instance metadata service, reached through the homecloud-imds helper.
+	mux.Handle(ec2.IMDSPath, ec2Svc.IMDSHandler())
 	mux.HandleFunc("/api/", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteError(w, core.Errf(http.StatusNotFound, "UnknownOperation", "no API route for %s %s", r.Method, r.URL.Path))
 	})
@@ -300,6 +309,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	go ecsSvc.Run(ctx)
 	go asgSvc.Run(ctx)
 	go dnsSvc.Run(ctx)
+	go ec2Svc.RunIMDS(ctx)
 	go func() {
 		if err := ecrSvc.Start(ctx); err != nil {
 			logf("ecr: %v", err)
