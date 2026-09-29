@@ -57,7 +57,7 @@ export function PoliciesList() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Policies"
-        description="A policy is an object that defines permissions. Attach policies to users and groups to control what they can do."
+        description="A policy is an object that defines permissions. Attach policies to users, groups and roles to control what they can do."
         breadcrumbs={[{ label: "IAM", href: "/iam/" }, { label: "Policies" }]}
       />
       <DataTable

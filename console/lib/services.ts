@@ -258,6 +258,7 @@ export const SERVICES: ServiceDef[] = [
         items: [
           { label: "Users", href: "/iam/users/", match: ["/iam/user/"] },
           { label: "User groups", href: "/iam/groups/", match: ["/iam/group/"] },
+          { label: "Roles", href: "/iam/roles/", match: ["/iam/role/", "/iam/roles/"] },
           { label: "Policies", href: "/iam/policies/", match: ["/iam/policy/"] },
         ],
       },

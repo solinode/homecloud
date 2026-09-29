@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { AlertTriangle, ArrowRight, CheckCircle2, FileText, FlaskConical, Info, KeyRound, ShieldCheck, UserPlus, Users, UsersRound } from "lucide-react"
+import { AlertTriangle, ArrowRight, CheckCircle2, FileText, FlaskConical, Info, KeyRound, ShieldCheck, UserCog, UserPlus, Users, UsersRound } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { CopyableText } from "@/components/console/copy-button"
@@ -12,10 +12,11 @@ import { Section } from "@/components/console/section"
 import { useSession } from "@/components/console/auth"
 import { useApi } from "@/lib/hooks"
 import { pluralize } from "@/lib/format"
-import type { IamGroup, IamSummary, IamUser, PolicySummary } from "@/lib/types"
+import type { IamGroup, IamRole, IamSummary, IamUser, PolicySummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { IAM, keyIdleDays, policyHref, signInUrl, useAccessKeysByUser, userHref } from "./common"
+import { DAY, IAM, keyIdleDays, policyHref, signInUrl, useAccessKeysByUser, userHref } from "./common"
+import { createRoleHref, roleHref } from "./role-common"
 
 function StatCard({ href, icon: Icon, label, value, sub, loading }: { href: string; icon: typeof Users; label: string; value: ReactNode; sub?: ReactNode; loading: boolean }) {
   return (
@@ -69,6 +70,7 @@ export function IamDashboard() {
   const users = useApi<IamUser[]>(`${IAM}/users`)
   const groups = useApi<IamGroup[]>(`${IAM}/groups`)
   const policies = useApi<PolicySummary[]>(`${IAM}/policies`)
+  const roles = useApi<IamRole[]>(`${IAM}/roles`)
   const keys = useAccessKeysByUser(users.data?.map((u) => u.name))
   const [origin, setOrigin] = useState("")
   useEffect(() => setOrigin(signInUrl()), [])
@@ -160,7 +162,7 @@ export function IamDashboard() {
         id: "unattached",
         severity: "info",
         title: `${pluralize(unattached.length, "customer managed policy", "customer managed policies")} not attached to anything`,
-        detail: <>{names(unattached, policyHref)}. Attach them to users or groups, or delete them.</>,
+        detail: <>{names(unattached, policyHref)}. Attach them to users, groups or roles, or delete them.</>,
       })
 
     const direct = nonRoot.filter((u) => u.attached_policies.length > 0 && u.groups.length === 0).map((u) => u.name)
@@ -179,8 +181,17 @@ export function IamDashboard() {
           </>
         ),
       })
+
+    const unusedRoles = (roles.data ?? []).filter((r) => now - new Date(r.last_used ?? r.created_at).getTime() > 90 * DAY).map((r) => r.name)
+    if (unusedRoles.length)
+      out.push({
+        id: "unused-roles",
+        severity: "info",
+        title: `${pluralize(unusedRoles.length, "role")} not used for more than 90 days`,
+        detail: <>{names(unusedRoles, roleHref)}. Delete roles that are no longer needed.</>,
+      })
     return out
-  }, [users.data, keys.data, policies.data, groups.data])
+  }, [users.data, keys.data, policies.data, groups.data, roles.data])
 
   const recsLoading = users.isLoading || policies.isLoading || (!!users.data && !keys.data)
   const signIn = origin || "/login/"
@@ -190,9 +201,17 @@ export function IamDashboard() {
       <PageHeader title="IAM dashboard" description="Manage who can sign in to HomeCloud and what they are allowed to do." />
 
       <Section title="IAM resources" description="Resources in this account">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
           <StatCard href="/iam/users/" icon={Users} label="Users" value={summary.data?.users ?? 0} sub={users.data ? `${users.data.filter((u) => u.console_access).length} with console access` : undefined} loading={summary.isLoading} />
           <StatCard href="/iam/groups/" icon={UsersRound} label="User groups" value={summary.data?.groups ?? 0} loading={summary.isLoading} />
+          <StatCard
+            href="/iam/roles/"
+            icon={UserCog}
+            label="Roles"
+            value={summary.data?.roles ?? roles.data?.length ?? 0}
+            sub={roles.data ? `${roles.data.filter((r) => r.trusted_services.length).length} for HomeCloud services` : undefined}
+            loading={summary.isLoading}
+          />
           <StatCard
             href="/iam/policies/"
             icon={FileText}
@@ -254,6 +273,7 @@ export function IamDashboard() {
               {[
                 { href: "/iam/users/?create=1", label: "Create user", icon: UserPlus },
                 { href: "/iam/groups/?create=1", label: "Create user group", icon: UsersRound },
+                { href: createRoleHref(), label: "Create role", icon: UserCog },
                 { href: "/iam/policies/create/", label: "Create policy", icon: FileText },
                 { href: `${userHref(session.user.name)}&tab=credentials`, label: "My security credentials", icon: ShieldCheck },
                 { href: "/iam/simulator/", label: "Policy simulator", icon: FlaskConical },

@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useState } from "react"
-import { Info, Loader2, Pencil, Trash2, Users, UsersRound } from "lucide-react"
+import { Info, Loader2, Pencil, Trash2, UserCog, Users, UsersRound } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -26,6 +26,7 @@ import type { PolicyDetail as PolicyDetailT } from "@/lib/types"
 
 import { IAM, PolicyStatementsTable, PolicyTypeBadge, groupHref, policyJson, userHref } from "./common"
 import { PolicyEditor, policyTextError } from "./policy-editor"
+import { roleHref } from "./role-common"
 
 export function PolicyDetail() {
   const name = useQueryParam("name")
@@ -61,7 +62,8 @@ export function PolicyDetail() {
   const { policy, attachments } = data
   const users = attachments?.users ?? []
   const groups = attachments?.groups ?? []
-  const attachedCount = users.length + groups.length
+  const roles = attachments?.roles ?? []
+  const attachedCount = users.length + groups.length + roles.length
   const json = policyJson(policy.document)
 
   const startEdit = () => {
@@ -131,7 +133,7 @@ export function PolicyDetail() {
         </TabsList>
         <TabsContent value="permissions" className="flex flex-col gap-4">
           {editing ? (
-            <Section title="Edit policy" description="Changes apply immediately to every user and group this policy is attached to.">
+            <Section title="Edit policy" description="Changes apply immediately to every user, group and role this policy is attached to.">
               <div className="flex flex-col gap-4">
                 <Field label="Description" htmlFor="edit-desc" optional>
                   <Textarea id="edit-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} />
@@ -169,9 +171,9 @@ export function PolicyDetail() {
           )}
         </TabsContent>
         <TabsContent value="entities">
-          <Section title="Entities attached" description="Users and user groups this policy is attached to as a permissions policy." flush>
+          <Section title="Entities attached" description="Users, user groups and roles this policy is attached to as a permissions policy." flush>
             {!attachedCount ? (
-              <EmptyState icon={Users} title="Not attached" description="Attach this policy from a user's Permissions tab or a group's Permissions tab." />
+              <EmptyState icon={Users} title="Not attached" description="Attach this policy from the Permissions tab of a user, group or role." />
             ) : (
               <div className="overflow-x-auto">
                 <table className="w-full text-sm">
@@ -210,6 +212,20 @@ export function PolicyDetail() {
                         </td>
                       </tr>
                     ))}
+                    {roles.map((r) => (
+                      <tr key={`r-${r}`} className="border-b last:border-0">
+                        <td className="px-4 py-2">
+                          <Link href={roleHref(r)} className="text-primary font-medium hover:underline">
+                            {r}
+                          </Link>
+                        </td>
+                        <td className="text-muted-foreground px-4 py-2">
+                          <span className="flex items-center gap-1.5">
+                            <UserCog className="size-3.5" /> Role
+                          </span>
+                        </td>
+                      </tr>
+                    ))}
                   </tbody>
                 </table>
               </div>
@@ -224,7 +240,7 @@ export function PolicyDetail() {
         title={`Delete ${policy.name}?`}
         description={
           attachedCount
-            ? `This policy is attached to ${users.length} user(s) and ${groups.length} group(s). Detach it from every entity first; the API rejects deleting an attached policy.`
+            ? `This policy is attached to ${users.length} user(s), ${groups.length} group(s) and ${roles.length} role(s). Detach it from every entity first; the API rejects deleting an attached policy.`
             : "The policy is permanently deleted. This cannot be undone."
         }
         confirmText={policy.name}
