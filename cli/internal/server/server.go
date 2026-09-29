@@ -20,6 +20,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cfn"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cloudwatch"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/cognito"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/dynamodb"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ecr"
@@ -167,6 +168,8 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	eventsSvc := events.New(env)
 	sfnSvc := sfn.New(env)
 	cfnSvc := cfn.New(env)
+	cognitoSvc := cognito.New(env, secSvc)
+	lambdaSvc.VerifyJWT = cognitoSvc.VerifyToken
 	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc, sfn: sfnSvc}
 	sfnSvc.Tasks = tg
 	eventsSvc.Deliver, eventsSvc.Exists = tg.deliver, tg.exists
@@ -177,7 +180,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 	mux := http.NewServeMux()
 	rt := &httpx.Router{Mux: mux, Auth: iamSvc, Account: account, Audit: trailSvc.Record}
-	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, trailSvc} {
+	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, trailSvc} {
 		s.Routes(rt)
 	}
 	started := time.Now()

@@ -50,6 +50,36 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | DELETE | `/api/v1/iam/policies/{name}` | `iam:DeletePolicy` |
 | POST | `/api/v1/iam/simulate` | `iam:SimulatePrincipalPolicy` |
 
+## Cognito (user pools)
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/cognito/user-pools` | `cognito-idp:ListUserPools` |
+| POST | `/api/v1/cognito/user-pools` | `cognito-idp:CreateUserPool` |
+| GET | `/api/v1/cognito/user-pools/{pool}` | `cognito-idp:DescribeUserPool` |
+| PATCH | `/api/v1/cognito/user-pools/{pool}` | `cognito-idp:UpdateUserPool` |
+| DELETE | `/api/v1/cognito/user-pools/{pool}` | `cognito-idp:DeleteUserPool` |
+| GET | `/api/v1/cognito/user-pools/{pool}/clients` | `cognito-idp:ListUserPoolClients` |
+| POST | `/api/v1/cognito/user-pools/{pool}/clients` | `cognito-idp:CreateUserPoolClient` |
+| DELETE | `/api/v1/cognito/user-pools/{pool}/clients/{client}` | `cognito-idp:DeleteUserPoolClient` |
+| GET | `/api/v1/cognito/user-pools/{pool}/users` | `cognito-idp:ListUsers` |
+| POST | `/api/v1/cognito/user-pools/{pool}/users` | `cognito-idp:AdminCreateUser` |
+| GET | `/api/v1/cognito/user-pools/{pool}/users/{user}` | `cognito-idp:AdminGetUser` |
+| DELETE | `/api/v1/cognito/user-pools/{pool}/users/{user}` | `cognito-idp:AdminDeleteUser` |
+| PATCH | `/api/v1/cognito/user-pools/{pool}/users/{user}` | `cognito-idp:AdminUpdateUserAttributes` |
+| POST | `/api/v1/cognito/user-pools/{pool}/users/{user}/password` | `cognito-idp:AdminSetUserPassword` |
+| POST | `/api/v1/cognito/user-pools/{pool}/users/{user}/sign-out` | `cognito-idp:AdminUserGlobalSignOut` |
+| POST | `/api/v1/cognito/user-pools/{pool}/groups` | `cognito-idp:CreateGroup` |
+| DELETE | `/api/v1/cognito/user-pools/{pool}/groups/{group}` | `cognito-idp:DeleteGroup` |
+| POST | `/cognito/{pool}/sign-up` | `(public)` |
+| POST | `/cognito/{pool}/auth` | `(public)` |
+| POST | `/cognito/{pool}/respond` | `(public)` |
+| POST | `/cognito/{pool}/change-password` | `(public)` |
+| GET | `/cognito/{pool}/userinfo` | `(public)` |
+| POST | `/cognito/{pool}/sign-out` | `(public)` |
+| GET | `/cognito/{pool}/.well-known/jwks.json` | `(public)` |
+| GET | `/cognito/{pool}/.well-known/openid-configuration` | `(public)` |
+
 ## EC2 (compute, volumes, EFS file systems)
 
 | Method | Path | IAM action |

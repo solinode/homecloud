@@ -41,6 +41,7 @@ No third parties. No vendor lock-in. No surprise billing.
 | **Workflows** | Step Functions | State machines in Amazon States Language: Task (Lambda, SQS, SNS), Choice, Wait, Parallel, Map, Pass, Succeed, Fail, with Retry/Catch, JSONPath input/output processing, intrinsic functions and a full execution history |
 | **Events** | EventBridge | Scheduled rules (`rate(...)`, `cron(...)`), event buses with pattern matching, targets in Lambda/SQS/SNS |
 | **Identity** | IAM | Users, groups, managed and custom JSON policies with allow/deny and resource ARNs, access keys, console passwords, a policy simulator |
+| **App identity** | Cognito | User pools with sign-up, sign-in, refresh tokens, forced password changes, groups and global sign-out; RS256 JWTs with a JWKS endpoint; API Gateway routes can require them |
 | **Secrets & keys** | Secrets Manager, KMS, SSM Parameter Store | Versioned secrets, customer keys with encrypt/decrypt, data keys, rotation and encryption context, hierarchical configuration parameters with SecureString values |
 | **Monitoring** | CloudWatch | Per-resource CPU/memory/network/disk metrics, custom metrics, alarms that notify SNS topics or webhooks, log groups for every function and container |
 | **Infrastructure as code** | CloudFormation | YAML/JSON stack templates for 30 resource types across every service, with parameters, outputs, `!Ref`/`!GetAtt`/`!Sub`/`!Join`, dependency ordering, readiness waits, rollback, updates and ordered deletion |
@@ -147,7 +148,7 @@ aws --endpoint-url http://localhost:9500 s3 ls
 * ✅ **Containers:** ECS services and tasks, ECR registry, load balancers, shared file systems
 * ✅ **Workflows:** Step Functions
 * ✅ **Infrastructure as code:** CloudFormation-style stacks
-* 🔄 **Next:** VM-backed instances (QEMU/KVM), TLS certificates (ACM), DNS (Route 53), Auto Scaling, Cognito, multi-node clusters
+* 🔄 **Next:** VM-backed instances (QEMU/KVM), TLS certificates (ACM), DNS (Route 53), Auto Scaling, multi-node clusters
 * 🔄 **Phase 4:** Edge compute and hardware integrations
 
 📍 **[Explore the full roadmap](https://github.com/orgs/homecloudhq/projects/1/views/1)**

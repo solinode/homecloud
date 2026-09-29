@@ -144,5 +144,6 @@ var builtinPolicies = []struct {
 	{"EFSFullAccess", "Full access to shared file systems.", doc("Allow", "elasticfilesystem:*")},
 	{"APIGatewayFullAccess", "Full access to HTTP APIs.", doc("Allow", "apigateway:*")},
 	{"CloudFormationFullAccess", "Full access to stacks (resources are created with the caller's own permissions).", doc("Allow", "cloudformation:*")},
+	{"CognitoPowerUser", "Full access to user pools, app clients and pool users.", doc("Allow", "cognito-idp:*")},
 	{"StepFunctionsFullAccess", "Full access to state machines and executions.", doc("Allow", "states:*")},
 }
