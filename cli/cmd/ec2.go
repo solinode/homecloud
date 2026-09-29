@@ -18,7 +18,7 @@ func init() {
 
 	var run struct {
 		Name, Image, Type, Subnet, UserData, UserDataFile string
-		SGs, Tags, Volumes                                []string
+		SGs, Tags, Volumes, FS                            []string
 		Count                                             int
 		Wait                                              bool
 	}
@@ -49,7 +49,15 @@ func init() {
 					vols = append(vols, map[string]any{"size_gb": n, "mount_path": mount})
 				}
 			}
-			body := map[string]any{"name": run.Name, "image_id": run.Image, "instance_type": run.Type, "subnet_id": run.Subnet,
+			fss := []map[string]any{}
+			for _, v := range run.FS {
+				id, mount, ok := strings.Cut(v, ":")
+				if !ok {
+					return fmt.Errorf("--fs must be fs-id:/mount/path")
+				}
+				fss = append(fss, map[string]any{"file_system_id": id, "mount_path": mount})
+			}
+			body := map[string]any{"file_systems": fss, "name": run.Name, "image_id": run.Image, "instance_type": run.Type, "subnet_id": run.Subnet,
 				"security_group_ids": run.SGs, "user_data": run.UserData, "count": run.Count, "tags": tagsFlag(run.Tags), "volumes": vols}
 			var out []map[string]any
 			c := api()
@@ -90,6 +98,7 @@ func init() {
 	f.StringVar(&run.UserDataFile, "user-data-file", "", "read user data from a file")
 	f.StringSliceVar(&run.Volumes, "volume", nil, "attach a volume: SIZE_GB:/path (new) or vol-id:/path (existing)")
 	f.StringSliceVar(&run.Tags, "tag", nil, "tags as key=value")
+	f.StringSliceVar(&run.FS, "fs", nil, "mount a shared file system: fs-id:/path")
 	f.IntVar(&run.Count, "count", 1, "number of instances")
 	f.BoolVar(&run.Wait, "wait", true, "wait until instances leave the pending state")
 	ec2.AddCommand(runCmd)

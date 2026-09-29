@@ -55,6 +55,7 @@ type Instance struct {
 	PrivateDNS       string             `json:"private_dns"`
 	SecurityGroups   []string           `json:"security_groups"`
 	Volumes          []VolumeAttachment `json:"volumes"`
+	FileSystems      []FSMount          `json:"file_systems"`
 	UserData         string             `json:"user_data,omitempty"`
 	KeepAlive        bool               `json:"keep_alive"`
 	PublicPorts      map[string]int     `json:"public_ports"` // "80/tcp" -> host port
@@ -187,6 +188,7 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("GET /api/v1/ec2/images/{id}", "ec2:DescribeImages", s.getImage)
 	r.Handle("DELETE /api/v1/ec2/images/{id}", "ec2:DeregisterImage", s.deregisterImage)
 
+	s.efsRoutes(r)
 	r.Handle("GET /api/v1/ec2/volumes", "ec2:DescribeVolumes", s.listVolumes)
 	r.Handle("POST /api/v1/ec2/volumes", "ec2:CreateVolume", s.createVolumeRoute)
 	r.Handle("GET /api/v1/ec2/volumes/{id}", "ec2:DescribeVolumes", s.getVolume)
@@ -220,6 +222,7 @@ type runInput struct {
 		MountPath           string `json:"mount_path"`
 		DeleteOnTermination *bool  `json:"delete_on_termination"`
 	} `json:"volumes"`
+	FileSystems []FSMount `json:"file_systems"`
 }
 
 func (s *Service) image(id string) (Image, error) {
@@ -260,6 +263,18 @@ func (s *Service) run(c *httpx.Ctx) (any, error) {
 	img, err := s.image(in.ImageID)
 	if err != nil {
 		return nil, err
+	}
+	for _, m := range in.FileSystems {
+		if !strings.HasPrefix(m.MountPath, "/") {
+			return nil, core.BadRequest("file system mount_path must be absolute")
+		}
+		fs, err := store.Get[FileSystem](s.env.Store, cFileSystems, m.FileSystemID)
+		if err != nil {
+			return nil, core.NotFound("file system", m.FileSystemID)
+		}
+		if fs.ReadOnly != m.ReadOnly && fs.ReadOnly {
+			return nil, core.BadRequest("file system %s is read-only", fs.ID)
+		}
 	}
 	for _, v := range in.Volumes {
 		if !strings.HasPrefix(v.MountPath, "/") {
@@ -303,7 +318,7 @@ func (s *Service) run(c *httpx.Ctx) (any, error) {
 			InstanceType: it.Name, VCPUs: it.VCPUs, MemoryMB: it.MemoryMB, State: "pending",
 			VpcID: pl.VPC.ID, SubnetID: pl.Subnet.ID, AvailabilityZone: pl.Subnet.AvailabilityZone,
 			PrivateIP: pl.IP, PrivateDNS: "ip-" + strings.ReplaceAll(pl.IP, ".", "-") + ".internal",
-			SecurityGroups: sgs, UserData: in.UserData, KeepAlive: img.KeepAlive, Volumes: []VolumeAttachment{},
+			SecurityGroups: sgs, UserData: in.UserData, KeepAlive: img.KeepAlive, Volumes: []VolumeAttachment{}, FileSystems: nzFS(in.FileSystems),
 			PublicPorts: map[string]int{}, PublicHost: s.env.Cfg.PublicHost, LaunchTime: core.Now(), Tags: in.Tags,
 		}
 		for _, v := range in.Volumes {
@@ -355,6 +370,9 @@ func (s *Service) launch(inst Instance, network string) {
 	mounts := []runtime.Mount{}
 	for _, v := range inst.Volumes {
 		mounts = append(mounts, runtime.Mount{Volume: volumeName(v.VolumeID), Target: v.MountPath})
+	}
+	for _, m := range inst.FileSystems {
+		mounts = append(mounts, runtime.Mount{Volume: fsVolume(m.FileSystemID), Target: m.MountPath, ReadOnly: m.ReadOnly})
 	}
 	meta, _ := json.MarshalIndent(map[string]any{
 		"instance-id": inst.ID, "instance-type": inst.InstanceType, "ami-id": inst.ImageID, "local-ipv4": inst.PrivateIP,
@@ -737,4 +755,13 @@ func (s *Service) Names() map[string]string {
 		out[i.ID] = i.Name
 	}
 	return out
+}
+
+// PrivateIP resolves a running instance to its private IP and VPC (for load balancer targets).
+func (s *Service) PrivateIP(id string) (string, string, bool) {
+	i, err := store.Get[Instance](s.env.Store, cInstances, id)
+	if err != nil || i.State != "running" {
+		return "", "", false
+	}
+	return i.PrivateIP, i.VpcID, true
 }

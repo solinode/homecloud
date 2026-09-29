@@ -50,7 +50,7 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | DELETE | `/api/v1/iam/policies/{name}` | `iam:DeletePolicy` |
 | POST | `/api/v1/iam/simulate` | `iam:SimulatePrincipalPolicy` |
 
-## EC2 (compute)
+## EC2 (compute, volumes, EFS file systems)
 
 | Method | Path | IAM action |
 |---|---|---|
@@ -75,6 +75,10 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/ec2/volumes` | `ec2:CreateVolume` |
 | GET | `/api/v1/ec2/volumes/{id}` | `ec2:DescribeVolumes` |
 | DELETE | `/api/v1/ec2/volumes/{id}` | `ec2:DeleteVolume` |
+| GET | `/api/v1/efs/file-systems` | `elasticfilesystem:DescribeFileSystems` |
+| POST | `/api/v1/efs/file-systems` | `elasticfilesystem:CreateFileSystem` |
+| GET | `/api/v1/efs/file-systems/{id}` | `elasticfilesystem:DescribeFileSystems` |
+| DELETE | `/api/v1/efs/file-systems/{id}` | `elasticfilesystem:DeleteFileSystem` |
 
 ## VPC (networking)
 
@@ -93,6 +97,27 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | DELETE | `/api/v1/vpc/security-groups/{id}` | `ec2:DeleteSecurityGroup` |
 | POST | `/api/v1/vpc/security-groups/{id}/ingress` | `ec2:AuthorizeSecurityGroupIngress` |
 | DELETE | `/api/v1/vpc/security-groups/{id}/ingress/{rule}` | `ec2:RevokeSecurityGroupIngress` |
+
+## Elastic Load Balancing
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/elb/load-balancers` | `elasticloadbalancing:DescribeLoadBalancers` |
+| POST | `/api/v1/elb/load-balancers` | `elasticloadbalancing:CreateLoadBalancer` |
+| GET | `/api/v1/elb/load-balancers/{name}` | `elasticloadbalancing:DescribeLoadBalancers` |
+| DELETE | `/api/v1/elb/load-balancers/{name}` | `elasticloadbalancing:DeleteLoadBalancer` |
+| POST | `/api/v1/elb/load-balancers/{name}/listeners` | `elasticloadbalancing:CreateListener` |
+| DELETE | `/api/v1/elb/load-balancers/{name}/listeners/{id}` | `elasticloadbalancing:DeleteListener` |
+| POST | `/api/v1/elb/load-balancers/{name}/listeners/{id}/rules` | `elasticloadbalancing:CreateRule` |
+| DELETE | `/api/v1/elb/load-balancers/{name}/listeners/{id}/rules/{rule}` | `elasticloadbalancing:DeleteRule` |
+| GET | `/api/v1/elb/load-balancers/{name}/config` | `elasticloadbalancing:DescribeLoadBalancers` |
+| GET | `/api/v1/elb/target-groups` | `elasticloadbalancing:DescribeTargetGroups` |
+| POST | `/api/v1/elb/target-groups` | `elasticloadbalancing:CreateTargetGroup` |
+| GET | `/api/v1/elb/target-groups/{name}` | `elasticloadbalancing:DescribeTargetHealth` |
+| PATCH | `/api/v1/elb/target-groups/{name}` | `elasticloadbalancing:ModifyTargetGroup` |
+| DELETE | `/api/v1/elb/target-groups/{name}` | `elasticloadbalancing:DeleteTargetGroup` |
+| POST | `/api/v1/elb/target-groups/{name}/targets` | `elasticloadbalancing:RegisterTargets` |
+| DELETE | `/api/v1/elb/target-groups/{name}/targets/{target}` | `elasticloadbalancing:DeregisterTargets` |
 
 ## S3 (object storage)
 
@@ -119,6 +144,36 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/s3/buckets/{bucket}/copy` | `s3:PutObject` |
 | POST | `/api/v1/s3/buckets/{bucket}/presign` | `s3:GetObject` |
 | GET | `/website/{bucket}/{key...}` | `(public)` |
+
+## ECR (container registry)
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/ecr/status` | `ecr:DescribeRegistry` |
+| GET | `/api/v1/ecr/repositories` | `ecr:DescribeRepositories` |
+| POST | `/api/v1/ecr/repositories` | `ecr:CreateRepository` |
+| GET | `/api/v1/ecr/repositories/{name...}` | `ecr:DescribeImages` |
+| DELETE | `/api/v1/ecr/repositories/{name...}` | `ecr:DeleteRepository` |
+| DELETE | `/api/v1/ecr/images` | `ecr:BatchDeleteImage` |
+
+## ECS (container services)
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/ecs/task-definitions` | `ecs:ListTaskDefinitions` |
+| POST | `/api/v1/ecs/task-definitions` | `ecs:RegisterTaskDefinition` |
+| GET | `/api/v1/ecs/task-definitions/{key}` | `ecs:DescribeTaskDefinition` |
+| DELETE | `/api/v1/ecs/task-definitions/{key}` | `ecs:DeregisterTaskDefinition` |
+| GET | `/api/v1/ecs/services` | `ecs:ListServices` |
+| POST | `/api/v1/ecs/services` | `ecs:CreateService` |
+| GET | `/api/v1/ecs/services/{name}` | `ecs:DescribeServices` |
+| PATCH | `/api/v1/ecs/services/{name}` | `ecs:UpdateService` |
+| DELETE | `/api/v1/ecs/services/{name}` | `ecs:DeleteService` |
+| GET | `/api/v1/ecs/tasks` | `ecs:ListTasks` |
+| POST | `/api/v1/ecs/tasks` | `ecs:RunTask` |
+| GET | `/api/v1/ecs/tasks/{id}` | `ecs:DescribeTasks` |
+| POST | `/api/v1/ecs/tasks/{id}/stop` | `ecs:StopTask` |
+| GET | `/api/v1/ecs/tasks/{id}/logs` | `logs:GetLogEvents` |
 
 ## RDS / ElastiCache / DocumentDB (databases)
 
@@ -245,6 +300,39 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | DELETE | `/api/v1/secrets/{name}` | `secretsmanager:DeleteSecret` |
 | POST | `/api/v1/secrets/{name}/restore` | `secretsmanager:RestoreSecret` |
 | POST | `/api/v1/secrets/random-password` | `secretsmanager:GetRandomPassword` |
+
+## KMS (encryption keys)
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/kms/keys` | `kms:ListKeys` |
+| POST | `/api/v1/kms/keys` | `kms:CreateKey` |
+| GET | `/api/v1/kms/keys/{id}` | `kms:DescribeKey` |
+| PATCH | `/api/v1/kms/keys/{id}` | `kms:UpdateKeyDescription` |
+| POST | `/api/v1/kms/keys/{id}/enable` | `kms:EnableKey` |
+| POST | `/api/v1/kms/keys/{id}/disable` | `kms:DisableKey` |
+| POST | `/api/v1/kms/keys/{id}/rotate` | `kms:RotateKeyOnDemand` |
+| POST | `/api/v1/kms/keys/{id}/schedule-deletion` | `kms:ScheduleKeyDeletion` |
+| POST | `/api/v1/kms/keys/{id}/cancel-deletion` | `kms:CancelKeyDeletion` |
+| GET | `/api/v1/kms/aliases` | `kms:ListAliases` |
+| POST | `/api/v1/kms/aliases` | `kms:CreateAlias` |
+| DELETE | `/api/v1/kms/aliases/{name...}` | `kms:DeleteAlias` |
+| POST | `/api/v1/kms/encrypt` | `kms:Encrypt` |
+| POST | `/api/v1/kms/decrypt` | `kms:Decrypt` |
+| POST | `/api/v1/kms/generate-data-key` | `kms:GenerateDataKey` |
+| POST | `/api/v1/kms/generate-random` | `kms:GenerateRandom` |
+
+## Systems Manager Parameter Store
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/ssm/parameters` | `ssm:DescribeParameters` |
+| GET | `/api/v1/ssm/parameter` | `ssm:GetParameter` |
+| PUT | `/api/v1/ssm/parameter` | `ssm:PutParameter` |
+| DELETE | `/api/v1/ssm/parameter` | `ssm:DeleteParameter` |
+| GET | `/api/v1/ssm/parameter/history` | `ssm:GetParameterHistory` |
+| POST | `/api/v1/ssm/parameter/labels` | `ssm:LabelParameterVersion` |
+| GET | `/api/v1/ssm/parameters-by-path` | `ssm:GetParametersByPath` |
 
 ## CloudWatch (metrics, logs, alarms)
 

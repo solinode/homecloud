@@ -20,14 +20,19 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cloudwatch"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/dynamodb"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/ecr"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/ecs"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/elb"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/events"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/iam"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/kms"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/lambda"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/rds"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/s3"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/secrets"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/sns"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/sqs"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/ssm"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/trail"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
 	"github.com/homecloudhq/homecloud/cli/internal/web"
@@ -127,6 +132,17 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		return err
 	}
 	defer ddb.Close()
+	kmsSvc := kms.New(env, secSvc)
+	ssmSvc := ssm.New(env, kmsSvc)
+	ecrSvc := ecr.New(env)
+	elbSvc := elb.New(env, vpcSvc)
+	ecsSvc := ecs.New(env, vpcSvc, elbSvc, secSvc)
+	elbSvc.Resolve = func(id string) (string, string, bool) {
+		if ip, v, ok := ec2Svc.PrivateIP(id); ok {
+			return ip, v, true
+		}
+		return ecsSvc.PrivateIP(id)
+	}
 	eventsSvc := events.New(env)
 	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc}
 	eventsSvc.Deliver, eventsSvc.Exists = tg.deliver, tg.exists
@@ -137,7 +153,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 	mux := http.NewServeMux()
 	rt := &httpx.Router{Mux: mux, Auth: iamSvc, Account: account, Audit: trailSvc.Record}
-	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, trailSvc} {
+	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, trailSvc} {
 		s.Routes(rt)
 	}
 	started := time.Now()
@@ -157,6 +173,15 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	go sqsSvc.Run(ctx)
 	go ddb.Run(ctx)
 	go eventsSvc.Run(ctx)
+	go elbSvc.Run(ctx)
+	go ecsSvc.Run(ctx)
+	go func() {
+		if err := ecrSvc.Start(ctx); err != nil {
+			logf("ecr: %v", err)
+		} else {
+			logf("ecr: registry ready at %s", ecrSvc.Host())
+		}
+	}()
 	go func() {
 		var networks []string
 		for _, v := range vpcList(st) {
@@ -174,6 +199,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		for {
 			trailSvc.Prune()
 			secSvc.PurgeExpired()
+			kmsSvc.Maintain()
 			select {
 			case <-ctx.Done():
 				return

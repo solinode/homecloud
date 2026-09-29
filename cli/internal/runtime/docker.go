@@ -61,11 +61,13 @@ type Port struct {
 	ContainerPort int    `json:"container_port"`
 	HostPort      int    `json:"host_port"` // 0 = let Docker pick
 	Protocol      string `json:"protocol"`  // tcp|udp
+	HostIP        string `json:"host_ip"`   // default 0.0.0.0
 }
 
 type Mount struct {
-	Volume string `json:"volume"`
-	Target string `json:"target"`
+	Volume   string `json:"volume"`
+	Target   string `json:"target"`
+	ReadOnly bool   `json:"read_only"`
 }
 
 type RunSpec struct {
@@ -109,11 +111,15 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 		if p.HostPort > 0 {
 			hp = strconv.Itoa(p.HostPort)
 		}
-		bindings[dp] = append(bindings[dp], docker.PortBinding{HostIP: "0.0.0.0", HostPort: hp})
+		ip := p.HostIP
+		if ip == "" {
+			ip = "0.0.0.0"
+		}
+		bindings[dp] = append(bindings[dp], docker.PortBinding{HostIP: ip, HostPort: hp})
 	}
 	mounts := make([]docker.HostMount, 0, len(s.Mounts))
 	for _, m := range s.Mounts {
-		mounts = append(mounts, docker.HostMount{Type: "volume", Source: m.Volume, Target: m.Target})
+		mounts = append(mounts, docker.HostMount{Type: "volume", Source: m.Volume, Target: m.Target, ReadOnly: m.ReadOnly})
 	}
 	hc := &docker.HostConfig{
 		Memory:       s.MemoryMB * 1024 * 1024,

@@ -312,6 +312,16 @@ func (s *Service) PublishedPorts(ids []string) []runtime.Port {
 
 func (s *Service) GetVPC(id string) (VPC, error) { return store.Get[VPC](s.env.Store, cVPCs, id) }
 
+// DefaultVPCID returns the ID of the default VPC.
+func (s *Service) DefaultVPCID() string {
+	for _, v := range store.List[VPC](s.env.Store, cVPCs) {
+		if v.Default {
+			return v.ID
+		}
+	}
+	return ""
+}
+
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {

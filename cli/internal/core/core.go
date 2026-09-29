@@ -29,6 +29,7 @@ type Config struct {
 	PublicHost    string `json:"public_host"` // host name clients use to reach published ports
 	S3Port        int    `json:"s3_port"`
 	S3ConsolePort int    `json:"s3_console_port"`
+	ECRPort       int    `json:"ecr_port"`
 	Region        string `json:"region"`
 }
 
@@ -50,6 +51,7 @@ func DefaultConfig() Config {
 		PublicHost:    "localhost",
 		S3Port:        9500,
 		S3ConsolePort: 9501,
+		ECRPort:       5500,
 		Region:        DefaultRegion,
 	}
 }

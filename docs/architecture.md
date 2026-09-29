@@ -69,6 +69,16 @@ The data directory defaults to `~/.homecloud` (override with `--data-dir` or `HO
 
 **EventBridge.** Scheduled rules use AWS `rate()` and six-field `cron()` expressions, checked every minute. Pattern rules match published events using exact values, `prefix`, `anything-but`, `exists` and `numeric` operators. Targets are Lambda functions, SQS queues and SNS topics, addressed by ARN.
 
+**EFS.** A file system is a named Docker volume that any number of instances mount at launch (`file_systems` in RunInstances), so they share files like an NFS mount.
+
+**ECR.** HomeCloud runs a Docker Distribution registry (`homecloud-ecr`, loopback port 5500 by default) and manages repositories, tags and deletions through its API. Images pushed with `docker push localhost:5500/...` can be used by ECS task definitions and registered as AMIs.
+
+**ELB.** Each load balancer is an nginx container with a private IP in a subnet (`<name>.elb.internal`); internet-facing listeners are published on the host. HomeCloud renders nginx configuration from listeners, path/host rules and target groups, health-checks every target from inside the VPC on the target group's interval and thresholds, and reloads nginx when targets register, deregister or change health. Upstreams share state across workers for true round robin.
+
+**ECS.** Task definitions are versioned (`family:revision`); secrets listed in a task definition are read from Secrets Manager (optionally a JSON key) and injected as environment variables at launch. A reconciler runs every 5 s: it replaces exited tasks, starts tasks for the current revision one at a time, retires tasks from previous revisions once the new ones are up, and registers/deregisters task IPs with the service's target group. Services are reachable inside the VPC as `<service>.ecs.internal`.
+
+**KMS & Parameter Store.** KMS keys hold versioned AES-256 key material encrypted under the master key; ciphertext blobs embed the key ID and version, so rotated keys still decrypt old data, and the encryption context is bound as AEAD associated data. SecureString parameters are encrypted with a service-managed key (`alias/hc/ssm`) or a customer key, bound to the parameter's ARN.
+
 **CloudWatch.** A collector samples every managed container every 30 s (CPU, memory, network, disk I/O, processes) into namespaces `HC/EC2`, `HC/RDS`, `HC/ElastiCache`; Lambda publishes `HC/Lambda` invocations, errors and duration. Alarms evaluate on each cycle and notify SNS topics or webhooks on state changes.
 
 ## Limits and differences from AWS
