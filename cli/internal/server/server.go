@@ -18,6 +18,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/autoscaling"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cfn"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cloudwatch"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cognito"
@@ -169,6 +170,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	sfnSvc := sfn.New(env)
 	cfnSvc := cfn.New(env)
 	cognitoSvc := cognito.New(env, secSvc)
+	asgSvc := autoscaling.New(env, ec2Svc, elbSvc, cw)
 	lambdaSvc.VerifyJWT = cognitoSvc.VerifyToken
 	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc, sfn: sfnSvc}
 	sfnSvc.Tasks = tg
@@ -180,7 +182,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 	mux := http.NewServeMux()
 	rt := &httpx.Router{Mux: mux, Auth: iamSvc, Account: account, Audit: trailSvc.Record}
-	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, trailSvc} {
+	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, asgSvc, trailSvc} {
 		s.Routes(rt)
 	}
 	started := time.Now()
@@ -203,6 +205,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	go eventsSvc.Run(ctx)
 	go elbSvc.Run(ctx)
 	go ecsSvc.Run(ctx)
+	go asgSvc.Run(ctx)
 	go func() {
 		if err := ecrSvc.Start(ctx); err != nil {
 			logf("ecr: %v", err)

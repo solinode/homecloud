@@ -110,6 +110,16 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | GET | `/api/v1/efs/file-systems/{id}` | `elasticfilesystem:DescribeFileSystems` |
 | DELETE | `/api/v1/efs/file-systems/{id}` | `elasticfilesystem:DeleteFileSystem` |
 
+## EC2 Auto Scaling
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/autoscaling/groups` | `autoscaling:DescribeAutoScalingGroups` |
+| POST | `/api/v1/autoscaling/groups` | `autoscaling:CreateAutoScalingGroup` |
+| GET | `/api/v1/autoscaling/groups/{name}` | `autoscaling:DescribeAutoScalingGroups` |
+| PATCH | `/api/v1/autoscaling/groups/{name}` | `autoscaling:UpdateAutoScalingGroup` |
+| DELETE | `/api/v1/autoscaling/groups/{name}` | `autoscaling:DeleteAutoScalingGroup` |
+
 ## VPC (networking)
 
 | Method | Path | IAM action |

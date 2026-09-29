@@ -3,10 +3,10 @@
 import glob
 import re
 
-ORDER = ["iam", "cognito", "ec2", "vpc", "elb", "s3", "ecr", "ecs", "rds", "lambda", "sqs", "sns", "dynamodb", "events", "sfn", "cfn", "secrets", "kms", "ssm", "cloudwatch", "trail"]
+ORDER = ["iam", "cognito", "ec2", "autoscaling", "vpc", "elb", "s3", "ecr", "ecs", "rds", "lambda", "sqs", "sns", "dynamodb", "events", "sfn", "cfn", "secrets", "kms", "ssm", "cloudwatch", "trail"]
 NAMES = {
     "iam": "IAM & authentication", "ec2": "EC2 (compute, volumes, EFS file systems)", "elb": "Elastic Load Balancing",
-    "ecr": "ECR (container registry)", "ecs": "ECS (container services)", "kms": "KMS (encryption keys)", "ssm": "Systems Manager Parameter Store", "sfn": "Step Functions", "cognito": "Cognito (user pools)", "cfn": "CloudFormation (stacks)", "vpc": "VPC (networking)", "s3": "S3 (object storage)",
+    "ecr": "ECR (container registry)", "ecs": "ECS (container services)", "kms": "KMS (encryption keys)", "ssm": "Systems Manager Parameter Store", "sfn": "Step Functions", "cognito": "Cognito (user pools)", "autoscaling": "EC2 Auto Scaling", "cfn": "CloudFormation (stacks)", "vpc": "VPC (networking)", "s3": "S3 (object storage)",
     "rds": "RDS / ElastiCache / DocumentDB (databases)", "lambda": "Lambda & API Gateway (serverless)", "sqs": "SQS (queues)",
     "sns": "SNS (pub/sub)", "dynamodb": "DynamoDB (key-value)", "events": "EventBridge (events & schedules)",
     "secrets": "Secrets Manager", "cloudwatch": "CloudWatch (metrics, logs, alarms)", "trail": "CloudTrail (audit log)",

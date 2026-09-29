@@ -878,3 +878,15 @@ func (s *Service) TargetGroupVPC(name string) (string, bool) {
 	tg, err := store.Get[TargetGroup](s.env.Store, cTGs, name)
 	return tg.VpcID, err == nil
 }
+
+// EnsureTarget registers id with a target group if it is not already registered.
+func (s *Service) EnsureTarget(tgName, id string) error {
+	tg, err := store.Get[TargetGroup](s.env.Store, cTGs, tgName)
+	if err != nil {
+		return err
+	}
+	if slices.ContainsFunc(tg.Targets, func(t Target) bool { return t.ID == id }) {
+		return nil
+	}
+	return s.SetTarget(tgName, id, 0, true)
+}

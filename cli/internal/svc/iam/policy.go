@@ -124,6 +124,7 @@ var builtinPolicies = []struct {
 	{"ReadOnlyAccess", "Read-only access to every HomeCloud service.", doc("Allow", "*:Describe*", "*:List*", "*:Get*")},
 	{"IAMFullAccess", "Full access to users, groups, policies and access keys.", doc("Allow", "iam:*")},
 	{"EC2FullAccess", "Full access to compute instances, images, volumes and security groups.", doc("Allow", "ec2:*")},
+	{"AutoScalingFullAccess", "Full access to Auto Scaling groups.", doc("Allow", "autoscaling:*")},
 	{"S3FullAccess", "Full access to all buckets and objects.", doc("Allow", "s3:*")},
 	{"S3ReadOnlyAccess", "Read access to all buckets and objects.", doc("Allow", "s3:Get*", "s3:List*")},
 	{"RDSFullAccess", "Full access to managed database instances.", doc("Allow", "rds:*", "elasticache:*")},
