@@ -4,6 +4,7 @@ import (
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/ecs"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/iam"
 )
 
@@ -27,4 +28,19 @@ func (r ec2Roles) InstanceCredentials(role, session string, ttl time.Duration) (
 		return ec2.Credentials{}, err
 	}
 	return ec2.Credentials{AccessKeyID: c.AccessKeyID, SecretAccessKey: c.SecretAccessKey, SessionToken: c.SessionToken, Expiration: c.Expiration}, nil
+}
+
+// ecsRoles gives ECS tasks their task role's credentials (IAM).
+type ecsRoles struct{ iam *iam.Service }
+
+const ecsTasksPrincipal = "ecs-tasks.amazonaws.com"
+
+func (r ecsRoles) TaskRole(ref string) (string, error) {
+	role, err := r.iam.ServiceRole(ref, ecsTasksPrincipal)
+	return role.ARN, err
+}
+
+func (r ecsRoles) TaskCredentials(ref, session string, ttl time.Duration) (ecs.Credentials, error) {
+	c, err := r.iam.AssumeRoleForService(ref, ecsTasksPrincipal, session, ttl)
+	return ecs.Credentials{AccessKeyID: c.AccessKeyID, SecretAccessKey: c.SecretAccessKey, SessionToken: c.SessionToken, Expiration: c.Expiration}, err
 }

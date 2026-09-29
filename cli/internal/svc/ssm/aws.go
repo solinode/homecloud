@@ -4,6 +4,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"slices"
 	"sort"
@@ -191,6 +192,15 @@ func (s *Service) awsPutParameter(q *awsapi.Req) (any, error) {
 }
 
 // get reads one parameter (or a Secrets Manager reference) for GetParameter(s).
+// Value returns a parameter's decrypted value (callers authorize themselves).
+func (s *Service) Value(ref string) (string, error) {
+	p, err := s.get(func(string, string) error { return nil }, ref, true)
+	if err != nil {
+		return "", err
+	}
+	return fmt.Sprint(p["Value"]), nil
+}
+
 func (s *Service) get(az Authz, ref string, decrypt bool) (map[string]any, error) {
 	name, sel := s.nameOf(ref)
 	if strings.HasPrefix(name, secretsPrefix) {
