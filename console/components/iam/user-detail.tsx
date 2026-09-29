@@ -277,7 +277,11 @@ function PermissionsTab({
       <PermissionsBoundarySection
         kind="user"
         arn={user.permissions_boundary}
-        readOnlyNote="A permissions boundary can be chosen when the user is created. Changing it later needs the AWS API (PutUserPermissionsBoundary / DeleteUserPermissionsBoundary)."
+        onSet={async (arn) => {
+          const p = `${IAM}/users/${seg(user.name)}/permissions-boundary`
+          await (arn ? api.put(p, { policy: arn }) : api.del(p))
+          onChanged()
+        }}
       />
 
       <AttachPoliciesDialog

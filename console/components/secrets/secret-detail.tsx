@@ -327,8 +327,18 @@ function TagsSection({ secret, onSaved }: { secret: Secret; onSaved: () => void 
   )
 }
 
-function VersionsSection({ secret, viewVersion, onView }: { secret: Secret; viewVersion: string | null; onView: (id: string) => void }) {
+function VersionsSection({ secret, viewVersion, onView, onChanged }: { secret: Secret; viewVersion: string | null; onView: (id: string) => void; onChanged: () => void }) {
   const keys = useKmsKeys()
+  const { pending, run } = useAction()
+  const current = secret.versions.find((v) => v.stages.includes("AWSCURRENT"))
+  // Moving AWSCURRENT to an older version rolls the secret back (UpdateSecretVersionStage).
+  const makeCurrent = async (id: string) => {
+    const r = await run(
+      () => api.put(`/api/v1/secrets/${seg(secret.name)}/stages`, { stage: "AWSCURRENT", remove_from_version_id: current?.id ?? "", move_to_version_id: id }),
+      "AWSCURRENT moved",
+    )
+    if (r !== undefined) onChanged()
+  }
   const customKeys = secret.versions.some((v) => v.kms_key) || !!secret.kms_key_id
   return (
     <Section
@@ -368,7 +378,12 @@ function VersionsSection({ secret, viewVersion, onView }: { secret: Secret; view
                 )}
                 <td className="hidden px-3 py-2 whitespace-nowrap sm:table-cell">{formatDate(v.created_at)}</td>
                 <td className="hidden px-3 py-2 whitespace-nowrap md:table-cell">{v.last_accessed ? <TimeAgo value={v.last_accessed} /> : <span className="text-muted-foreground">Never</span>}</td>
-                <td className="px-4 py-2 text-right">
+                <td className="px-4 py-2 text-right whitespace-nowrap">
+                  {!v.stages.includes("AWSCURRENT") && !(v.stages.length === 1 && v.stages[0] === "AWSPENDING") && (
+                    <Button variant="ghost" size="sm" className="mr-1" disabled={!!secret.deletion_date || pending} onClick={() => makeCurrent(v.id)} title="Move the AWSCURRENT label to this version">
+                      Make current
+                    </Button>
+                  )}
                   <Button variant="outline" size="sm" disabled={!!secret.deletion_date || viewVersion === v.id} onClick={() => onView(v.id)}>
                     Retrieve
                   </Button>
@@ -508,11 +523,11 @@ export function SecretDetail() {
 
       <SecretValueSection secret={secret} onChanged={() => mutate()} viewVersion={viewVersion} onViewVersionDone={() => setViewVersion(null)} />
 
-      <VersionsSection secret={secret} viewVersion={viewVersion} onView={setViewVersion} />
+      <VersionsSection secret={secret} viewVersion={viewVersion} onView={setViewVersion} onChanged={() => mutate()} />
 
-      <RotationSection secret={secret} />
+      <RotationSection secret={secret} onChanged={() => mutate()} />
 
-      <ResourcePolicySection secret={secret} />
+      <ResourcePolicySection secret={secret} onChanged={() => mutate()} />
 
       <TagsSection secret={secret} onSaved={refresh} />
 

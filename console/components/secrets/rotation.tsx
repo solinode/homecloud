@@ -1,8 +1,9 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useState } from "react"
 import Link from "next/link"
-import { AlertTriangle, Info, Terminal } from "lucide-react"
+import { AlertTriangle, Info, Loader2 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -10,16 +11,18 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { Field } from "@/components/console/form-field"
+import { JsonEditor, jsonError } from "@/components/console/json-editor"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
-import { apiOrigin } from "@/components/kms/shared"
 import { FUNCTIONS_PATH, functionHref } from "@/components/lambda/common"
 import { CodeBlock } from "@/components/s3/common"
 import { formatDate } from "@/lib/format"
-import { useApi } from "@/lib/hooks"
+import { api, seg } from "@/lib/api"
+import { useAction, useApi } from "@/lib/hooks"
 import type { LambdaFunction, Secret, SecretRotationRules } from "@/lib/types"
 
 /** functionName extracts the function name from a Lambda ARN (dropping a qualifier). */
@@ -45,14 +48,8 @@ export function scheduleLabel(r?: SecretRotationRules | null): string {
 /** rotationPending: a version carries AWSPENDING without AWSCURRENT (a rotation that hasn't finished). */
 export const rotationPending = (s: Secret) => s.versions.some((v) => v.stages.includes("AWSPENDING") && !v.stages.includes("AWSCURRENT"))
 
-const q = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
-
-/**
- * RotationSection shows the secret's rotation configuration and status.
- * The native API has no rotation routes, so configuring and starting a
- * rotation is done with the AWS API; the builder below writes that command.
- */
-export function RotationSection({ secret }: { secret: Secret }) {
+/** RotationSection shows the secret's rotation configuration and status, and changes it. */
+export function RotationSection({ secret, onChanged }: { secret: Secret; onChanged: () => void }) {
   const pending = rotationPending(secret)
   const fnName = secret.rotation_lambda_arn ? lambdaName(secret.rotation_lambda_arn) : ""
   const status = secret.rotation_error ? (
@@ -97,7 +94,7 @@ export function RotationSection({ secret }: { secret: Secret }) {
             { label: "Next rotation", value: secret.rotation_enabled && secret.next_rotation ? formatDate(secret.next_rotation) : "" },
           ]}
         />
-        <RotationCommandBuilder secret={secret} />
+        <RotationControls secret={secret} onChanged={onChanged} />
       </div>
     </Section>
   )
@@ -105,44 +102,35 @@ export function RotationSection({ secret }: { secret: Secret }) {
 
 type Action = "configure" | "rotate" | "cancel"
 
-function RotationCommandBuilder({ secret }: { secret: Secret }) {
+function RotationControls({ secret, onChanged }: { secret: Secret; onChanged: () => void }) {
   const fns = useApi<LambdaFunction[]>(FUNCTIONS_PATH)
   const [action, setAction] = useState<Action>(secret.rotation_enabled ? "rotate" : "configure")
   const [fn, setFn] = useState(secret.rotation_lambda_arn ? lambdaName(secret.rotation_lambda_arn) : "")
   const [days, setDays] = useState(String(secret.rotation_rules?.AutomaticallyAfterDays || /rate\((\d+) days?\)/.exec(secret.rotation_rules?.ScheduleExpression ?? "")?.[1] || 30))
   const [now, setNow] = useState(true)
-  const [origin, setOrigin] = useState("")
-  useEffect(() => setOrigin(apiOrigin()), [])
+  const { pending, run } = useAction()
 
   const fnList = fns.data ?? []
   const fnArn = fnList.find((f) => f.name === fn)?.arn ?? fn
   const n = Number(days)
   const daysErr = Number.isInteger(n) && n >= 1 && n <= 1000 ? null : "Enter a whole number of days between 1 and 1000."
+  const base = `/api/v1/secrets/${seg(secret.name)}`
+  const disabled = pending || !!secret.deletion_date
 
-  const cmd = useMemo(() => {
-    const base = `aws --endpoint-url ${origin} secretsmanager`
-    const id = `--secret-id ${q(secret.name)}`
-    if (action === "cancel") return `${base} cancel-rotate-secret ${id}`
-    if (action === "rotate") return `${base} rotate-secret ${id}`
-    const lines = [`${base} rotate-secret ${id}`]
-    if (fnArn) lines.push(`  --rotation-lambda-arn ${fnArn}`)
-    lines.push(`  --rotation-rules ${q(JSON.stringify({ ScheduleExpression: `rate(${daysErr ? 30 : n} days)` }))}`)
-    lines.push(now ? "  --rotate-immediately" : "  --no-rotate-immediately")
-    return lines.join(" \\\n")
-  }, [action, origin, secret.name, fnArn, n, daysErr, now])
+  const submit = async () => {
+    let r: unknown
+    if (action === "cancel") r = await run(() => api.post(`${base}/cancel-rotation`), "Rotation turned off")
+    else if (action === "rotate") r = await run(() => api.post(`${base}/rotate`, { rotate_immediately: true }), "Rotation started")
+    else
+      r = await run(
+        () => api.post(`${base}/rotate`, { rotation_lambda_arn: fnArn, schedule_expression: `rate(${n} days)`, rotate_immediately: now }),
+        now ? "Rotation configured and started" : "Rotation configured",
+      )
+    if (r !== undefined) onChanged()
+  }
 
   return (
     <div className="flex flex-col gap-3 rounded-md border p-3">
-      <div className="flex items-start gap-2 text-sm">
-        <Terminal className="text-muted-foreground mt-0.5 size-4 shrink-0" />
-        <div>
-          <p className="font-medium">Configure rotation</p>
-          <p className="text-muted-foreground text-xs">
-            Rotation is configured through the Secrets Manager API. Choose what to do and run the generated AWS CLI command with credentials that allow
-            secretsmanager:RotateSecret and lambda:InvokeFunction.
-          </p>
-        </div>
-      </div>
       <div className="flex flex-wrap gap-1.5" role="radiogroup" aria-label="Rotation action">
         {(
           [
@@ -166,7 +154,7 @@ function RotationCommandBuilder({ secret }: { secret: Secret }) {
                 ? "Lambda functions couldn't be listed."
                 : fnList.length === 0 && fns.data
                   ? "No Lambda functions yet. Create one that implements the four rotation steps."
-                  : "The function receives Step, SecretId and ClientRequestToken."
+                  : "The function receives Step, SecretId and ClientRequestToken. You also need lambda:InvokeFunction on it."
             }
           >
             <Select value={fn} onValueChange={setFn} disabled={!fns.data}>
@@ -204,7 +192,23 @@ function RotationCommandBuilder({ secret }: { secret: Secret }) {
         <p className="text-destructive text-xs">This secret has no rotation function yet; turn on rotation first.</p>
       )}
       {action === "rotate" && pendingNote(secret)}
-      <CodeBlock code={cmd} />
+      {action === "cancel" && !secret.rotation_enabled && <p className="text-muted-foreground text-xs">Rotation is already off.</p>}
+      <div>
+        <Button
+          size="sm"
+          variant={action === "cancel" ? "outline" : "default"}
+          onClick={submit}
+          disabled={
+            disabled ||
+            (action === "configure" && (!fn || !!daysErr)) ||
+            (action === "rotate" && (!secret.rotation_lambda_arn || rotationPending(secret))) ||
+            (action === "cancel" && !secret.rotation_enabled)
+          }
+        >
+          {pending && <Loader2 className="animate-spin" />}
+          {action === "configure" ? "Save rotation" : action === "rotate" ? "Rotate now" : "Turn off rotation"}
+        </Button>
+      </div>
     </div>
   )
 }
@@ -218,39 +222,103 @@ function pendingNote(secret: Secret) {
   )
 }
 
-/** ResourcePolicySection shows the secret's resource-based policy. */
-export function ResourcePolicySection({ secret }: { secret: Secret }) {
-  const [origin, setOrigin] = useState("")
-  useEffect(() => setOrigin(apiOrigin()), [])
-  let doc = secret.resource_policy ?? ""
+const pretty = (doc: string) => {
   try {
-    if (doc) doc = JSON.stringify(JSON.parse(doc), null, 2)
+    return doc ? JSON.stringify(JSON.parse(doc), null, 2) : ""
   } catch {
-    // show as stored
+    return doc
   }
-  const put = `aws --endpoint-url ${origin} secretsmanager put-resource-policy \\\n  --secret-id ${q(secret.name)} \\\n  --block-public-policy --resource-policy file://policy.json`
+}
+
+function templatePolicy(secret: Secret): string {
+  const account = secret.arn.split(":")[4] ?? ""
+  return JSON.stringify(
+    {
+      Version: "2012-10-17",
+      Statement: [{ Effect: "Allow", Principal: { AWS: `arn:aws:iam::${account}:root` }, Action: "secretsmanager:GetSecretValue", Resource: "*" }],
+    },
+    null,
+    2,
+  )
+}
+
+/** ResourcePolicySection shows, edits and deletes the secret's resource-based policy. */
+export function ResourcePolicySection({ secret, onChanged }: { secret: Secret; onChanged: () => void }) {
+  const doc = pretty(secret.resource_policy ?? "")
+  const [editing, setEditing] = useState(false)
+  const [text, setText] = useState("")
+  const [blockPublic, setBlockPublic] = useState(true)
+  const [confirmDelete, setConfirmDelete] = useState(false)
+  const { pending, run } = useAction()
+  const path = `/api/v1/secrets/${seg(secret.name)}/policy`
+  const err = editing ? jsonError(text) : null
+
+  const start = () => {
+    setText(doc || templatePolicy(secret))
+    setBlockPublic(true)
+    setEditing(true)
+  }
+  const save = async () => {
+    const r = await run(() => api.put(path, { policy: JSON.stringify(JSON.parse(text)), block_public_policy: blockPublic }), "Resource policy saved")
+    if (r !== undefined) {
+      setEditing(false)
+      onChanged()
+    }
+  }
+
   return (
     <Section
       title="Resource permissions"
       description="A resource-based policy grants other principals access to this secret, in addition to their IAM policies."
+      actions={
+        !editing && !secret.deletion_date ? (
+          <>
+            {doc && (
+              <Button size="sm" variant="outline" onClick={() => setConfirmDelete(true)}>
+                Delete policy
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={start}>
+              {doc ? "Edit policy" : "Attach policy"}
+            </Button>
+          </>
+        ) : undefined
+      }
     >
-      <div className="flex flex-col gap-3">
-        {doc ? (
-          <CodeBlock code={doc} className="max-h-96 overflow-y-auto" />
-        ) : (
-          <p className="text-muted-foreground text-sm">No resource policy is attached. Access is controlled by IAM policies only.</p>
-        )}
-        <details className="group text-sm">
-          <summary className="text-primary cursor-pointer text-xs hover:underline">{doc ? "Replace or delete the policy" : "Attach a policy"}</summary>
-          <div className="mt-2 flex flex-col gap-2">
-            <p className="text-muted-foreground text-xs">
-              Resource policies are managed through the Secrets Manager API (PutResourcePolicy, DeleteResourcePolicy). --block-public-policy rejects policies that
-              grant access to everyone.
-            </p>
-            <CodeBlock code={doc ? `${put}\n\naws --endpoint-url ${origin} secretsmanager delete-resource-policy --secret-id ${q(secret.name)}` : put} />
+      {editing ? (
+        <div className="flex flex-col gap-3">
+          <JsonEditor value={text} onChange={setText} rows={14} />
+          <div className="flex items-center gap-2">
+            <Checkbox id="secret-block-public" checked={blockPublic} onCheckedChange={(v) => setBlockPublic(v === true)} />
+            <Label htmlFor="secret-block-public" className="text-sm font-normal">
+              Block public access (reject policies that grant access to everyone)
+            </Label>
           </div>
-        </details>
-      </div>
+          <div className="flex gap-2">
+            <Button size="sm" onClick={save} disabled={pending || !!err}>
+              {pending && <Loader2 className="animate-spin" />} Save policy
+            </Button>
+            <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={pending}>
+              Cancel
+            </Button>
+          </div>
+        </div>
+      ) : doc ? (
+        <CodeBlock code={doc} className="max-h-96 overflow-y-auto" />
+      ) : (
+        <p className="text-muted-foreground text-sm">No resource policy is attached. Access is controlled by IAM policies only.</p>
+      )}
+      <ConfirmDialog
+        open={confirmDelete}
+        onOpenChange={setConfirmDelete}
+        title="Delete resource policy?"
+        description="Principals that were granted access only by this policy lose access to the secret."
+        onConfirm={async () => {
+          await api.del(path)
+          toast.success("Resource policy deleted")
+          onChanged()
+        }}
+      />
     </Section>
   )
 }

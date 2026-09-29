@@ -32,6 +32,8 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("DELETE /api/v1/iam/users/{name}/policies/{policy}", "iam:DetachUserPolicy", s.detachUserPolicy, iamRes("user/{name}"))
 	r.Handle("PUT /api/v1/iam/users/{name}/inline-policies/{policy}", "iam:PutUserPolicy", s.putInline, iamRes("user/{name}"))
 	r.Handle("DELETE /api/v1/iam/users/{name}/inline-policies/{policy}", "iam:DeleteUserPolicy", s.deleteInline, iamRes("user/{name}"))
+	r.Handle("PUT /api/v1/iam/users/{name}/permissions-boundary", "iam:PutUserPermissionsBoundary", s.putUserBoundary, iamRes("user/{name}"))
+	r.Handle("DELETE /api/v1/iam/users/{name}/permissions-boundary", "iam:DeleteUserPermissionsBoundary", s.deleteUserBoundary, iamRes("user/{name}"))
 	r.Handle("GET /api/v1/iam/users/{name}/access-keys", "iam:ListAccessKeys", s.listKeys, iamRes("user/{name}"))
 	r.Handle("POST /api/v1/iam/users/{name}/access-keys", "iam:CreateAccessKey", s.createKeyRoute, iamRes("user/{name}"))
 	r.Handle("PATCH /api/v1/iam/users/{name}/access-keys/{key}", "iam:UpdateAccessKey", s.updateKey, iamRes("user/{name}"))
@@ -525,6 +527,8 @@ func (s *Service) roleRoutes(r *httpx.Router) {
 	r.Handle("PUT /api/v1/iam/roles/{name}/inline-policies/{policy}", "iam:PutRolePolicy", s.putRoleInlineRoute, res)
 	r.Handle("DELETE /api/v1/iam/roles/{name}/inline-policies/{policy}", "iam:DeleteRolePolicy", s.deleteRoleInlineRoute, res)
 	r.Handle("POST /api/v1/iam/roles/{name}/revoke-sessions", "iam:PutRolePolicy", s.revokeRoute, res)
+	r.Handle("PUT /api/v1/iam/roles/{name}/permissions-boundary", "iam:PutRolePermissionsBoundary", s.putRoleBoundary, res)
+	r.Handle("DELETE /api/v1/iam/roles/{name}/permissions-boundary", "iam:DeleteRolePermissionsBoundary", s.deleteRoleBoundary, res)
 	r.Handle("PUT /api/v1/iam/roles/{name}/tags", "iam:TagRole", s.tagRoleRoute, res)
 	r.Handle("DELETE /api/v1/iam/roles/{name}/tags", "iam:UntagRole", s.untagRoleRoute, res)
 	r.Handle("POST /api/v1/sts/assume-role", "sts:AssumeRole", s.assumeRoleRoute)
@@ -697,4 +701,42 @@ func (s *Service) assumeRoleRoute(c *httpx.Ctx) (any, error) {
 		in.SessionName = "homecloud-" + core.RandHex(8)
 	}
 	return s.AssumeRole(c.P, in.Role, in.SessionName, in.DurationSeconds, in.ExternalID)
+}
+
+// boundaryRef reads {"policy": name-or-arn} from a permissions-boundary request.
+func boundaryRef(c *httpx.Ctx) (string, error) {
+	var in struct {
+		Policy string `json:"policy"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return "", err
+	}
+	if in.Policy == "" {
+		return "", core.BadRequest("policy is required")
+	}
+	return in.Policy, nil
+}
+
+func (s *Service) putUserBoundary(c *httpx.Ctx) (any, error) {
+	ref, err := boundaryRef(c)
+	if err != nil {
+		return nil, err
+	}
+	return userView(s.SetUserBoundary(c.Param("name"), ref))
+}
+
+func (s *Service) deleteUserBoundary(c *httpx.Ctx) (any, error) {
+	return userView(s.SetUserBoundary(c.Param("name"), ""))
+}
+
+func (s *Service) putRoleBoundary(c *httpx.Ctx) (any, error) {
+	ref, err := boundaryRef(c)
+	if err != nil {
+		return nil, err
+	}
+	return s.roleResult(s.SetRoleBoundary(c.Param("name"), ref))
+}
+
+func (s *Service) deleteRoleBoundary(c *httpx.Ctx) (any, error) {
+	return s.roleResult(s.SetRoleBoundary(c.Param("name"), ""))
 }

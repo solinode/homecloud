@@ -732,11 +732,8 @@ func (s *Service) awsDeleteResourcePolicy(q *awsapi.Req) (any, error) {
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
-	sec, err := s.lookup(q.Authorize, "secretsmanager:DeleteResourcePolicy", in.SecretId)
+	sec, err := s.deletePolicy(q.Authorize, in.SecretId)
 	if err != nil {
-		return nil, err
-	}
-	if _, err := store.Update(s.env.Store, cSecrets, sec.Name, func(x *Secret) error { x.Policy = ""; return nil }); err != nil {
 		return nil, err
 	}
 	return map[string]any{"ARN": sec.ARN, "Name": sec.Name}, nil

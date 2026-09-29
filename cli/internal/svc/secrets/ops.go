@@ -612,3 +612,15 @@ func (s *Service) putPolicy(az Authz, ref, doc string, blockPublic bool) (Secret
 		return nil
 	})
 }
+
+func (s *Service) deletePolicy(az Authz, ref string) (Secret, error) {
+	sec, err := s.lookup(az, "secretsmanager:DeleteResourcePolicy", ref)
+	if err != nil {
+		return sec, err
+	}
+	return store.Update(s.env.Store, cSecrets, sec.Name, func(x *Secret) error {
+		x.Policy = ""
+		x.ARN = core.CanonicalARN(x.ARN)
+		return nil
+	})
+}

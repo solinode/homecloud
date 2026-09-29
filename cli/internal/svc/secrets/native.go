@@ -18,6 +18,12 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("PUT /api/v1/secrets/{name}/value", "secretsmanager:PutSecretValue", s.nativePutValue, d)
 	r.Handle("DELETE /api/v1/secrets/{name}", "secretsmanager:DeleteSecret", s.nativeDelete, d)
 	r.Handle("POST /api/v1/secrets/{name}/restore", "secretsmanager:RestoreSecret", s.nativeRestore, d)
+	r.Handle("POST /api/v1/secrets/{name}/rotate", "secretsmanager:RotateSecret", s.nativeRotate, d)
+	r.Handle("POST /api/v1/secrets/{name}/cancel-rotation", "secretsmanager:CancelRotateSecret", s.nativeCancelRotation, d)
+	r.Handle("GET /api/v1/secrets/{name}/policy", "secretsmanager:GetResourcePolicy", s.nativeGetPolicy, d)
+	r.Handle("PUT /api/v1/secrets/{name}/policy", "secretsmanager:PutResourcePolicy", s.nativePutPolicy, d)
+	r.Handle("DELETE /api/v1/secrets/{name}/policy", "secretsmanager:DeleteResourcePolicy", s.nativeDeletePolicy, d)
+	r.Handle("PUT /api/v1/secrets/{name}/stages", "secretsmanager:UpdateSecretVersionStage", s.nativeUpdateStage, d)
 	r.Handle("POST /api/v1/secrets/random-password", "secretsmanager:GetRandomPassword", s.randomPassword)
 }
 
@@ -149,4 +155,85 @@ func (s *Service) randomPassword(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	return map[string]string{"password": p}, nil
+}
+
+// nativeRotate configures rotation and, unless rotate_immediately is false,
+// starts one now.
+func (s *Service) nativeRotate(c *httpx.Ctx) (any, error) {
+	var in struct {
+		RotationLambdaARN  string `json:"rotation_lambda_arn"`
+		ScheduleExpression string `json:"schedule_expression"`
+		AfterDays          int64  `json:"automatically_after_days"`
+		RotateImmediately  *bool  `json:"rotate_immediately"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	var rules *RotationRules
+	if in.ScheduleExpression != "" || in.AfterDays != 0 {
+		rules = &RotationRules{ScheduleExpression: in.ScheduleExpression, AutomaticallyAfterDays: in.AfterDays}
+	}
+	now := in.RotateImmediately == nil || *in.RotateImmediately
+	sec, token, err := s.rotate(c.Authorize, c.Param("name"), RotateInput{RotationLambdaARN: in.RotationLambdaARN, Rules: rules, RotateImmediately: now})
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"secret": sec.view(), "version_id": token}, nil
+}
+
+func (s *Service) nativeCancelRotation(c *httpx.Ctx) (any, error) {
+	sec, err := s.cancelRotation(c.Authorize, c.Param("name"))
+	if err != nil {
+		return nil, err
+	}
+	return sec.view(), nil
+}
+
+func (s *Service) nativeGetPolicy(c *httpx.Ctx) (any, error) {
+	sec, err := s.lookup(c.Authorize, "secretsmanager:GetResourcePolicy", c.Param("name"))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"name": sec.Name, "arn": core.CanonicalARN(sec.ARN), "policy": sec.Policy}, nil
+}
+
+func (s *Service) nativePutPolicy(c *httpx.Ctx) (any, error) {
+	var in struct {
+		Policy            string `json:"policy"`
+		BlockPublicPolicy *bool  `json:"block_public_policy"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	sec, err := s.putPolicy(c.Authorize, c.Param("name"), in.Policy, in.BlockPublicPolicy == nil || *in.BlockPublicPolicy)
+	if err != nil {
+		return nil, err
+	}
+	return sec.view(), nil
+}
+
+func (s *Service) nativeDeletePolicy(c *httpx.Ctx) (any, error) {
+	sec, err := s.deletePolicy(c.Authorize, c.Param("name"))
+	if err != nil {
+		return nil, err
+	}
+	return sec.view(), nil
+}
+
+// nativeUpdateStage moves (or, without move_to_version_id, removes) a
+// staging label.
+func (s *Service) nativeUpdateStage(c *httpx.Ctx) (any, error) {
+	var in struct {
+		Stage               string `json:"stage"`
+		RemoveFromVersionID string `json:"remove_from_version_id"`
+		MoveToVersionID     string `json:"move_to_version_id"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	sec, err := s.updateStage(c.Authorize, c.Param("name"), in.Stage, in.RemoveFromVersionID, in.MoveToVersionID)
+	if err != nil {
+		return nil, err
+	}
+	return sec.view(), nil
 }
