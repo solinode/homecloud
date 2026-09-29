@@ -2,6 +2,8 @@
 
 **An open-source, self-hosted cloud platform.** HomeCloud runs AWS-style services (compute, object storage, managed databases, serverless functions, queues, pub/sub, key-value tables, networking, identity, monitoring) on your own hardware, from one binary, managed through a web console, a CLI and a REST API.
 
+**Speaks AWS.** The AWS CLI, the AWS SDKs and Terraform work against HomeCloud unchanged: point `AWS_ENDPOINT_URL` at it and use a HomeCloud access key. IAM policies, roles and temporary credentials are enforced exactly as in the console.
+
 No third parties. No vendor lock-in. No surprise billing.
 
 > 🛡 Built with privacy, transparency, and sovereignty at its core.
@@ -28,7 +30,7 @@ No third parties. No vendor lock-in. No surprise billing.
 
 | Service | AWS equivalent | What you get |
 | --- | --- | --- |
-| **Compute** | EC2, EBS, AMIs | Instances with CPU/memory limits from `t3.nano` to `r5.large`, 10 base images (Ubuntu, Debian, Amazon Linux, Rocky, Fedora, Alpine, …), user-data scripts, start/stop/reboot/resize, persistent volumes, capture an instance as a new image, run-command, and a shell in the browser |
+| **Compute** | EC2, EBS, AMIs | Instances with CPU/memory limits from `t3.nano` to `r5.large`, 10 base images (Ubuntu, Debian, Amazon Linux, Rocky, Fedora, Alpine, …), user data, key pairs, start/stop/reboot/resize, volumes and snapshots, capture an instance as a new image, run-command, a shell in the browser, and an instance metadata service (IMDSv1/v2) that hands role credentials to SDKs inside instances |
 | **Auto Scaling** | EC2 Auto Scaling | Groups that keep a desired number of instances across subnets, replace unhealthy ones, register them with load balancers and scale on CPU or memory targets |
 | **Shared files** | EFS | File systems that any number of instances mount at the same time |
 | **Containers** | ECS (Fargate), ECR | Versioned task definitions with secrets injected from Secrets Manager, services that keep N tasks running with rolling deployments and load-balancer registration, one-off tasks, and a private image registry you `docker push` to |
@@ -37,20 +39,20 @@ No third parties. No vendor lock-in. No surprise billing.
 | **Certificates** | ACM | A private certificate authority that issues TLS certificates for your domains and IPs, import of Let's Encrypt or other certificates, renewal, and HTTPS on load balancers |
 | **Object storage** | S3 | Buckets, folders, uploads/downloads, versioning, public-read access, lifecycle expiry, presigned URLs, static website hosting, and a fully S3-compatible endpoint for AWS SDKs and `aws` CLI |
 | **Databases** | RDS, ElastiCache, DocumentDB | PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Valkey, Memcached with generated credentials in Secrets Manager, snapshots and restore, daily automated backups, resizing, password rotation and a query editor |
-| **Serverless** | Lambda, API Gateway | Python 3.11–3.13 and Node.js 20/22 functions with warm environments, env vars, timeouts, logs and metrics; public function URLs; HTTP APIs with path parameters; SQS triggers with partial-batch failures |
+| **Serverless** | Lambda, API Gateway | Functions on AWS's official runtime images (Python, Node.js, Java, Ruby, .NET, Go/Rust custom runtimes, container images) with warm environments, execution roles, versions and aliases, layers, async invocation with retries and destinations, reserved concurrency; function URLs; HTTP APIs with JWT authorizers; SQS and DynamoDB stream triggers |
 | **Queues** | SQS | Standard and FIFO queues, visibility timeouts, delays, long polling, dead-letter queues with redrive, batches |
-| **Pub/sub** | SNS | Topics fanning out to queues, functions and HTTP(S) webhooks, raw delivery, filter policies |
-| **Key-value** | DynamoDB | Tables with partition/sort keys, range queries, scans with filters, secondary indexes, conditional writes, atomic counters, TTL |
+| **Pub/sub** | SNS | Standard and FIFO topics fanning out to queues, functions and confirmed HTTP(S) endpoints, signed messages, raw delivery, full filter-policy syntax |
+| **Key-value** | DynamoDB | Typed items with the full condition/update/projection expression language, GSIs and LSIs, batches, transactions, PartiQL, TTL and streams |
 | **Workflows** | Step Functions | State machines in Amazon States Language: Task (Lambda, SQS, SNS), Choice, Wait, Parallel, Map, Pass, Succeed, Fail, with Retry/Catch, JSONPath input/output processing, intrinsic functions and a full execution history |
-| **Events** | EventBridge | Scheduled rules (`rate(...)`, `cron(...)`), event buses with pattern matching, targets in Lambda/SQS/SNS |
-| **Identity** | IAM | Users, groups, managed and custom JSON policies with allow/deny and resource ARNs, access keys, console passwords, a policy simulator |
+| **Events** | EventBridge, Scheduler | Event buses with the full pattern syntax, input transformers, retries and DLQs; schedules with `at()`/`rate()`/`cron()` and time zones |
+| **Identity** | IAM, STS | Users, groups, roles with trust policies, AWS-managed and custom policies (with versions, conditions and permissions boundaries), instance profiles, access keys, temporary credentials, console passwords, a policy simulator |
 | **App identity** | Cognito | User pools with sign-up, sign-in, refresh tokens, forced password changes, groups and global sign-out; RS256 JWTs with a JWKS endpoint; API Gateway routes can require them |
-| **Secrets & keys** | Secrets Manager, KMS, SSM Parameter Store | Versioned secrets, customer keys with encrypt/decrypt, data keys, rotation and encryption context, hierarchical configuration parameters with SecureString values |
-| **Monitoring** | CloudWatch | Per-resource CPU/memory/network/disk metrics, custom metrics, alarms that notify SNS topics or webhooks, log groups for every function and container |
+| **Secrets & keys** | Secrets Manager, KMS, SSM Parameter Store | Versioned secrets with staging labels and Lambda rotation; symmetric, RSA, ECC and HMAC keys with policies, grants and rotation; hierarchical parameters with SecureString values, versions and labels |
+| **Monitoring** | CloudWatch | Per-resource metrics, custom metrics with metric math, alarms that notify SNS topics or webhooks, log groups with filter patterns, Logs Insights queries and subscription filters |
 | **Infrastructure as code** | CloudFormation | YAML/JSON stack templates for 30 resource types across every service, with parameters, outputs, `!Ref`/`!GetAtt`/`!Sub`/`!Join`, dependency ordering, readiness waits, rollback, updates and ordered deletion |
 | **Audit** | CloudTrail | A record of every change and every denied request, with who, what, when and from where |
 
-Everything runs as containers on Docker, labelled so HomeCloud never touches containers it didn't create. See **[docs/architecture.md](docs/architecture.md)** for how each service is built and **[docs/api.md](docs/api.md)** for the full API reference.
+Everything runs as containers on Docker, labelled so HomeCloud never touches containers it didn't create. See **[docs/architecture.md](docs/architecture.md)** for how each service is built, **[docs/aws-compat.md](docs/aws-compat.md)** for the AWS APIs it speaks and **[docs/api.md](docs/api.md)** for the native API reference.
 
 ---
 
@@ -72,7 +74,7 @@ curl -fsSL https://homecloud.drk1rd.systems/scripts/install.sh | sh
 irm https://homecloud.drk1rd.systems/scripts/install.ps1 | iex
 ```
 
-Or build from source with Go 1.23+ and Node.js 20+: `make` (the binary lands in `bin/homecloud`).
+Or build from source with Go 1.25+ and Node.js 22+: `make` (the binary lands in `bin/homecloud`).
 
 ### Run
 
@@ -163,7 +165,8 @@ homecloud upgrade                 # verified update from GitHub releases
 * ✅ **Containers:** ECS services and tasks, ECR registry, load balancers, shared file systems
 * ✅ **Workflows:** Step Functions
 * ✅ **Infrastructure as code:** CloudFormation-style stacks
-* 🔄 **Next:** VM-backed instances (QEMU/KVM), multi-node clusters, a service catalog for one-click apps
+* ✅ **AWS compatibility:** the AWS CLI, SDKs and Terraform work against HomeCloud for IAM/STS, EC2/VPC, S3, Lambda, DynamoDB, SQS, SNS, Secrets Manager, SSM, KMS, CloudWatch, EventBridge and Step Functions
+* 🔄 **Next:** AWS APIs for ELB, Auto Scaling, ECS, ECR, RDS, CloudFormation, Route 53 and API Gateway; VM-backed instances (QEMU/KVM); multi-node clusters
 * 🔄 **Phase 4:** Edge compute and hardware integrations
 
 📍 **[Explore the full roadmap](https://github.com/orgs/homecloudhq/projects/1/views/1)**
@@ -177,7 +180,9 @@ cli/        Go server + CLI (single binary)
   cmd/                 CLI commands
   internal/server      wires services into one HTTP API
   internal/svc/<name>  one package per service (ec2, s3, rds, lambda, ...)
-  internal/httpx       routing, IAM checks, errors
+  internal/httpx       native API routing, IAM checks, errors
+  internal/awsapi      AWS protocols: SigV4, awsJson, awsQuery, REST
+  internal/system      backup and restore
   internal/runtime     Docker engine wrapper
   internal/store       persistent state
 console/    Next.js web console (static export, embedded into the binary)
@@ -185,7 +190,7 @@ docs/       architecture and API reference
 ```
 
 ```bash
-make test                          # Go unit tests
+make test                          # Go tests (AWS CLI/boto3 tests run when installed)
 cd cli && go run . serve           # API on :8080
 cd console && NEXT_PUBLIC_API_URL=http://127.0.0.1:8080 npm run dev   # console on :3000
 make release                       # cross-compiled archives for 6 platforms in dist/

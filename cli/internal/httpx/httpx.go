@@ -74,13 +74,6 @@ type Handler func(c *Ctx) (any, error)
 // refuses to start if any exist (a guard against authorization regressions).
 var Unscoped []string
 
-// allowStar lists parameterised routes that intentionally authorize against "*"
-// (their handlers check the specific resource).
-var allowStar = map[string]bool{}
-
-// AllowStar exempts a route pattern from the resource guard.
-func AllowStar(pattern string) { allowStar[pattern] = true }
-
 type Router struct {
 	Mux     *http.ServeMux
 	Auth    Authenticator
@@ -116,7 +109,7 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 	for _, f := range opts {
 		f(&o)
 	}
-	if strings.Contains(pattern, "{") && o.resource == "*" && !o.public && !o.deferred && !allowStar[pattern] {
+	if strings.Contains(pattern, "{") && o.resource == "*" && !o.public && !o.deferred {
 		// Scoped Allow/Deny statements never match "*": per-resource routes must say which resource they touch.
 		Unscoped = append(Unscoped, pattern)
 	}

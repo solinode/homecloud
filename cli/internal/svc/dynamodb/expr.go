@@ -284,8 +284,6 @@ type expr struct {
 	args []*expr
 }
 
-func (e *expr) isOperand() bool { return e.kind <= eMinus }
-
 // ---- parser ----
 
 type parser struct {
@@ -1190,18 +1188,6 @@ func (pr *projection) apply(it Item) Item {
 	for k, c := range root.children {
 		if v, ok := build(c); ok {
 			out[k] = v
-		}
-	}
-	return out
-}
-
-func (pr *projection) topNames() []string {
-	var out []string
-	seen := map[string]bool{}
-	for _, p := range pr.paths {
-		if !seen[p[0].Name] {
-			seen[p[0].Name] = true
-			out = append(out, p[0].Name)
 		}
 	}
 	return out

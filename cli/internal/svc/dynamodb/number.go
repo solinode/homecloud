@@ -123,8 +123,6 @@ func (d decimal) check() error {
 	return nil
 }
 
-func (d decimal) isZero() bool { return d.digits == "" }
-
 // String is the canonical form DynamoDB returns: plain decimal notation
 // without leading or trailing zeros.
 func (d decimal) String() string {
