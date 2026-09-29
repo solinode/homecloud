@@ -1,7 +1,7 @@
 // Package s3 implements object storage on a HomeCloud-managed MinIO server.
-// The MinIO endpoint itself speaks the S3 protocol, so AWS SDKs and CLIs work
-// against it directly; this package adds the management API, the console
-// file browser, presigned URLs and static website hosting.
+// This package adds the management API, the console file browser, presigned
+// URLs, static website hosting and the AWS S3 endpoint on the HomeCloud API
+// port (aws.go), which authorizes requests with IAM and proxies them to MinIO.
 package s3
 
 import (
@@ -49,6 +49,9 @@ type bucketMeta struct {
 	IndexDocument string    `json:"index_document"`
 	ErrorDocument string    `json:"error_document"`
 	Tags          core.Tags `json:"tags,omitempty"`
+	// Config holds bucket configuration documents set through the AWS API that
+	// HomeCloud stores without acting on (cors, encryption, logging, ...), by subresource.
+	Config map[string]string `json:"aws_config,omitempty"`
 }
 
 type Service struct {
@@ -60,6 +63,11 @@ type Service struct {
 	user    string
 	pass    string
 	status  string
+
+	metaMu    sync.Mutex // serializes read-modify-write of bucketMeta
+	policies  policyCache
+	names     nameCache
+	nativeOps map[string]func(*s3req) error // AWS operations answered by HomeCloud
 }
 
 func New(env *svc.Env, sec *secrets.Service) *Service {
@@ -114,12 +122,23 @@ func (s *Service) Start(ctx context.Context, vpcs []vpc.VPC) error {
 	for _, v := range vpcs {
 		s.ConnectNetwork(v)
 	}
+	return s.connect(ctx, fmt.Sprintf("127.0.0.1:%d", s.env.Cfg.S3Port), fmt.Sprintf("%s:%d", s.env.Cfg.PublicHost, s.env.Cfg.S3Port))
+}
+
+// UseMinIO points the service at an already running MinIO server (host:port)
+// instead of the managed container. Tests use it.
+func (s *Service) UseMinIO(ctx context.Context, hostport, user, pass string) error {
+	s.user, s.pass = user, pass
+	return s.connect(ctx, hostport, hostport)
+}
+
+func (s *Service) connect(ctx context.Context, hostport, public string) error {
 	opts := &minio.Options{Creds: credentials.NewStaticV4(s.user, s.pass, ""), Region: signingRegion}
-	cl, err := minio.New(fmt.Sprintf("127.0.0.1:%d", s.env.Cfg.S3Port), opts)
+	cl, err := minio.New(hostport, opts)
 	if err != nil {
 		return err
 	}
-	signer, err := minio.New(fmt.Sprintf("%s:%d", s.env.Cfg.PublicHost, s.env.Cfg.S3Port), opts)
+	signer, err := minio.New(public, opts)
 	if err != nil {
 		return err
 	}
@@ -298,6 +317,8 @@ func (s *Service) createBucket(c *httpx.Ctx) (any, error) {
 		}
 		return store.Put(s.env.Store, cBuckets, in.Name, bucketMeta{Name: in.Name, Tags: in.Tags})
 	}()
+	s.forgetNames()
+	s.forgetPolicy(in.Name)
 	if err != nil {
 		_ = cl.RemoveBucketWithOptions(context.Background(), in.Name, minio.RemoveBucketOptions{ForceDelete: true})
 		return nil, err
@@ -381,6 +402,8 @@ func (s *Service) deleteBucket(c *httpx.Ctx) (any, error) {
 		return nil, s3err(err)
 	}
 	_ = store.Delete(s.env.Store, cBuckets, name)
+	s.forgetNames()
+	s.forgetPolicy(name)
 	return nil, nil
 }
 
@@ -417,6 +440,7 @@ func (s *Service) putAccess(c *httpx.Ctx) (any, error) {
 	if in.Public {
 		p = publicReadPolicy(c.Param("bucket"))
 	}
+	defer s.forgetPolicy(c.Param("bucket"))
 	return nil, s3err(cl.SetBucketPolicy(c.R.Context(), c.Param("bucket"), p))
 }
 
@@ -434,6 +458,7 @@ func (s *Service) putPolicy(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	defer s.forgetPolicy(c.Param("bucket"))
 	return nil, s3err(cl.SetBucketPolicy(c.R.Context(), c.Param("bucket"), in.Policy))
 }
 

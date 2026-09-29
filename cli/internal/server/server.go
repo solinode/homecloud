@@ -263,6 +263,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	ddb.RegisterAWS()
 	wireLambda(lambdaSvc, iamSvc, tg, eventsSvc, s3Svc, ecrSvc)
 	lambdaSvc.Streams = ddbStreams{ddb}
+	s3Svc.RegisterAWS()
 	awsHandler := &awsapi.Handler{Creds: iamSvc, Account: account, Audit: trailSvc.Record}
 	if len(httpx.Unscoped) > 0 {
 		return fmt.Errorf("internal error: routes without a resource ARN: %v", httpx.Unscoped)
