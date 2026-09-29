@@ -6,8 +6,9 @@ import (
 
 const stsNS = "https://sts.amazonaws.com/doc/2011-06-15/"
 
-// RegisterAWS serves STS over the AWS Query protocol.
+// RegisterAWS serves IAM and STS over the AWS Query protocol.
 func (s *Service) RegisterAWS() {
+	s.registerIAM()
 	awsapi.Register(&awsapi.Service{
 		Name: "sts", XMLNS: stsNS,
 		ErrorCode: map[string]string{"ResourceNotFound": "NoSuchEntity", "ValidationError": "ValidationError", "AccessDenied": "AccessDenied"},
@@ -40,7 +41,7 @@ func credsXML(c Credentials) map[string]any {
 func (s *Service) awsAssumeRole(q *awsapi.Req) (any, error) {
 	arn := q.Param("RoleArn")
 	q.Authorize("sts:AssumeRole", arn)
-	c, err := s.AssumeRole(q.P, arn, q.Param("RoleSessionName"), q.ParamInt("DurationSeconds", 0))
+	c, err := s.AssumeRole(q.P, arn, q.Param("RoleSessionName"), q.ParamInt("DurationSeconds", 0), q.Param("ExternalId"))
 	if err != nil {
 		return nil, err
 	}

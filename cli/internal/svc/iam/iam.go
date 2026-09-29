@@ -1,6 +1,6 @@
 // Package iam implements identity and access management: users, groups,
-// managed and inline policies, access keys, console sessions and the policy
-// evaluation every API request goes through.
+// roles, instance profiles, managed and inline policies, access keys, console
+// sessions and the policy evaluation every API request goes through.
 package iam
 
 import (
@@ -33,31 +33,68 @@ const (
 
 	RootUser   = "root"
 	sessionTTL = 12 * time.Hour
+
+	maxAccessKeys = 2
+	maxAttached   = 20 // managed policies per user, group or role
 )
 
 func errf(format string, a ...any) error { return core.BadRequest(format, a...) }
 
+// IAM error codes, as the AWS API reports them.
+func noSuchEntity(format string, a ...any) error {
+	return core.Errf(http.StatusNotFound, "NoSuchEntity", format, a...)
+}
+func alreadyExists(format string, a ...any) error {
+	return core.Errf(http.StatusConflict, "EntityAlreadyExists", format, a...)
+}
+func deleteConflict(format string, a ...any) error {
+	return core.Errf(http.StatusConflict, "DeleteConflict", format, a...)
+}
+func limitExceeded(format string, a ...any) error {
+	return core.Errf(http.StatusConflict, "LimitExceeded", format, a...)
+}
+func unmodifiable(format string, a ...any) error {
+	return core.Errf(http.StatusBadRequest, "UnmodifiableEntity", format, a...)
+}
+func invalidInput(format string, a ...any) error {
+	return core.Errf(http.StatusBadRequest, "InvalidInput", format, a...)
+}
+
+// authz checks one permission for the caller (Ctx.Authorize or awsapi.Req.Authorize).
+type authz func(action, resource string) error
+
 type User struct {
-	Name             string                    `json:"name"`
-	ID               string                    `json:"id"`
-	ARN              string                    `json:"arn"`
-	Root             bool                      `json:"root,omitempty"`
-	CreatedAt        time.Time                 `json:"created_at"`
-	PasswordHash     string                    `json:"password_hash,omitempty"`
-	PasswordSetAt    *time.Time                `json:"password_set_at,omitempty"`
-	LastLogin        *time.Time                `json:"last_login,omitempty"`
-	Groups           []string                  `json:"groups"`
-	AttachedPolicies []string                  `json:"attached_policies"`
-	InlinePolicies   map[string]PolicyDocument `json:"inline_policies"`
-	Tags             core.Tags                 `json:"tags,omitempty"`
+	Name                  string                    `json:"name"`
+	ID                    string                    `json:"id"`
+	ARN                   string                    `json:"arn"`
+	Path                  string                    `json:"path,omitempty"`
+	Root                  bool                      `json:"root,omitempty"`
+	CreatedAt             time.Time                 `json:"created_at"`
+	PasswordHash          string                    `json:"password_hash,omitempty"`
+	PasswordSetAt         *time.Time                `json:"password_set_at,omitempty"`
+	PasswordResetRequired bool                      `json:"password_reset_required,omitempty"`
+	LastLogin             *time.Time                `json:"last_login,omitempty"`
+	Groups                []string                  `json:"groups"`
+	AttachedPolicies      []string                  `json:"attached_policies"`
+	InlinePolicies        map[string]PolicyDocument `json:"inline_policies"`
+	PermissionsBoundary   string                    `json:"permissions_boundary,omitempty"` // policy ARN
+	Tags                  core.Tags                 `json:"tags,omitempty"`
+}
+
+func (u User) path() string {
+	if u.Path == "" {
+		return "/"
+	}
+	return u.Path
 }
 
 // view hides secrets when a user is returned over the API.
 func (u User) view() map[string]any {
 	return map[string]any{
-		"name": u.Name, "id": u.ID, "arn": u.ARN, "root": u.Root, "created_at": u.CreatedAt,
+		"name": u.Name, "id": u.ID, "arn": u.ARN, "path": u.path(), "root": u.Root, "created_at": u.CreatedAt,
 		"console_access": u.PasswordHash != "", "password_set_at": u.PasswordSetAt, "last_login": u.LastLogin,
 		"groups": nz(u.Groups), "attached_policies": nz(u.AttachedPolicies), "inline_policies": u.InlinePolicies, "tags": u.Tags,
+		"permissions_boundary": u.PermissionsBoundary,
 	}
 }
 
@@ -69,20 +106,20 @@ func nz(s []string) []string {
 }
 
 type Group struct {
-	Name             string    `json:"name"`
-	ARN              string    `json:"arn"`
-	CreatedAt        time.Time `json:"created_at"`
-	AttachedPolicies []string  `json:"attached_policies"`
+	Name             string                    `json:"name"`
+	ID               string                    `json:"id,omitempty"`
+	ARN              string                    `json:"arn"`
+	Path             string                    `json:"path,omitempty"`
+	CreatedAt        time.Time                 `json:"created_at"`
+	AttachedPolicies []string                  `json:"attached_policies"`
+	InlinePolicies   map[string]PolicyDocument `json:"inline_policies,omitempty"`
 }
 
-type Policy struct {
-	Name        string         `json:"name"`
-	ARN         string         `json:"arn"`
-	Description string         `json:"description"`
-	Managed     bool           `json:"managed"` // built in, cannot be edited
-	Document    PolicyDocument `json:"document"`
-	CreatedAt   time.Time      `json:"created_at"`
-	UpdatedAt   time.Time      `json:"updated_at"`
+func (g Group) path() string {
+	if g.Path == "" {
+		return "/"
+	}
+	return g.Path
 }
 
 type AccessKey struct {
@@ -95,6 +132,11 @@ type AccessKey struct {
 	Status    string     `json:"status"` // Active | Inactive
 	CreatedAt time.Time  `json:"created_at"`
 	LastUsed  *time.Time `json:"last_used,omitempty"`
+}
+
+func (k AccessKey) public() AccessKey {
+	k.SecretHash, k.SecretCT = "", ""
+	return k
 }
 
 type session struct {
@@ -113,6 +155,7 @@ type Service struct {
 	env *svc.Env
 	// Seal encrypts access key secrets and temporary credentials at rest.
 	Seal     Sealer
+	mu       sync.Mutex // serialises creates and renames of users, groups, policies and instance profiles
 	roleMu   sync.Mutex
 	failMu   sync.Mutex
 	failures map[string][]time.Time // client IP -> recent failed sign-ins
@@ -164,22 +207,20 @@ func LoadAccount(s *store.Store) (string, bool, error) {
 	return a.ID, true, store.Put(s, cAccount, "self", a)
 }
 
-// Bootstrap installs managed policies and, on first run, the root user.
+// Bootstrap installs the managed policies, migrates stored data from older
+// versions and, on first run, creates the root user.
 func (s *Service) Bootstrap() (*BootstrapResult, error) {
-	for _, bp := range builtinPolicies {
-		p := Policy{Name: bp.Name, ARN: s.policyARN(bp.Name), Description: bp.Description, Managed: true, Document: bp.Doc, CreatedAt: core.Now(), UpdatedAt: core.Now()}
-		if old, err := store.Get[Policy](s.env.Store, cPolicies, bp.Name); err == nil {
-			p.CreatedAt, p.UpdatedAt = old.CreatedAt, old.UpdatedAt
-		}
-		if err := store.Put(s.env.Store, cPolicies, bp.Name, p); err != nil {
-			return nil, err
-		}
+	if err := s.installBuiltins(); err != nil {
+		return nil, err
+	}
+	if err := s.migrate(); err != nil {
+		return nil, err
 	}
 	if store.Has(s.env.Store, cUsers, RootUser) {
 		return nil, nil
 	}
 	pw := core.NewSecret(20)
-	u := s.newUser(RootUser)
+	u := s.newUser(RootUser, "/")
 	u.Root = true
 	u.AttachedPolicies = []string{"AdministratorAccess"}
 	if err := setPassword(&u, pw); err != nil {
@@ -202,18 +243,26 @@ func (s *Service) ResetRootPassword() (string, error) {
 	return pw, err
 }
 
-func (s *Service) policyARN(name string) string { return s.env.ARN("iam", "policy/"+name) }
+func (s *Service) userARN(name, path string) string { return s.env.ARN("iam", "user"+path+name) }
+func (s *Service) groupARN(name, path string) string {
+	return s.env.ARN("iam", "group"+path+name)
+}
 
-func (s *Service) newUser(name string) User {
+func newID(prefix string) string { return prefix + strings.ToUpper(core.RandHex(16)) }
+
+func (s *Service) newUser(name, path string) User {
 	return User{
-		Name: name, ID: "HCUA" + strings.ToUpper(core.RandHex(16)), ARN: s.env.ARN("iam", "user/"+name),
+		Name: name, ID: newID("HCUA"), ARN: s.userARN(name, path), Path: path,
 		CreatedAt: core.Now(), Groups: []string{}, AttachedPolicies: []string{}, InlinePolicies: map[string]PolicyDocument{},
 	}
 }
 
 func setPassword(u *User, pw string) error {
 	if len(pw) < 8 {
-		return errf("password must be at least 8 characters")
+		return core.Errf(http.StatusBadRequest, "PasswordPolicyViolation", "password must be at least 8 characters")
+	}
+	if len(pw) > 128 {
+		return core.Errf(http.StatusBadRequest, "PasswordPolicyViolation", "password must be at most 128 characters")
 	}
 	h, err := bcrypt.GenerateFromPassword([]byte(pw), bcrypt.DefaultCost)
 	if err != nil {
@@ -280,7 +329,9 @@ func (s *Service) Authenticate(r *http.Request) (*httpx.Principal, error) {
 	if err != nil || (sessionUserID != "" && sessionUserID != u.ID) {
 		return nil, core.Errf(http.StatusUnauthorized, "InvalidClientTokenId", "user %q no longer exists", user)
 	}
-	return s.principal(u, keyID), nil
+	p := s.principal(u, keyID)
+	p.AddRequestContext(r)
+	return p, nil
 }
 
 // Refresh re-reads a principal's user, access key and policies, so long-running
@@ -306,356 +357,115 @@ func (s *Service) Refresh(p *httpx.Principal) (*httpx.Principal, error) {
 	return s.principal(u, p.AccessKey), nil
 }
 
+// userContext is the identity part of a user's request context.
+func (s *Service) userContext(u User) CondContext {
+	typ := "User"
+	if u.Root {
+		typ = "Account"
+	}
+	c := CondContext{
+		"aws:username": {u.Name}, "aws:userid": {u.ID}, "aws:principalarn": {u.ARN},
+		"aws:principalaccount": {s.env.AccountID}, "aws:principaltype": {typ},
+	}
+	for k, v := range u.Tags {
+		c["aws:principaltag/"+strings.ToLower(k)] = []string{v}
+	}
+	return c
+}
+
 func (s *Service) principal(u User, keyID string) *httpx.Principal {
-	p := &httpx.Principal{AccountID: s.env.AccountID, UserName: u.Name, ARN: u.ARN, Root: u.Root, AccessKey: keyID}
+	p := &httpx.Principal{AccountID: s.env.AccountID, UserName: u.Name, ARN: u.ARN, Root: u.Root, AccessKey: keyID, Context: s.userContext(u)}
 	if u.Root {
 		p.Can = func(string, string) bool { return true }
 		return p
 	}
 	docs := s.effectiveDocs(u)
-	p.Can = func(action, resource string) bool { return evaluate(docs, action, resource) == allow }
+	boundary := s.boundaryDoc(u.PermissionsBoundary)
+	p.Can = func(action, resource string) bool {
+		return decide(docs, boundary, action, resource, CondContext(p.Context)) == allow
+	}
 	return p
 }
 
 // effectiveDocs gathers every policy that applies to u: attached, inline, and via groups.
 func (s *Service) effectiveDocs(u User) []PolicyDocument {
 	names := slices.Clone(u.AttachedPolicies)
+	var docs []PolicyDocument
 	for _, g := range u.Groups {
 		if grp, err := store.Get[Group](s.env.Store, cGroups, g); err == nil {
 			names = append(names, grp.AttachedPolicies...)
+			for _, d := range grp.InlinePolicies {
+				docs = append(docs, d)
+			}
 		}
 	}
-	var docs []PolicyDocument
-	for _, n := range names {
-		if p, err := store.Get[Policy](s.env.Store, cPolicies, n); err == nil {
-			docs = append(docs, p.Document)
-		}
-	}
+	docs = append(docs, s.managedDocs(names)...)
 	for _, d := range u.InlinePolicies {
 		docs = append(docs, d)
 	}
 	return docs
 }
 
-var nameRe = regexp.MustCompile(`^[\w+=,.@-]{1,64}$`)
+func (s *Service) managedDocs(names []string) []PolicyDocument {
+	var docs []PolicyDocument
+	for _, n := range names {
+		if p, err := store.Get[Policy](s.env.Store, cPolicies, n); err == nil {
+			docs = append(docs, p.Document)
+		}
+	}
+	return docs
+}
+
+// boundaryDoc returns the permissions boundary policy, or nil for none. A
+// boundary that no longer exists allows nothing.
+func (s *Service) boundaryDoc(arn string) *PolicyDocument {
+	if arn == "" {
+		return nil
+	}
+	if p, err := s.resolvePolicy(arn); err == nil {
+		return &p.Document
+	}
+	return &PolicyDocument{}
+}
+
+var (
+	nameRe = regexp.MustCompile(`^[\w+=,.@-]{1,64}$`)
+	pathRe = regexp.MustCompile(`^/([\x21-\x7E]+/)?$`)
+)
 
 func validName(kind, n string) error {
 	if !nameRe.MatchString(n) {
-		return errf("%s name %q is invalid: use 1-64 letters, digits or +=,.@_-", kind, n)
+		return core.Errf(http.StatusBadRequest, "ValidationError", "%s name %q is invalid: use 1-64 letters, digits or +=,.@_-", kind, n)
 	}
 	return nil
 }
 
-// ---- routes ----
-
-func (s *Service) Routes(r *httpx.Router) {
-	iamRes := func(kind string) httpx.Opt { return httpx.Res("arn:aws:iam::{account}:" + kind) }
-
-	r.Handle("POST /api/v1/auth/login", "", s.login, httpx.Public())
-	r.Handle("POST /api/v1/auth/logout", "sts:Logout", s.logout)
-	r.Handle("GET /api/v1/auth/whoami", "sts:GetCallerIdentity", s.whoami)
-
-	r.Handle("GET /api/v1/iam/summary", "iam:GetAccountSummary", s.summary)
-	r.Handle("GET /api/v1/iam/users", "iam:ListUsers", s.listUsers)
-	r.Handle("POST /api/v1/iam/users", "iam:CreateUser", s.createUser)
-	r.Handle("GET /api/v1/iam/users/{name}", "iam:GetUser", s.getUser, iamRes("user/{name}"))
-	r.Handle("DELETE /api/v1/iam/users/{name}", "iam:DeleteUser", s.deleteUser, iamRes("user/{name}"))
-	r.Handle("PUT /api/v1/iam/users/{name}/tags", "iam:TagUser", s.tagUser, iamRes("user/{name}"))
-	r.Handle("PUT /api/v1/iam/users/{name}/password", "iam:UpdateLoginProfile", s.setUserPassword, iamRes("user/{name}"))
-	r.Handle("DELETE /api/v1/iam/users/{name}/password", "iam:DeleteLoginProfile", s.deleteUserPassword, iamRes("user/{name}"))
-	r.Handle("POST /api/v1/iam/users/{name}/policies", "iam:AttachUserPolicy", s.attachUserPolicy, iamRes("user/{name}"))
-	r.Handle("DELETE /api/v1/iam/users/{name}/policies/{policy}", "iam:DetachUserPolicy", s.detachUserPolicy, iamRes("user/{name}"))
-	r.Handle("PUT /api/v1/iam/users/{name}/inline-policies/{policy}", "iam:PutUserPolicy", s.putInline, iamRes("user/{name}"))
-	r.Handle("DELETE /api/v1/iam/users/{name}/inline-policies/{policy}", "iam:DeleteUserPolicy", s.deleteInline, iamRes("user/{name}"))
-	r.Handle("GET /api/v1/iam/users/{name}/access-keys", "iam:ListAccessKeys", s.listKeys, iamRes("user/{name}"))
-	r.Handle("POST /api/v1/iam/users/{name}/access-keys", "iam:CreateAccessKey", s.createKeyRoute, iamRes("user/{name}"))
-	r.Handle("PATCH /api/v1/iam/users/{name}/access-keys/{key}", "iam:UpdateAccessKey", s.updateKey, iamRes("user/{name}"))
-	r.Handle("DELETE /api/v1/iam/users/{name}/access-keys/{key}", "iam:DeleteAccessKey", s.deleteKey, iamRes("user/{name}"))
-
-	r.Handle("GET /api/v1/iam/groups", "iam:ListGroups", s.listGroups)
-	r.Handle("POST /api/v1/iam/groups", "iam:CreateGroup", s.createGroup)
-	r.Handle("GET /api/v1/iam/groups/{name}", "iam:GetGroup", s.getGroup, iamRes("group/{name}"))
-	r.Handle("DELETE /api/v1/iam/groups/{name}", "iam:DeleteGroup", s.deleteGroup, iamRes("group/{name}"))
-	r.Handle("POST /api/v1/iam/groups/{name}/members", "iam:AddUserToGroup", s.addMember, iamRes("group/{name}"))
-	r.Handle("DELETE /api/v1/iam/groups/{name}/members/{user}", "iam:RemoveUserFromGroup", s.removeMember, iamRes("group/{name}"))
-	r.Handle("POST /api/v1/iam/groups/{name}/policies", "iam:AttachGroupPolicy", s.attachGroupPolicy, iamRes("group/{name}"))
-	r.Handle("DELETE /api/v1/iam/groups/{name}/policies/{policy}", "iam:DetachGroupPolicy", s.detachGroupPolicy, iamRes("group/{name}"))
-
-	r.Handle("GET /api/v1/iam/policies", "iam:ListPolicies", s.listPolicies)
-	r.Handle("POST /api/v1/iam/policies", "iam:CreatePolicy", s.createPolicy)
-	r.Handle("GET /api/v1/iam/policies/{name}", "iam:GetPolicy", s.getPolicy, iamRes("policy/{name}"))
-	r.Handle("PUT /api/v1/iam/policies/{name}", "iam:CreatePolicyVersion", s.updatePolicy, iamRes("policy/{name}"))
-	r.Handle("DELETE /api/v1/iam/policies/{name}", "iam:DeletePolicy", s.deletePolicy, iamRes("policy/{name}"))
-	r.Handle("POST /api/v1/iam/simulate", "iam:SimulatePrincipalPolicy", s.simulate)
-	s.roleRoutes(r)
+func validPath(p string) (string, error) {
+	if p == "" {
+		return "/", nil
+	}
+	if len(p) > 512 || !pathRe.MatchString(p) {
+		return "", core.Errf(http.StatusBadRequest, "ValidationError", "path %q must begin and end with / and contain printable ASCII characters", p)
+	}
+	return p, nil
 }
 
-func (s *Service) login(c *httpx.Ctx) (any, error) {
-	var in struct{ Username, Password string }
-	if err := c.Bind(&in); err != nil {
-		return nil, err
+// nameTaken reports whether name is in use in coll other than by self. IAM
+// names are unique ignoring case (Alice and alice cannot both exist), as in AWS.
+func nameTaken[T any](s *Service, coll, name, self string, nameOf func(T) string) bool {
+	if name != self && store.Has(s.env.Store, coll, name) {
+		return true
 	}
-	ip := httpx.ClientIP(c.R)
-	if s.throttled(ip, false) {
-		return nil, core.Errf(http.StatusTooManyRequests, "TooManyRequests", "too many failed sign-in attempts; try again in a few minutes")
-	}
-	u, err := store.Get[User](s.env.Store, cUsers, in.Username)
-	if err != nil || u.PasswordHash == "" || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Password)) != nil {
-		s.throttled(ip, true)
-		time.Sleep(300 * time.Millisecond)
-		return nil, core.Errf(http.StatusUnauthorized, "AuthFailure", "incorrect user name or password")
-	}
-	token := "hcs_" + core.NewSecret(40)
-	exp := time.Now().Add(sessionTTL)
-	if err := store.Put(s.env.Store, cSessions, hashSecret(token), session{Token: "", UserName: u.Name, UserID: u.ID, Expires: exp}); err != nil {
-		return nil, err
-	}
-	_, _ = store.Update(s.env.Store, cUsers, u.Name, func(u *User) error { n := core.Now(); u.LastLogin = &n; return nil })
-	s.pruneSessions()
-	return map[string]any{"token": token, "expires": exp, "user": u.view(), "account_id": s.env.AccountID}, nil
-}
-
-func (s *Service) pruneSessions() {
-	s.env.Store.Retain(cSessions, func(id string, raw json.RawMessage) bool {
-		var ss session
-		return json.Unmarshal(raw, &ss) == nil && time.Now().Before(ss.Expires)
-	})
-}
-
-func (s *Service) logout(c *httpx.Ctx) (any, error) {
-	h := strings.TrimPrefix(c.R.Header.Get("Authorization"), "Bearer ")
-	if strings.HasPrefix(h, "hcs_") {
-		_ = store.Delete(s.env.Store, cSessions, hashSecret(h))
-	}
-	return nil, nil
-}
-
-func (s *Service) whoami(c *httpx.Ctx) (any, error) {
-	return map[string]any{"account_id": c.P.AccountID, "user_name": c.P.UserName, "arn": c.P.ARN, "root": c.P.Root, "region": s.env.Cfg.Region,
-		"role_name": c.P.RoleName, "session_name": c.P.SessionName}, nil
-}
-
-func (s *Service) summary(c *httpx.Ctx) (any, error) {
-	policies := store.List[Policy](s.env.Store, cPolicies)
-	customer := 0
-	for _, p := range policies {
-		if !p.Managed {
-			customer++
+	for _, v := range store.List[T](s.env.Store, coll) {
+		if n := nameOf(v); n != self && strings.EqualFold(n, name) {
+			return true
 		}
 	}
-	return map[string]any{
-		"account_id":        s.env.AccountID,
-		"users":             len(store.List[User](s.env.Store, cUsers)),
-		"groups":            len(store.List[Group](s.env.Store, cGroups)),
-		"policies":          len(policies),
-		"customer_policies": customer,
-		"managed_policies":  len(policies) - customer,
-		"access_keys":       len(store.List[AccessKey](s.env.Store, cKeys)),
-		"roles":             len(store.List[Role](s.env.Store, cRoles)),
-	}, nil
+	return false
 }
 
-func (s *Service) listUsers(c *httpx.Ctx) (any, error) {
-	type keyInfo struct {
-		count, active int
-		lastUsed      *time.Time
-	}
-	keys := map[string]*keyInfo{}
-	for _, k := range store.List[AccessKey](s.env.Store, cKeys) {
-		ki := keys[k.UserName]
-		if ki == nil {
-			ki = &keyInfo{}
-			keys[k.UserName] = ki
-		}
-		ki.count++
-		if k.Status == "Active" {
-			ki.active++
-		}
-		if k.LastUsed != nil && (ki.lastUsed == nil || k.LastUsed.After(*ki.lastUsed)) {
-			ki.lastUsed = k.LastUsed
-		}
-	}
-	out := []map[string]any{}
-	for _, u := range store.List[User](s.env.Store, cUsers) {
-		v := u.view()
-		ki := keys[u.Name]
-		if ki == nil {
-			ki = &keyInfo{}
-		}
-		v["access_key_count"], v["active_access_keys"], v["access_key_last_used"] = ki.count, ki.active, ki.lastUsed
-		out = append(out, v)
-	}
-	return out, nil
-}
-
-func (s *Service) createUser(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Name     string    `json:"name"`
-		Password string    `json:"password"`
-		Groups   []string  `json:"groups"`
-		Policies []string  `json:"policies"`
-		Tags     core.Tags `json:"tags"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	if err := validName("user", in.Name); err != nil {
-		return nil, err
-	}
-	if store.Has(s.env.Store, cUsers, in.Name) {
-		return nil, core.Conflict("user %q already exists", in.Name)
-	}
-	// Everything the request sets on the new user needs its own permission, or
-	// iam:CreateUser alone would be enough to mint an administrator.
-	userARN := s.env.ARN("iam", "user/"+in.Name)
-	if in.Password != "" {
-		if err := c.Authorize("iam:CreateLoginProfile", userARN); err != nil {
-			return nil, err
-		}
-	}
-	for range in.Policies {
-		if err := c.Authorize("iam:AttachUserPolicy", userARN); err != nil {
-			return nil, err
-		}
-	}
-	for _, g := range in.Groups {
-		if err := c.Authorize("iam:AddUserToGroup", s.env.ARN("iam", "group/"+g)); err != nil {
-			return nil, err
-		}
-	}
-	u := s.newUser(in.Name)
-	u.Tags = in.Tags
-	if in.Password != "" {
-		if err := setPassword(&u, in.Password); err != nil {
-			return nil, err
-		}
-	}
-	for _, p := range in.Policies {
-		if !store.Has(s.env.Store, cPolicies, p) {
-			return nil, core.NotFound("policy", p)
-		}
-		u.AttachedPolicies = addUnique(u.AttachedPolicies, p)
-	}
-	for _, g := range in.Groups {
-		if !store.Has(s.env.Store, cGroups, g) {
-			return nil, core.NotFound("group", g)
-		}
-		u.Groups = addUnique(u.Groups, g)
-	}
-	return u.view(), store.Put(s.env.Store, cUsers, u.Name, u)
-}
-
-func (s *Service) getUserOr404(name string) (User, error) {
-	u, err := store.Get[User](s.env.Store, cUsers, name)
-	if err != nil {
-		return u, core.NotFound("user", name)
-	}
-	return u, nil
-}
-
-func (s *Service) getUser(c *httpx.Ctx) (any, error) {
-	u, err := s.getUserOr404(c.Param("name"))
-	if err != nil {
-		return nil, err
-	}
-	v := u.view()
-	keys := []AccessKey{}
-	for _, k := range store.List[AccessKey](s.env.Store, cKeys) {
-		if k.UserName == u.Name {
-			k.SecretHash, k.SecretCT = "", ""
-			keys = append(keys, k)
-		}
-	}
-	v["access_keys"] = keys
-	return v, nil
-}
-
-func (s *Service) deleteUser(c *httpx.Ctx) (any, error) {
-	name := c.Param("name")
-	u, err := s.getUserOr404(name)
-	if err != nil {
-		return nil, err
-	}
-	if u.Root {
-		return nil, core.Conflict("the root user cannot be deleted")
-	}
-	for _, k := range store.List[AccessKey](s.env.Store, cKeys) {
-		if k.UserName == name {
-			_ = store.Delete(s.env.Store, cKeys, k.AccessKeyID)
-		}
-	}
-	s.endSessions(name)
-	return nil, store.Delete(s.env.Store, cUsers, name)
-}
-
-func (s *Service) updateUser(name string, fn func(*User) error) (any, error) {
-	u, err := store.Update(s.env.Store, cUsers, name, fn)
-	if err == store.ErrNotFound {
-		return nil, core.NotFound("user", name)
-	}
-	if err != nil {
-		return nil, err
-	}
-	return u.view(), nil
-}
-
-func (s *Service) tagUser(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Tags core.Tags `json:"tags"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	return s.updateUser(c.Param("name"), func(u *User) error { u.Tags = in.Tags; return nil })
-}
-
-func (s *Service) setUserPassword(c *httpx.Ctx) (any, error) {
-	var in struct{ Password string }
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	out, err := s.updateUser(c.Param("name"), func(u *User) error { return setPassword(u, in.Password) })
-	if err == nil {
-		s.endSessions(c.Param("name"))
-	}
-	return out, err
-}
-
-// endSessions signs a user out of every console session.
-func (s *Service) endSessions(user string) {
-	_ = s.env.Store.Retain(cSessions, func(_ string, raw json.RawMessage) bool {
-		var ss session
-		return json.Unmarshal(raw, &ss) != nil || ss.UserName != user
-	})
-}
-
-func (s *Service) deleteUserPassword(c *httpx.Ctx) (any, error) {
-	out, err := s.updateUser(c.Param("name"), func(u *User) error {
-		if u.Root {
-			return core.Conflict("the root user must keep console access")
-		}
-		u.PasswordHash, u.PasswordSetAt = "", nil
-		return nil
-	})
-	if err == nil {
-		s.endSessions(c.Param("name"))
-	}
-	return out, err
-}
-
-func (s *Service) policyArg(c *httpx.Ctx) (string, error) {
-	var in struct {
-		Policy string `json:"policy"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return "", err
-	}
-	in.Policy = strings.TrimPrefix(in.Policy, s.policyARN(""))
-	if !store.Has(s.env.Store, cPolicies, in.Policy) {
-		return "", core.NotFound("policy", in.Policy)
-	}
-	return in.Policy, nil
-}
+func userName(u User) string   { return u.Name }
+func groupName(g Group) string { return g.Name }
 
 func addUnique(list []string, v string) []string {
 	if slices.Contains(list, v) {
@@ -668,44 +478,341 @@ func remove(list []string, v string) []string {
 	return slices.DeleteFunc(slices.Clone(list), func(x string) bool { return x == v })
 }
 
-func (s *Service) attachUserPolicy(c *httpx.Ctx) (any, error) {
-	p, err := s.policyArg(c)
+// ---- users ----
+
+func (s *Service) getUserOr404(name string) (User, error) {
+	u, err := store.Get[User](s.env.Store, cUsers, name)
 	if err != nil {
-		return nil, err
+		return u, noSuchEntity("The user with name %s cannot be found.", name)
 	}
-	return s.updateUser(c.Param("name"), func(u *User) error { u.AttachedPolicies = addUnique(u.AttachedPolicies, p); return nil })
+	return u, nil
 }
 
-func (s *Service) detachUserPolicy(c *httpx.Ctx) (any, error) {
-	p := c.Param("policy")
-	return s.updateUser(c.Param("name"), func(u *User) error {
-		if u.Root && p == "AdministratorAccess" {
-			return core.Conflict("AdministratorAccess cannot be detached from root")
+// UserInput creates a user.
+type UserInput struct {
+	Name                  string    `json:"name"`
+	Path                  string    `json:"path"`
+	Password              string    `json:"password"`
+	PasswordResetRequired bool      `json:"password_reset_required"`
+	Groups                []string  `json:"groups"`
+	Policies              []string  `json:"policies"`
+	Tags                  core.Tags `json:"tags"`
+	PermissionsBoundary   string    `json:"permissions_boundary"`
+}
+
+// CreateUser creates a user. Everything the request sets on the new user needs
+// its own permission, or iam:CreateUser alone would be enough to mint an administrator.
+func (s *Service) CreateUser(in UserInput, can authz) (User, error) {
+	if err := validName("user", in.Name); err != nil {
+		return User{}, err
+	}
+	path, err := validPath(in.Path)
+	if err != nil {
+		return User{}, err
+	}
+	if err := checkTags(in.Tags); err != nil {
+		return User{}, err
+	}
+	userARN := s.userARN(in.Name, path)
+	if in.Password != "" {
+		if err := can("iam:CreateLoginProfile", userARN); err != nil {
+			return User{}, err
 		}
-		if !slices.Contains(u.AttachedPolicies, p) {
-			return core.NotFound("attached policy", p)
+	}
+	var policies []string
+	for _, ref := range in.Policies {
+		if err := can("iam:AttachUserPolicy", userARN); err != nil {
+			return User{}, err
 		}
-		u.AttachedPolicies = remove(u.AttachedPolicies, p)
+		p, err := s.resolvePolicy(ref)
+		if err != nil {
+			return User{}, err
+		}
+		policies = addUnique(policies, p.Name)
+	}
+	for _, g := range in.Groups {
+		if err := can("iam:AddUserToGroup", s.groupARNByName(g)); err != nil {
+			return User{}, err
+		}
+		if !store.Has(s.env.Store, cGroups, g) {
+			return User{}, noSuchEntity("The group with name %s cannot be found.", g)
+		}
+	}
+	if len(in.Tags) > 0 {
+		if err := can("iam:TagUser", userARN); err != nil {
+			return User{}, err
+		}
+	}
+	u := s.newUser(in.Name, path)
+	if in.PermissionsBoundary != "" {
+		if err := can("iam:PutUserPermissionsBoundary", userARN); err != nil {
+			return User{}, err
+		}
+		b, err := s.resolvePolicy(in.PermissionsBoundary)
+		if err != nil {
+			return User{}, err
+		}
+		u.PermissionsBoundary = b.ARN
+	}
+	u.Tags = in.Tags
+	if in.Password != "" {
+		if err := setPassword(&u, in.Password); err != nil {
+			return User{}, err
+		}
+		u.PasswordResetRequired = in.PasswordResetRequired
+	}
+	u.AttachedPolicies = append(u.AttachedPolicies, policies...)
+	for _, g := range in.Groups {
+		u.Groups = addUnique(u.Groups, g)
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if nameTaken(s, cUsers, in.Name, "", userName) {
+		return User{}, alreadyExists("User with name %s already exists.", in.Name)
+	}
+	return u, store.Put(s.env.Store, cUsers, u.Name, u)
+}
+
+// UserKeys returns a user's access keys (without secrets).
+func (s *Service) UserKeys(user string) []AccessKey {
+	out := []AccessKey{}
+	for _, k := range store.List[AccessKey](s.env.Store, cKeys) {
+		if k.UserName == user {
+			out = append(out, k.public())
+		}
+	}
+	return out
+}
+
+// DeleteUser deletes a user. Without force it fails, as in AWS, while the user
+// still has access keys, a password, policies or group memberships; with force
+// (the console) those go with the user.
+func (s *Service) DeleteUser(name string, force bool) error {
+	u, err := s.getUserOr404(name)
+	if err != nil {
+		return err
+	}
+	if u.Root {
+		return deleteConflict("the root user cannot be deleted")
+	}
+	if !force {
+		switch {
+		case len(s.UserKeys(name)) > 0:
+			return deleteConflict("Cannot delete entity, must delete access keys first.")
+		case u.PasswordHash != "":
+			return deleteConflict("Cannot delete entity, must delete login profile first.")
+		case len(u.AttachedPolicies) > 0:
+			return deleteConflict("Cannot delete entity, must detach all policies first.")
+		case len(u.InlinePolicies) > 0:
+			return deleteConflict("Cannot delete entity, must delete policies first.")
+		case len(u.Groups) > 0:
+			return deleteConflict("Cannot delete entity, must remove users from group first.")
+		}
+	}
+	for _, k := range store.List[AccessKey](s.env.Store, cKeys) {
+		if k.UserName == name {
+			_ = store.Delete(s.env.Store, cKeys, k.AccessKeyID)
+		}
+	}
+	s.endSessions(name)
+	s.env.Store.Retain(cTempCreds, func(_ string, raw json.RawMessage) bool {
+		var t tempCred
+		return json.Unmarshal(raw, &t) == nil && (t.UserName != name || t.UserID != u.ID)
+	})
+	return store.Delete(s.env.Store, cUsers, name)
+}
+
+// UpdateUser applies fn to a user.
+func (s *Service) UpdateUser(name string, fn func(*User) error) (User, error) {
+	u, err := store.Update(s.env.Store, cUsers, name, fn)
+	if err == store.ErrNotFound {
+		return u, noSuchEntity("The user with name %s cannot be found.", name)
+	}
+	return u, err
+}
+
+// RenameUser changes a user's name and/or path (UpdateUser in AWS). The user
+// keeps its ID, keys, groups and policies; console sessions end.
+func (s *Service) RenameUser(name, newName, newPath string) (User, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	u, err := s.getUserOr404(name)
+	if err != nil {
+		return u, err
+	}
+	if newPath != "" {
+		if u.Path, err = validPath(newPath); err != nil {
+			return u, err
+		}
+	}
+	renamed := newName != "" && newName != name
+	if renamed {
+		if u.Root {
+			return u, unmodifiable("the root user cannot be renamed")
+		}
+		if err := validName("user", newName); err != nil {
+			return u, err
+		}
+		if nameTaken(s, cUsers, newName, name, userName) {
+			return u, alreadyExists("User with name %s already exists.", newName)
+		}
+		u.Name = newName
+	}
+	u.ARN = s.userARN(u.Name, u.path())
+	if err := store.Put(s.env.Store, cUsers, u.Name, u); err != nil {
+		return u, err
+	}
+	if !renamed {
+		return u, nil
+	}
+	_ = store.Delete(s.env.Store, cUsers, name)
+	for _, k := range store.List[AccessKey](s.env.Store, cKeys) {
+		if k.UserName == name {
+			_, _ = store.Update(s.env.Store, cKeys, k.AccessKeyID, func(k *AccessKey) error { k.UserName = newName; return nil })
+		}
+	}
+	for _, t := range store.List[tempCred](s.env.Store, cTempCreds) {
+		if t.UserName == name {
+			_, _ = store.Update(s.env.Store, cTempCreds, t.AccessKeyID, func(t *tempCred) error { t.UserName = newName; return nil })
+		}
+	}
+	s.endSessions(name)
+	return u, nil
+}
+
+// SetLoginProfile sets a user's console password. create requires that the
+// user has none yet (CreateLoginProfile); mustExist that it has one
+// (UpdateLoginProfile). An empty password with mustExist only changes reset.
+func (s *Service) SetLoginProfile(name, pw string, reset *bool, create, mustExist bool) (User, error) {
+	u, err := s.UpdateUser(name, func(u *User) error {
+		if create && u.PasswordHash != "" {
+			return alreadyExists("Login Profile for user %s already exists.", u.Name)
+		}
+		if mustExist && u.PasswordHash == "" {
+			return noSuchEntity("Login Profile for User %s cannot be found.", u.Name)
+		}
+		if pw != "" || !mustExist {
+			if err := setPassword(u, pw); err != nil {
+				return err
+			}
+		}
+		if reset != nil {
+			u.PasswordResetRequired = *reset
+		}
 		return nil
+	})
+	if err == nil && pw != "" {
+		s.endSessions(name)
+	}
+	return u, err
+}
+
+// DeleteLoginProfile removes a user's console password.
+func (s *Service) DeleteLoginProfile(name string, mustExist bool) (User, error) {
+	u, err := s.UpdateUser(name, func(u *User) error {
+		if u.Root {
+			return unmodifiable("the root user must keep console access")
+		}
+		if mustExist && u.PasswordHash == "" {
+			return noSuchEntity("Login Profile for User %s cannot be found.", u.Name)
+		}
+		u.PasswordHash, u.PasswordSetAt, u.PasswordResetRequired = "", nil, false
+		return nil
+	})
+	if err == nil {
+		s.endSessions(name)
+	}
+	return u, err
+}
+
+// endSessions signs a user out of every console session.
+func (s *Service) endSessions(user string) {
+	_ = s.env.Store.Retain(cSessions, func(_ string, raw json.RawMessage) bool {
+		var ss session
+		return json.Unmarshal(raw, &ss) != nil || ss.UserName != user
 	})
 }
 
-func (s *Service) putInline(c *httpx.Ctx) (any, error) {
-	var d PolicyDocument
-	if err := c.Bind(&d); err != nil {
-		return nil, err
+func checkTags(t core.Tags) error {
+	if len(t) > 50 {
+		return limitExceeded("Cannot exceed quota for TagsPerEntity: 50")
 	}
-	if err := d.Validate(); err != nil {
-		return nil, err
+	for k, v := range t {
+		if k == "" || len(k) > 128 || len(v) > 256 {
+			return core.Errf(http.StatusBadRequest, "ValidationError", "tag keys must be 1-128 characters and values at most 256")
+		}
 	}
-	name := c.Param("policy")
-	if err := validName("policy", name); err != nil {
-		return nil, err
+	return nil
+}
+
+func mergeTags(cur, add core.Tags) (core.Tags, error) {
+	out := core.Tags{}
+	for k, v := range cur {
+		out[k] = v
 	}
-	if d.Version == "" {
-		d.Version = "2012-10-17"
+	for k, v := range add {
+		out[k] = v
 	}
-	return s.updateUser(c.Param("name"), func(u *User) error {
+	return out, checkTags(out)
+}
+
+func dropTags(cur core.Tags, keys []string) core.Tags {
+	out := core.Tags{}
+	for k, v := range cur {
+		if !slices.Contains(keys, k) {
+			out[k] = v
+		}
+	}
+	return out
+}
+
+func (s *Service) attachTo(list []string, ref string) ([]string, error) {
+	p, err := s.resolvePolicy(ref)
+	if err != nil {
+		return list, err
+	}
+	if !slices.Contains(list, p.Name) && len(list) >= maxAttached {
+		return list, limitExceeded("Cannot exceed quota for PoliciesPerEntity: %d", maxAttached)
+	}
+	return addUnique(list, p.Name), nil
+}
+
+func (s *Service) detachFrom(list []string, ref, entity string) ([]string, error) {
+	n := s.policyName(ref)
+	if !slices.Contains(list, n) {
+		return list, noSuchEntity("Policy %s was not found (it is not attached to %s).", ref, entity)
+	}
+	return remove(list, n), nil
+}
+
+// AttachUserPolicy attaches a managed policy (name or ARN) to a user.
+func (s *Service) AttachUserPolicy(user, ref string) (User, error) {
+	if _, err := s.resolvePolicy(ref); err != nil {
+		return User{}, err
+	}
+	return s.UpdateUser(user, func(u *User) (err error) {
+		u.AttachedPolicies, err = s.attachTo(u.AttachedPolicies, ref)
+		return err
+	})
+}
+
+// DetachUserPolicy detaches a managed policy (name or ARN) from a user.
+func (s *Service) DetachUserPolicy(user, ref string) (User, error) {
+	return s.UpdateUser(user, func(u *User) (err error) {
+		if u.Root && s.policyName(ref) == "AdministratorAccess" {
+			return unmodifiable("AdministratorAccess cannot be detached from root")
+		}
+		u.AttachedPolicies, err = s.detachFrom(u.AttachedPolicies, ref, "user "+u.Name)
+		return err
+	})
+}
+
+// PutUserPolicy sets an inline policy on a user.
+func (s *Service) PutUserPolicy(user, name string, d PolicyDocument) (User, error) {
+	if err := checkInline(name, d, 2048); err != nil {
+		return User{}, err
+	}
+	return s.UpdateUser(user, func(u *User) error {
 		if u.InlinePolicies == nil {
 			u.InlinePolicies = map[string]PolicyDocument{}
 		}
@@ -714,83 +821,114 @@ func (s *Service) putInline(c *httpx.Ctx) (any, error) {
 	})
 }
 
-func (s *Service) deleteInline(c *httpx.Ctx) (any, error) {
-	return s.updateUser(c.Param("name"), func(u *User) error {
-		if _, ok := u.InlinePolicies[c.Param("policy")]; !ok {
-			return core.NotFound("inline policy", c.Param("policy"))
+// DeleteUserPolicy removes an inline policy from a user.
+func (s *Service) DeleteUserPolicy(user, name string) (User, error) {
+	return s.UpdateUser(user, func(u *User) error {
+		if _, ok := u.InlinePolicies[name]; !ok {
+			return noSuchEntity("The user policy with name %s cannot be found.", name)
 		}
-		delete(u.InlinePolicies, c.Param("policy"))
+		delete(u.InlinePolicies, name)
 		return nil
 	})
 }
 
-func (s *Service) listKeys(c *httpx.Ctx) (any, error) {
-	if _, err := s.getUserOr404(c.Param("name")); err != nil {
-		return nil, err
+// checkInline validates an inline policy and its name. limit is the AWS size
+// quota for the entity type (non-whitespace characters).
+func checkInline(name string, d PolicyDocument, limit int) error {
+	if err := validName("policy", name); err != nil {
+		return err
 	}
-	out := []AccessKey{}
-	for _, k := range store.List[AccessKey](s.env.Store, cKeys) {
-		if k.UserName == c.Param("name") {
-			k.SecretHash, k.SecretCT = "", ""
-			out = append(out, k)
-		}
+	if err := d.Validate(); err != nil {
+		return err
 	}
-	return out, nil
+	if n := docSize(d); n > limit*5 {
+		// AWS sums inline policies per entity; HomeCloud only bounds each one generously.
+		return limitExceeded("Maximum policy size of %d bytes exceeded", limit*5)
+	}
+	return nil
 }
 
-func (s *Service) createKeyRoute(c *httpx.Ctx) (any, error) {
-	name := c.Param("name")
-	if _, err := s.getUserOr404(name); err != nil {
-		return nil, err
-	}
-	n := 0
-	for _, k := range store.List[AccessKey](s.env.Store, cKeys) {
-		if k.UserName == name {
-			n++
-		}
-	}
-	if n >= 2 {
-		return nil, core.Errf(http.StatusConflict, "LimitExceeded", "user %q already has the maximum of 2 access keys", name)
-	}
-	k, secret, err := s.createKey(name)
-	if err != nil {
-		return nil, err
-	}
-	return map[string]any{"access_key_id": k.AccessKeyID, "secret_access_key": secret, "user_name": name, "status": k.Status, "created_at": k.CreatedAt}, nil
+func docSize(d PolicyDocument) int {
+	b, _ := json.Marshal(d)
+	return len(b)
 }
 
-func (s *Service) keyOf(c *httpx.Ctx) (AccessKey, error) {
-	k, err := store.Get[AccessKey](s.env.Store, cKeys, c.Param("key"))
-	if err != nil || k.UserName != c.Param("name") {
-		return k, core.NotFound("access key", c.Param("key"))
+// SetUserBoundary sets (or with ref "" removes) a user's permissions boundary.
+func (s *Service) SetUserBoundary(user, ref string) (User, error) {
+	arn := ""
+	if ref != "" {
+		p, err := s.resolvePolicy(ref)
+		if err != nil {
+			return User{}, err
+		}
+		arn = p.ARN
+	}
+	return s.UpdateUser(user, func(u *User) error {
+		if u.Root {
+			return unmodifiable("the root user cannot have a permissions boundary")
+		}
+		u.PermissionsBoundary = arn
+		return nil
+	})
+}
+
+// CreateAccessKey creates an access key for a user (at most two per user).
+func (s *Service) CreateAccessKey(user string) (AccessKey, string, error) {
+	if _, err := s.getUserOr404(user); err != nil {
+		return AccessKey{}, "", err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if len(s.UserKeys(user)) >= maxAccessKeys {
+		return AccessKey{}, "", limitExceeded("Cannot exceed quota for AccessKeysPerUser: %d", maxAccessKeys)
+	}
+	return s.createKey(user)
+}
+
+func (s *Service) userKey(user, id string) (AccessKey, error) {
+	k, err := store.Get[AccessKey](s.env.Store, cKeys, id)
+	if err != nil || k.UserName != user {
+		return k, noSuchEntity("The Access Key with id %s cannot be found.", id)
 	}
 	return k, nil
 }
 
-func (s *Service) updateKey(c *httpx.Ctx) (any, error) {
-	var in struct{ Status string }
-	if err := c.Bind(&in); err != nil {
-		return nil, err
+// UpdateAccessKey activates or deactivates a key.
+func (s *Service) UpdateAccessKey(user, id, status string) (AccessKey, error) {
+	if status != "Active" && status != "Inactive" {
+		return AccessKey{}, core.Errf(http.StatusBadRequest, "ValidationError", "status must be Active or Inactive")
 	}
-	if in.Status != "Active" && in.Status != "Inactive" {
-		return nil, errf("status must be Active or Inactive")
+	if _, err := s.userKey(user, id); err != nil {
+		return AccessKey{}, err
 	}
-	if _, err := s.keyOf(c); err != nil {
-		return nil, err
-	}
-	k, err := store.Update(s.env.Store, cKeys, c.Param("key"), func(k *AccessKey) error { k.Status = in.Status; return nil })
-	k.SecretHash, k.SecretCT = "", ""
-	return k, err
+	k, err := store.Update(s.env.Store, cKeys, id, func(k *AccessKey) error { k.Status = status; return nil })
+	return k.public(), err
 }
 
-func (s *Service) deleteKey(c *httpx.Ctx) (any, error) {
-	if _, err := s.keyOf(c); err != nil {
-		return nil, err
+// DeleteAccessKey deletes a key.
+func (s *Service) DeleteAccessKey(user, id string) error {
+	if _, err := s.userKey(user, id); err != nil {
+		return err
 	}
-	return nil, store.Delete(s.env.Store, cKeys, c.Param("key"))
+	return store.Delete(s.env.Store, cKeys, id)
 }
 
 // ---- groups ----
+
+func (s *Service) groupARNByName(name string) string {
+	if g, err := store.Get[Group](s.env.Store, cGroups, name); err == nil {
+		return g.ARN
+	}
+	return s.groupARN(name, "/")
+}
+
+func (s *Service) getGroupOr404(name string) (Group, error) {
+	g, err := store.Get[Group](s.env.Store, cGroups, name)
+	if err != nil {
+		return g, noSuchEntity("The group with name %s cannot be found.", name)
+	}
+	return g, nil
+}
 
 func (s *Service) groupMembers(name string) []string {
 	out := []string{}
@@ -802,270 +940,170 @@ func (s *Service) groupMembers(name string) []string {
 	return out
 }
 
-func (s *Service) groupView(g Group) map[string]any {
-	return map[string]any{"name": g.Name, "arn": g.ARN, "created_at": g.CreatedAt, "attached_policies": nz(g.AttachedPolicies), "members": s.groupMembers(g.Name)}
-}
-
-func (s *Service) listGroups(c *httpx.Ctx) (any, error) {
-	out := []map[string]any{}
-	for _, g := range store.List[Group](s.env.Store, cGroups) {
-		out = append(out, s.groupView(g))
+// CreateGroup creates a group; attaching policies needs iam:AttachGroupPolicy.
+func (s *Service) CreateGroup(name, path string, policies []string, can authz) (Group, error) {
+	if err := validName("group", name); err != nil {
+		return Group{}, err
 	}
-	return out, nil
-}
-
-func (s *Service) createGroup(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Name     string   `json:"name"`
-		Policies []string `json:"policies"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	if err := validName("group", in.Name); err != nil {
-		return nil, err
-	}
-	if store.Has(s.env.Store, cGroups, in.Name) {
-		return nil, core.Conflict("group %q already exists", in.Name)
-	}
-	if len(in.Policies) > 0 {
-		if err := c.Authorize("iam:AttachGroupPolicy", s.env.ARN("iam", "group/"+in.Name)); err != nil {
-			return nil, err
-		}
-	}
-	for _, p := range in.Policies {
-		if !store.Has(s.env.Store, cPolicies, p) {
-			return nil, core.NotFound("policy", p)
-		}
-	}
-	g := Group{Name: in.Name, ARN: s.env.ARN("iam", "group/"+in.Name), CreatedAt: core.Now(), AttachedPolicies: []string{}}
-	for _, p := range in.Policies {
-		g.AttachedPolicies = addUnique(g.AttachedPolicies, p)
-	}
-	return s.groupView(g), store.Put(s.env.Store, cGroups, g.Name, g)
-}
-
-func (s *Service) getGroup(c *httpx.Ctx) (any, error) {
-	g, err := store.Get[Group](s.env.Store, cGroups, c.Param("name"))
+	path, err := validPath(path)
 	if err != nil {
-		return nil, core.NotFound("group", c.Param("name"))
+		return Group{}, err
 	}
-	return s.groupView(g), nil
+	g := Group{Name: name, ID: newID("HCGA"), Path: path, ARN: s.groupARN(name, path), CreatedAt: core.Now(), AttachedPolicies: []string{}}
+	if len(policies) > 0 {
+		if err := can("iam:AttachGroupPolicy", g.ARN); err != nil {
+			return Group{}, err
+		}
+	}
+	for _, ref := range policies {
+		if g.AttachedPolicies, err = s.attachTo(g.AttachedPolicies, ref); err != nil {
+			return Group{}, err
+		}
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if nameTaken(s, cGroups, name, "", groupName) {
+		return Group{}, alreadyExists("Group with name %s already exists.", name)
+	}
+	return g, store.Put(s.env.Store, cGroups, g.Name, g)
 }
 
-func (s *Service) deleteGroup(c *httpx.Ctx) (any, error) {
-	name := c.Param("name")
-	if !store.Has(s.env.Store, cGroups, name) {
-		return nil, core.NotFound("group", name)
+// DeleteGroup deletes a group. Without force it fails while the group has
+// members or policies, as in AWS; with force members are removed.
+func (s *Service) DeleteGroup(name string, force bool) error {
+	g, err := s.getGroupOr404(name)
+	if err != nil {
+		return err
 	}
-	for _, m := range s.groupMembers(name) {
+	members := s.groupMembers(name)
+	if !force {
+		switch {
+		case len(members) > 0:
+			return deleteConflict("Cannot delete entity, must remove users from group first.")
+		case len(g.AttachedPolicies) > 0:
+			return deleteConflict("Cannot delete entity, must detach all policies first.")
+		case len(g.InlinePolicies) > 0:
+			return deleteConflict("Cannot delete entity, must delete policies first.")
+		}
+	}
+	for _, m := range members {
 		_, _ = store.Update(s.env.Store, cUsers, m, func(u *User) error { u.Groups = remove(u.Groups, name); return nil })
 	}
-	return nil, store.Delete(s.env.Store, cGroups, name)
+	return store.Delete(s.env.Store, cGroups, name)
 }
 
-func (s *Service) addMember(c *httpx.Ctx) (any, error) {
-	var in struct {
-		User string `json:"user"`
+// RenameGroup changes a group's name and/or path (UpdateGroup in AWS).
+func (s *Service) RenameGroup(name, newName, newPath string) (Group, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	g, err := s.getGroupOr404(name)
+	if err != nil {
+		return g, err
 	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	g := c.Param("name")
-	if !store.Has(s.env.Store, cGroups, g) {
-		return nil, core.NotFound("group", g)
-	}
-	return s.updateUser(in.User, func(u *User) error { u.Groups = addUnique(u.Groups, g); return nil })
-}
-
-func (s *Service) removeMember(c *httpx.Ctx) (any, error) {
-	g := c.Param("name")
-	return s.updateUser(c.Param("user"), func(u *User) error {
-		if !slices.Contains(u.Groups, g) {
-			return core.NotFound("group membership", g)
+	if newPath != "" {
+		if g.Path, err = validPath(newPath); err != nil {
+			return g, err
 		}
-		u.Groups = remove(u.Groups, g)
-		return nil
-	})
+	}
+	renamed := newName != "" && newName != name
+	if renamed {
+		if err := validName("group", newName); err != nil {
+			return g, err
+		}
+		if nameTaken(s, cGroups, newName, name, groupName) {
+			return g, alreadyExists("Group with name %s already exists.", newName)
+		}
+		g.Name = newName
+	}
+	g.ARN = s.groupARN(g.Name, g.path())
+	if err := store.Put(s.env.Store, cGroups, g.Name, g); err != nil {
+		return g, err
+	}
+	if renamed {
+		_ = store.Delete(s.env.Store, cGroups, name)
+		for _, m := range s.groupMembers(name) {
+			_, _ = store.Update(s.env.Store, cUsers, m, func(u *User) error {
+				u.Groups = append(remove(u.Groups, name), newName)
+				return nil
+			})
+		}
+	}
+	return g, nil
 }
 
-func (s *Service) updateGroup(name string, fn func(*Group) error) (any, error) {
+// UpdateGroup applies fn to a group.
+func (s *Service) UpdateGroup(name string, fn func(*Group) error) (Group, error) {
 	g, err := store.Update(s.env.Store, cGroups, name, fn)
 	if err == store.ErrNotFound {
-		return nil, core.NotFound("group", name)
+		return g, noSuchEntity("The group with name %s cannot be found.", name)
 	}
-	if err != nil {
-		return nil, err
-	}
-	return s.groupView(g), nil
+	return g, err
 }
 
-func (s *Service) attachGroupPolicy(c *httpx.Ctx) (any, error) {
-	p, err := s.policyArg(c)
-	if err != nil {
-		return nil, err
+// AddUserToGroup adds a user to a group.
+func (s *Service) AddUserToGroup(group, user string) (User, error) {
+	if _, err := s.getGroupOr404(group); err != nil {
+		return User{}, err
 	}
-	return s.updateGroup(c.Param("name"), func(g *Group) error { g.AttachedPolicies = addUnique(g.AttachedPolicies, p); return nil })
+	return s.UpdateUser(user, func(u *User) error { u.Groups = addUnique(u.Groups, group); return nil })
 }
 
-func (s *Service) detachGroupPolicy(c *httpx.Ctx) (any, error) {
-	return s.updateGroup(c.Param("name"), func(g *Group) error {
-		if !slices.Contains(g.AttachedPolicies, c.Param("policy")) {
-			return core.NotFound("attached policy", c.Param("policy"))
+// RemoveUserFromGroup removes a user from a group.
+func (s *Service) RemoveUserFromGroup(group, user string) (User, error) {
+	if _, err := s.getGroupOr404(group); err != nil {
+		return User{}, err
+	}
+	return s.UpdateUser(user, func(u *User) error {
+		if !slices.Contains(u.Groups, group) {
+			return noSuchEntity("User %s is not in group %s.", u.Name, group)
 		}
-		g.AttachedPolicies = remove(g.AttachedPolicies, c.Param("policy"))
+		u.Groups = remove(u.Groups, group)
 		return nil
 	})
 }
 
-// ---- policies ----
-
-func (s *Service) attachments(name string) map[string][]string {
-	users, groups := []string{}, []string{}
-	for _, u := range store.List[User](s.env.Store, cUsers) {
-		if slices.Contains(u.AttachedPolicies, name) {
-			users = append(users, u.Name)
-		}
+// AttachGroupPolicy attaches a managed policy to a group.
+func (s *Service) AttachGroupPolicy(group, ref string) (Group, error) {
+	if _, err := s.resolvePolicy(ref); err != nil {
+		return Group{}, err
 	}
-	for _, g := range store.List[Group](s.env.Store, cGroups) {
-		if slices.Contains(g.AttachedPolicies, name) {
-			groups = append(groups, g.Name)
-		}
-	}
-	roles := []string{}
-	for _, r := range store.List[Role](s.env.Store, cRoles) {
-		if slices.Contains(r.AttachedPolicies, name) {
-			roles = append(roles, r.Name)
-		}
-	}
-	return map[string][]string{"users": users, "groups": groups, "roles": roles}
+	return s.UpdateGroup(group, func(g *Group) (err error) {
+		g.AttachedPolicies, err = s.attachTo(g.AttachedPolicies, ref)
+		return err
+	})
 }
 
-func (s *Service) listPolicies(c *httpx.Ctx) (any, error) {
-	scope := c.Query("scope") // all | managed | local
-	out := []map[string]any{}
-	for _, p := range store.List[Policy](s.env.Store, cPolicies) {
-		if (scope == "managed" && !p.Managed) || (scope == "local" && p.Managed) {
-			continue
-		}
-		a := s.attachments(p.Name)
-		out = append(out, map[string]any{"name": p.Name, "arn": p.ARN, "description": p.Description, "managed": p.Managed,
-			"created_at": p.CreatedAt, "updated_at": p.UpdatedAt, "attachment_count": len(a["users"]) + len(a["groups"]) + len(a["roles"])})
-	}
-	return out, nil
+// DetachGroupPolicy detaches a managed policy from a group.
+func (s *Service) DetachGroupPolicy(group, ref string) (Group, error) {
+	return s.UpdateGroup(group, func(g *Group) (err error) {
+		g.AttachedPolicies, err = s.detachFrom(g.AttachedPolicies, ref, "group "+g.Name)
+		return err
+	})
 }
 
-func (s *Service) createPolicy(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Name        string         `json:"name"`
-		Description string         `json:"description"`
-		Document    PolicyDocument `json:"document"`
+// PutGroupPolicy sets an inline policy on a group.
+func (s *Service) PutGroupPolicy(group, name string, d PolicyDocument) (Group, error) {
+	if err := checkInline(name, d, 5120); err != nil {
+		return Group{}, err
 	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	if err := validName("policy", in.Name); err != nil {
-		return nil, err
-	}
-	if err := in.Document.Validate(); err != nil {
-		return nil, err
-	}
-	if store.Has(s.env.Store, cPolicies, in.Name) {
-		return nil, core.Conflict("policy %q already exists", in.Name)
-	}
-	if in.Document.Version == "" {
-		in.Document.Version = "2012-10-17"
-	}
-	p := Policy{Name: in.Name, ARN: s.policyARN(in.Name), Description: in.Description, Document: in.Document, CreatedAt: core.Now(), UpdatedAt: core.Now()}
-	return p, store.Put(s.env.Store, cPolicies, p.Name, p)
-}
-
-func (s *Service) getPolicy(c *httpx.Ctx) (any, error) {
-	p, err := store.Get[Policy](s.env.Store, cPolicies, c.Param("name"))
-	if err != nil {
-		return nil, core.NotFound("policy", c.Param("name"))
-	}
-	return map[string]any{"policy": p, "attachments": s.attachments(p.Name)}, nil
-}
-
-func (s *Service) updatePolicy(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Description *string        `json:"description"`
-		Document    PolicyDocument `json:"document"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	if err := in.Document.Validate(); err != nil {
-		return nil, err
-	}
-	if in.Document.Version == "" {
-		in.Document.Version = "2012-10-17"
-	}
-	p, err := store.Update(s.env.Store, cPolicies, c.Param("name"), func(p *Policy) error {
-		if p.Managed {
-			return core.Conflict("managed policy %q cannot be modified", p.Name)
+	return s.UpdateGroup(group, func(g *Group) error {
+		if g.InlinePolicies == nil {
+			g.InlinePolicies = map[string]PolicyDocument{}
 		}
-		p.Document, p.UpdatedAt = in.Document, core.Now()
-		if in.Description != nil {
-			p.Description = *in.Description
-		}
+		g.InlinePolicies[name] = d
 		return nil
 	})
-	if err == store.ErrNotFound {
-		return nil, core.NotFound("policy", c.Param("name"))
-	}
-	return p, err
 }
 
-func (s *Service) deletePolicy(c *httpx.Ctx) (any, error) {
-	name := c.Param("name")
-	p, err := store.Get[Policy](s.env.Store, cPolicies, name)
-	if err != nil {
-		return nil, core.NotFound("policy", name)
-	}
-	if p.Managed {
-		return nil, core.Conflict("managed policy %q cannot be deleted", name)
-	}
-	if a := s.attachments(name); len(a["users"])+len(a["groups"])+len(a["roles"]) > 0 {
-		return nil, core.Errf(http.StatusConflict, "DeleteConflict", "policy %q is still attached to %d user(s), %d group(s) and %d role(s)", name, len(a["users"]), len(a["groups"]), len(a["roles"]))
-	}
-	return nil, store.Delete(s.env.Store, cPolicies, name)
-}
-
-func (s *Service) simulate(c *httpx.Ctx) (any, error) {
-	var in struct {
-		User     string   `json:"user"`
-		Actions  []string `json:"actions"`
-		Resource string   `json:"resource"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	u, err := s.getUserOr404(in.User)
-	if err != nil {
-		return nil, err
-	}
-	if in.Resource == "" {
-		in.Resource = "*"
-	}
-	docs := s.effectiveDocs(u)
-	results := []map[string]string{}
-	for _, a := range in.Actions {
-		d := "implicitDeny"
-		if u.Root {
-			d = "allowed"
-		} else {
-			switch evaluate(docs, a, in.Resource) {
-			case allow:
-				d = "allowed"
-			case explicitDeny:
-				d = "explicitDeny"
-			}
+// DeleteGroupPolicy removes an inline policy from a group.
+func (s *Service) DeleteGroupPolicy(group, name string) (Group, error) {
+	return s.UpdateGroup(group, func(g *Group) error {
+		if _, ok := g.InlinePolicies[name]; !ok {
+			return noSuchEntity("The group policy with name %s cannot be found.", name)
 		}
-		results = append(results, map[string]string{"action": a, "resource": in.Resource, "decision": d})
-	}
-	return results, nil
+		delete(g.InlinePolicies, name)
+		return nil
+	})
 }
 
 // String renders a bootstrap result for the terminal.
