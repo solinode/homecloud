@@ -50,6 +50,27 @@ func Handler() http.Handler {
 	})
 }
 
+// Serves reports whether the console has a page or file for urlPath (other
+// than the index.html fallback), so handlers sharing the origin (anonymous S3
+// path-style requests) never shadow console routes.
+func Serves(urlPath string) bool {
+	root, err := fs.Sub(dist, "dist")
+	if err != nil {
+		return false
+	}
+	p := strings.TrimPrefix(path.Clean(urlPath), "/")
+	if p == "" || p == "." {
+		return true
+	}
+	first, _, _ := strings.Cut(p, "/")
+	for _, c := range []string{p, p + ".html", p + "/index.html", first, first + ".html"} {
+		if _, err := fs.Stat(root, c); err == nil {
+			return true
+		}
+	}
+	return false
+}
+
 const placeholder = `<!doctype html><html><head><meta charset="utf-8"><title>HomeCloud</title></head>
 <body style="font-family:system-ui;padding:40px;max-width:640px">
 <h1>HomeCloud is running</h1>
