@@ -1,122 +1,368 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HomeCloud - Your own AWS, on your hardware</title>
-    <meta name="description" content="HomeCloud is an open-source, self-hosted cloud: EC2, S3, Lambda, DynamoDB, SQS, IAM and 25 more AWS-style services from one binary on Docker. The AWS CLI, SDKs and Terraform work against it unchanged.">
-    <meta name="keywords" content="homecloud, self-hosted cloud, aws alternative, private cloud, home server, homelab, s3, lambda, terraform">
-    <meta name="author" content="HomeCloudHQ">
-    <meta name="robots" content="index, follow">
-    <meta property="og:type" content="website">
-    <meta property="og:url" content="https://homecloud.drk1rd.systems/">
-    <meta property="og:title" content="HomeCloud - Your own AWS, on your hardware">
-    <meta property="og:description" content="30 AWS-style services from one binary. The AWS CLI, SDKs and Terraform work unchanged.">
-    <meta name="twitter:card" content="summary">
-    <link rel="canonical" href="https://homecloud.drk1rd.systems/">
-    <style>
-        :root { --fg: #00ff00; --dim: #00aa00; --bg: #000; }
-        * { box-sizing: border-box; }
-        body {
-            margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
-            font-family: "Courier New", Courier, monospace; line-height: 1.5;
-            display: flex; flex-direction: column; align-items: center;
-        }
-        a { color: var(--fg); }
-        a:hover { text-decoration: none; }
-        header, main, section, footer { width: 100%; max-width: 760px; }
-        header { text-align: center; margin-bottom: 32px; }
-        header h1 { font-size: 2rem; margin: 0 0 6px; }
-        header .tag { color: var(--dim); margin: 0 0 12px; }
-        header nav a { margin: 0 8px; text-decoration: none; }
-        h2 { font-size: 1.1rem; margin: 32px 0 8px; }
-        h2::before { content: "$ "; color: var(--dim); }
-        pre {
-            border: 1px solid var(--dim); padding: 12px; overflow-x: auto; margin: 8px 0;
-            white-space: pre; font-size: 0.9rem;
-        }
-        ul { padding-left: 20px; margin: 8px 0; }
-        li { margin: 4px 0; }
-        .dim { color: var(--dim); }
-        .partners { text-align: center; margin-top: 40px; }
-        .partners img { margin: 8px 12px; vertical-align: middle; }
-        footer { text-align: center; margin-top: 40px; color: var(--dim); font-size: 0.85rem; }
-    </style>
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-SW07QRM18M"></script>
-    <script>
-      window.dataLayer = window.dataLayer || [];
-      function gtag(){dataLayer.push(arguments);}
-      gtag('js', new Date());
-      gtag('config', 'G-SW07QRM18M');
-    </script>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>HomeCloud</title>
+<meta name="description" content="HomeCloud is an open-source, self-hosted cloud. One binary runs 30 AWS-style services on your hardware, and the AWS CLI, SDKs and Terraform work against it unchanged.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="HomeCloud: your own AWS, on your hardware">
+<meta property="og:description" content="30 AWS-style services from one binary. The AWS CLI, SDKs and Terraform work unchanged.">
+<meta name="twitter:card" content="summary">
+<meta name="theme-color" content="#0a0c10">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%230a0c10'/%3E%3Cpath d='M9 21a5 5 0 0 1 .6-10A7 7 0 0 1 23 12a4.5 4.5 0 0 1 0 9z' fill='%2334d399'/%3E%3C/svg%3E">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-SW07QRM18M"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-SW07QRM18M');
+</script>
+<style>
+  :root {
+    --bg: #0a0c10;
+    --bg-2: #0f1218;
+    --card: #12161d;
+    --line: #1f2530;
+    --text: #e6e9ef;
+    --muted: #8b93a3;
+    --accent: #34d399;
+    --accent-2: #22d3ee;
+    --warn: #fbbf24;
+    --radius: 14px;
+    --mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0; background: var(--bg); color: var(--text);
+    font: 16px/1.6 Inter, system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+    -webkit-font-smoothing: antialiased;
+  }
+  a { color: inherit; }
+  .wrap { max-width: 1120px; margin: 0 auto; padding: 0 20px; }
+  code, pre, .mono { font-family: var(--mono); }
+
+  /* nav */
+  nav { position: sticky; top: 0; z-index: 10; backdrop-filter: blur(12px); background: rgba(10,12,16,.75); border-bottom: 1px solid var(--line); }
+  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 60px; }
+  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; letter-spacing: -.01em; }
+  .brand svg { width: 26px; height: 26px; }
+  .links { display: flex; gap: 22px; align-items: center; font-size: 14px; }
+  .links a { text-decoration: none; color: var(--muted); }
+  .links a:hover { color: var(--text); }
+  .btn { display: inline-flex; align-items: center; gap: 8px; padding: 10px 16px; border-radius: 10px; font-weight: 600; font-size: 14px; text-decoration: none; border: 1px solid var(--line); background: var(--card); color: var(--text); cursor: pointer; }
+  .btn:hover { border-color: #2c3442; }
+  .btn.primary { background: var(--accent); color: #04130d; border-color: transparent; }
+  .btn.primary:hover { filter: brightness(1.08); }
+  .btn svg { width: 16px; height: 16px; }
+
+  /* hero */
+  .hero { position: relative; padding: 88px 0 72px; overflow: hidden; }
+  .hero::before {
+    content: ""; position: absolute; inset: -40% -10% auto; height: 700px; pointer-events: none;
+    background: radial-gradient(600px 300px at 30% 30%, rgba(52,211,153,.16), transparent 70%),
+                radial-gradient(500px 260px at 75% 20%, rgba(34,211,238,.12), transparent 70%);
+  }
+  .grid-bg { position: absolute; inset: 0; pointer-events: none; opacity: .35;
+    background-image: linear-gradient(var(--line) 1px, transparent 1px), linear-gradient(90deg, var(--line) 1px, transparent 1px);
+    background-size: 44px 44px; mask-image: radial-gradient(ellipse at 50% 20%, #000 20%, transparent 70%); }
+  .hero .wrap { position: relative; display: grid; grid-template-columns: 1.05fr .95fr; gap: 48px; align-items: center; }
+  .hero .wrap > *, .split > *, .features > *, .steps > * { min-width: 0; }
+  .pill { max-width: 100%; display: inline-flex; align-items: center; gap: 8px; font-size: 13px; color: var(--muted); border: 1px solid var(--line); background: var(--bg-2); padding: 6px 12px; border-radius: 999px; }
+  .pill b { color: var(--accent); font-weight: 600; }
+  h1 { font-size: clamp(38px, 5.6vw, 64px); line-height: 1.04; letter-spacing: -.035em; margin: 18px 0 18px; font-weight: 800; }
+  h1 .grad { background: linear-gradient(90deg, var(--accent), var(--accent-2)); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { font-size: 18px; color: var(--muted); max-width: 540px; margin: 0 0 28px; }
+  .install { display: flex; align-items: center; gap: 10px; background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 12px 12px 12px 16px; max-width: 560px; }
+  .install code { flex: 1; font-size: 13.5px; white-space: nowrap; overflow-x: auto; scrollbar-width: none; }
+  .install code::-webkit-scrollbar { display: none; }
+  .install .p { color: var(--accent); user-select: none; }
+  .copy { flex: none; border: 1px solid var(--line); background: var(--card); color: var(--muted); border-radius: 8px; padding: 6px 10px; font: 500 12px Inter, sans-serif; cursor: pointer; }
+  .copy:hover { color: var(--text); }
+  .os { font-size: 13px; color: var(--muted); margin-top: 10px; }
+  .os button { background: none; border: 0; color: var(--muted); text-decoration: underline; cursor: pointer; font: inherit; padding: 0; }
+  .cta { display: flex; gap: 12px; margin-top: 26px; flex-wrap: wrap; }
+
+  /* terminal */
+  .term { background: #0c0f14; border: 1px solid var(--line); border-radius: var(--radius); box-shadow: 0 30px 80px -20px rgba(0,0,0,.6), 0 0 0 1px rgba(255,255,255,.02) inset; overflow: hidden; }
+  .term-bar { display: flex; align-items: center; gap: 8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+  .term-bar i { width: 11px; height: 11px; border-radius: 50%; background: #2a303b; }
+  .term-bar span { margin-left: 8px; font: 12px var(--mono); color: var(--muted); }
+  .term pre { margin: 0; padding: 18px 18px 22px; font-size: 13px; line-height: 1.75; overflow-x: auto; }
+  .c { color: #5b6477; } .g { color: var(--accent); } .b { color: var(--accent-2); } .y { color: var(--warn); } .w { color: var(--text); }
+
+  /* sections */
+  section { padding: 84px 0; border-top: 1px solid var(--line); }
+  .eyebrow { font: 500 13px var(--mono); color: var(--accent); letter-spacing: .04em; text-transform: uppercase; }
+  h2 { font-size: clamp(28px, 3.6vw, 40px); letter-spacing: -.025em; line-height: 1.15; margin: 10px 0 14px; }
+  .sub { color: var(--muted); max-width: 640px; margin: 0 0 40px; font-size: 17px; }
+
+  .features { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: var(--radius); padding: 22px; }
+  .card h3 { margin: 12px 0 6px; font-size: 17px; }
+  .card p { margin: 0; color: var(--muted); font-size: 15px; }
+  .icon { width: 38px; height: 38px; border-radius: 10px; display: grid; place-items: center; background: rgba(52,211,153,.1); color: var(--accent); }
+  .icon svg { width: 20px; height: 20px; }
+
+  .services { display: grid; grid-template-columns: repeat(4, 1fr); gap: 14px; }
+  .svc { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px; }
+  .svc h4 { margin: 0 0 10px; font-size: 13px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: .06em; }
+  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .chip { font: 500 12.5px var(--mono); padding: 4px 8px; border-radius: 6px; background: var(--bg-2); border: 1px solid var(--line); }
+  .chip.aws { border-color: rgba(52,211,153,.35); color: var(--accent); }
+  .legend { margin-top: 16px; font-size: 13px; color: var(--muted); }
+  .legend .chip { margin-right: 6px; }
+
+  .split { display: grid; grid-template-columns: 1fr 1fr; gap: 40px; align-items: center; }
+  .checks { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; }
+  .checks li { display: flex; gap: 12px; color: var(--muted); }
+  .checks li b { color: var(--text); font-weight: 600; }
+  .checks svg { flex: none; width: 20px; height: 20px; color: var(--accent); margin-top: 2px; }
+
+  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 16px; counter-reset: step; }
+  .step { counter-increment: step; }
+  .step::before { content: "0" counter(step); font: 500 13px var(--mono); color: var(--accent); }
+  .step pre { background: var(--bg-2); border: 1px solid var(--line); border-radius: 10px; padding: 12px 14px; font-size: 12.5px; overflow-x: auto; margin: 12px 0 0; }
+
+  .final { text-align: center; }
+  .final .sub { margin: 0 auto 28px; }
+  .final .cta { justify-content: center; }
+
+  .partners { display: flex; justify-content: center; align-items: center; gap: 40px; flex-wrap: wrap; margin-top: 18px; opacity: .85; }
+  .partners img { filter: grayscale(1) brightness(1.6); transition: filter .2s; }
+  .partners a:hover img { filter: none; }
+
+  footer { border-top: 1px solid var(--line); padding: 28px 0 40px; color: var(--muted); font-size: 14px; }
+  footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  footer a { color: var(--muted); text-decoration: none; margin-left: 18px; }
+  footer a:hover { color: var(--text); }
+
+  @media (max-width: 900px) {
+    .hero .wrap, .split { grid-template-columns: 1fr; }
+    .features, .steps { grid-template-columns: 1fr; }
+    .services { grid-template-columns: 1fr 1fr; }
+    .hero { padding-top: 56px; }
+  }
+  @media (max-width: 560px) {
+    .services { grid-template-columns: 1fr; }
+    .links a.hide-sm { display: none; }
+    footer a { margin: 0 16px 0 0; }
+    section { padding: 64px 0; }
+  }
+</style>
 </head>
 <body>
-    <header>
-        <h1>HomeCloud</h1>
-        <p class="tag">your own AWS, on your hardware.</p>
-        <nav>
-            <a href="https://github.com/homecloudhq/homecloud" target="_blank" rel="noopener">github</a>
-            <a href="https://github.com/homecloudhq/homecloud/blob/main/docs/aws-compat.md" target="_blank" rel="noopener">docs</a>
-            <a href="discord.html">discord</a>
-            <a href="https://www.linkedin.com/company/homecloudhq/" target="_blank" rel="noopener">linkedin</a>
-        </nav>
-    </header>
-    <main>
-        <p>
-            HomeCloud is an open-source, self-hosted cloud. One binary runs thirty AWS-style services
-            on Docker, with a web console, a CLI and an API. Your data never leaves your machines,
-            and there's no bill.
-        </p>
 
-        <h2>install</h2>
-        <pre>curl -fsSL https://homecloud.drk1rd.systems/scripts/install.sh | sh
-homecloud serve          # console on http://127.0.0.1:8080</pre>
-        <p class="dim">Windows: <code>irm https://homecloud.drk1rd.systems/scripts/install.ps1 | iex</code> &middot; needs Docker (or OrbStack / Docker Desktop)</p>
+<nav>
+  <div class="wrap">
+    <a class="brand" href="#">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="8" fill="#12161d" stroke="#1f2530"/><path d="M9 21a5 5 0 0 1 .6-10A7 7 0 0 1 23 12a4.5 4.5 0 0 1 0 9z" fill="#34d399"/></svg>
+      HomeCloud
+    </a>
+    <div class="links">
+      <a class="hide-sm" href="#features">Features</a>
+      <a class="hide-sm" href="#services">Services</a>
+      <a class="hide-sm" href="#start">Get started</a>
+      <a class="btn" href="https://github.com/homecloudhq/homecloud" target="_blank" rel="noopener">
+        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
+        GitHub
+      </a>
+    </div>
+  </div>
+</nav>
 
-        <h2>speaks aws</h2>
-        <p>The AWS CLI, the SDKs and Terraform work unchanged, with IAM enforced:</p>
-        <pre>eval "$(homecloud aws-env)"
-aws s3 cp photo.jpg s3://family/
-aws lambda invoke --function-name resize out.json
-terraform apply</pre>
+<header class="hero">
+  <div class="grid-bg"></div>
+  <div class="wrap">
+    <div>
+      <span class="pill"><b>New</b> AWS CLI, SDKs and Terraform work unchanged</span>
+      <h1>Your own AWS.<br><span class="grad">On your hardware.</span></h1>
+      <p class="lead">HomeCloud is an open-source, self-hosted cloud. One binary runs thirty AWS-style services on Docker, with a web console, a CLI and IAM on every request. Your data stays on your machines, and there's no bill.</p>
+      <div class="install" id="install">
+        <code><span class="p">$ </span><span id="cmd">curl -fsSL https://raw.githubusercontent.com/homecloudhq/homecloud/main/scripts/install.sh | sh</span></code>
+        <button class="copy" data-copy="cmd">Copy</button>
+      </div>
+      <div class="os">macOS &amp; Linux · <button id="os-toggle" type="button">Windows (PowerShell)</button> · needs Docker</div>
+      <div class="cta">
+        <a class="btn primary" href="#start">Get started</a>
+        <a class="btn" href="https://github.com/homecloudhq/homecloud/blob/main/docs/aws-compat.md" target="_blank" rel="noopener">AWS compatibility</a>
+      </div>
+    </div>
+    <div class="term" aria-label="Example terminal session">
+      <div class="term-bar"><i></i><i></i><i></i><span>~/homelab</span></div>
+<pre><span class="c"># start your cloud</span>
+<span class="g">$</span> <span class="w">homecloud serve</span>
+<span class="c">  console  http://127.0.0.1:8080</span>
 
-        <h2>services</h2>
-        <ul>
-            <li><strong>compute</strong> <span class="dim">EC2, EBS, Auto Scaling, EFS, ECS, ECR</span></li>
-            <li><strong>storage &amp; data</strong> <span class="dim">S3, RDS (Postgres, MySQL, MariaDB, Redis, MongoDB), DynamoDB</span></li>
-            <li><strong>serverless</strong> <span class="dim">Lambda, API Gateway, Step Functions, EventBridge</span></li>
-            <li><strong>messaging</strong> <span class="dim">SQS, SNS</span></li>
-            <li><strong>networking</strong> <span class="dim">VPC, load balancers, Route 53, ACM</span></li>
-            <li><strong>security</strong> <span class="dim">IAM &amp; STS, Cognito, KMS, Secrets Manager, Parameter Store</span></li>
-            <li><strong>operations</strong> <span class="dim">CloudWatch metrics, logs &amp; alarms, CloudTrail, CloudFormation</span></li>
-        </ul>
+<span class="c"># point the AWS tools at it</span>
+<span class="g">$</span> <span class="w">eval "$(homecloud aws-env)"</span>
 
-        <h2>why</h2>
-        <p>
-            <a href="files/Project Concept_ _HomeCloud_.pdf">- concept?</a><br>
-            <a href="files/but, why_.pdf">- but, why?</a>
-        </p>
-    </main>
-    <section class="partners">
-        <p class="dim">support partners</p>
-        <a href="https://tailscale.com/" target="_blank" rel="noopener"><img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" alt="Tailscale" height="44"></a>
-        <a href="https://coderabbit.ai/" target="_blank" rel="noopener"><img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png" alt="CodeRabbit" height="20"></a>
-    </section>
-    <footer>
-        <p>AGPL-3.0 &middot; &copy; 2026 HomeCloudHQ</p>
-    </footer>
-    <script type="application/ld+json">
-    {
-      "@context": "https://schema.org",
-      "@type": "SoftwareApplication",
-      "name": "HomeCloud",
-      "description": "Open-source, self-hosted cloud with AWS-compatible APIs",
-      "applicationCategory": "DeveloperApplication",
-      "operatingSystem": "Linux, macOS, Windows",
-      "license": "https://www.gnu.org/licenses/agpl-3.0.html",
-      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
-      "publisher": { "@type": "Organization", "name": "HomeCloudHQ" }
-    }
-    </script>
+<span class="g">$</span> <span class="w">aws s3 cp photo.jpg s3://family/</span>
+<span class="b">upload:</span> ./photo.jpg to s3://family/photo.jpg
+
+<span class="g">$</span> <span class="w">aws lambda invoke --function-name resize out.json</span>
+{ <span class="y">"StatusCode"</span>: 200, <span class="y">"ExecutedVersion"</span>: "$LATEST" }
+
+<span class="g">$</span> <span class="w">terraform apply</span>
+<span class="b">Apply complete!</span> Resources: 9 added, 0 changed, 0 destroyed.</pre>
+    </div>
+  </div>
+</header>
+
+<section id="features">
+  <div class="wrap">
+    <div class="eyebrow">Why HomeCloud</div>
+    <h2>The cloud you already know, running where you want it.</h2>
+    <p class="sub">Everything you build against HomeCloud uses the same APIs, tools and mental model as AWS, without the account, the region or the invoice.</p>
+    <div class="features">
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 9-3 3 3 3M16 9l3 3-3 3M14 5l-4 14"/></svg></div>
+        <h3>Speaks AWS</h3>
+        <p>The AWS CLI, boto3, the JS/Go/Java SDKs and Terraform connect with a HomeCloud access key. Signatures, errors and ARNs match AWS.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M9 9h6v6H9z"/></svg></div>
+        <h3>One binary</h3>
+        <p>A single <code>homecloud</code> file runs the API, the console and every service on Docker. Install in a minute on Linux, macOS or Windows.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 4 6v6c0 5 3.5 8 8 9 4.5-1 8-4 8-9V6z"/><path d="m9 12 2 2 4-4"/></svg></div>
+        <h3>IAM everywhere</h3>
+        <p>Users, roles, policies with conditions and temporary credentials guard every request. Functions and instances get role credentials automatically.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="14" rx="2"/><path d="M3 9h18M8 21h8"/></svg></div>
+        <h3>A real console</h3>
+        <p>A web console modeled on the one you know, with pages for every service, dark mode, and a browser shell into instances.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
+        <h3>Built to keep running</h3>
+        <p>Install it as a system service, back up state and volumes with one command, and upgrade in place with verified releases.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg></div>
+        <h3>Yours, fully</h3>
+        <p>Open source under AGPL-3.0. No telemetry in the product, no lock-in, and it works offline on your LAN or over Tailscale.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<section id="services">
+  <div class="wrap">
+    <div class="eyebrow">Services</div>
+    <h2>Thirty services, one install.</h2>
+    <p class="sub">Every service runs as containers you can see and control. Highlighted ones also speak the AWS API, so existing tools work as-is.</p>
+    <div class="services">
+      <div class="svc"><h4>Compute</h4><div class="chips"><span class="chip aws">EC2</span><span class="chip aws">EBS</span><span class="chip">Auto Scaling</span><span class="chip">EFS</span></div></div>
+      <div class="svc"><h4>Containers</h4><div class="chips"><span class="chip">ECS</span><span class="chip">ECR</span></div></div>
+      <div class="svc"><h4>Serverless</h4><div class="chips"><span class="chip aws">Lambda</span><span class="chip">API Gateway</span><span class="chip aws">Step Functions</span></div></div>
+      <div class="svc"><h4>Storage</h4><div class="chips"><span class="chip aws">S3</span><span class="chip aws">DynamoDB</span></div></div>
+      <div class="svc"><h4>Databases</h4><div class="chips"><span class="chip">PostgreSQL</span><span class="chip">MySQL</span><span class="chip">MariaDB</span><span class="chip">Redis</span><span class="chip">MongoDB</span></div></div>
+      <div class="svc"><h4>Messaging</h4><div class="chips"><span class="chip aws">SQS</span><span class="chip aws">SNS</span><span class="chip aws">EventBridge</span></div></div>
+      <div class="svc"><h4>Networking</h4><div class="chips"><span class="chip aws">VPC</span><span class="chip">Load balancers</span><span class="chip">Route 53</span><span class="chip">ACM</span></div></div>
+      <div class="svc"><h4>Security</h4><div class="chips"><span class="chip aws">IAM</span><span class="chip aws">STS</span><span class="chip aws">KMS</span><span class="chip aws">Secrets Manager</span><span class="chip aws">Parameter Store</span><span class="chip">Cognito</span></div></div>
+      <div class="svc"><h4>Operations</h4><div class="chips"><span class="chip aws">CloudWatch</span><span class="chip aws">Logs</span><span class="chip">CloudTrail</span><span class="chip">CloudFormation</span></div></div>
+    </div>
+    <div class="legend"><span class="chip aws">green</span>works with the AWS CLI, SDKs and Terraform today</div>
+  </div>
+</section>
+
+<section>
+  <div class="wrap split">
+    <div>
+      <div class="eyebrow">Drop-in</div>
+      <h2>Point your code at HomeCloud. That's the migration.</h2>
+      <ul class="checks">
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Same SDK calls.</b> Set <code>AWS_ENDPOINT_URL</code> and your boto3 or JavaScript code runs unchanged.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Same Terraform.</b> Plans apply, re-plan clean and destroy for IAM, VPC, EC2 and S3.</span></li>
+        <li><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12 5 5 9-10"/></svg><span><b>Same patterns.</b> DynamoDB streams trigger Lambda, which sends to SQS with its role's credentials.</span></li>
+      </ul>
+    </div>
+    <div class="term">
+      <div class="term-bar"><i></i><i></i><i></i><span>app.py</span></div>
+<pre><span class="b">import</span> boto3
+
+<span class="c"># AWS_ENDPOINT_URL=http://homelab:8080</span>
+table = boto3.resource(<span class="y">"dynamodb"</span>).Table(<span class="y">"orders"</span>)
+table.put_item(Item={<span class="y">"pk"</span>: <span class="y">"order-1"</span>, <span class="y">"total"</span>: 42})
+
+sqs = boto3.client(<span class="y">"sqs"</span>)
+url = sqs.get_queue_url(QueueName=<span class="y">"jobs"</span>)[<span class="y">"QueueUrl"</span>]
+sqs.send_message(QueueUrl=url, MessageBody=<span class="y">"resize"</span>)</pre>
+    </div>
+  </div>
+</section>
+
+<section id="start">
+  <div class="wrap">
+    <div class="eyebrow">Get started</div>
+    <h2>Up and running in three commands.</h2>
+    <p class="sub">You need Docker: Docker Engine on Linux, or Docker Desktop / OrbStack on macOS and Windows.</p>
+    <div class="steps">
+      <div class="card step"><h3>Install</h3><p>Download the binary for your platform.</p><pre>curl -fsSL …/install.sh | sh</pre></div>
+      <div class="card step"><h3>Serve</h3><p>Start the API and console, and note the root password.</p><pre>homecloud serve</pre></div>
+      <div class="card step"><h3>Build</h3><p>Use the console, the CLI or your AWS tools.</p><pre>eval "$(homecloud aws-env)"
+aws s3 mb s3://photos</pre></div>
+    </div>
+  </div>
+</section>
+
+<section class="final">
+  <div class="wrap">
+    <h2>The cloud, on your terms.</h2>
+    <p class="sub">HomeCloud is a community project. Star it, try it on your homelab, and tell us what to build next.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/homecloudhq/homecloud" target="_blank" rel="noopener">Star on GitHub</a>
+      <a class="btn" href="https://discord.gg/pemra9uaC9" target="_blank" rel="noopener">Join the Discord</a>
+    </div>
+    <p class="os" style="margin-top:44px">Supported by</p>
+    <div class="partners">
+      <a href="https://tailscale.com/" target="_blank" rel="noopener"><img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" alt="Tailscale" height="40"></a>
+      <a href="https://coderabbit.ai/" target="_blank" rel="noopener"><img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png" alt="CodeRabbit" height="20"></a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <span>© 2026 HomeCloudHQ · AGPL-3.0</span>
+    <span>
+      <a href="files/Project Concept_ _HomeCloud_.pdf">Concept</a>
+      <a href="files/but, why_.pdf">But, why?</a>
+      <a href="https://www.linkedin.com/company/homecloudhq/" target="_blank" rel="noopener">LinkedIn</a>
+      <a href="https://github.com/homecloudhq/homecloud" target="_blank" rel="noopener">GitHub</a>
+    </span>
+  </div>
+</footer>
+
+<script>
+  // Serve the install scripts from this site when it hosts them; otherwise from GitHub.
+  (function () {
+    var hosted = location.protocol.indexOf("http") === 0;
+    var base = hosted ? location.origin + "/scripts/" : "https://raw.githubusercontent.com/homecloudhq/homecloud/main/scripts/";
+    var cmds = { unix: "curl -fsSL " + base + "install.sh | sh", win: "irm " + base + "install.ps1 | iex" };
+    var cmd = document.getElementById("cmd"), toggle = document.getElementById("os-toggle"), win = false;
+    cmd.textContent = cmds.unix;
+    toggle.addEventListener("click", function () {
+      win = !win;
+      cmd.textContent = win ? cmds.win : cmds.unix;
+      toggle.textContent = win ? "macOS & Linux" : "Windows (PowerShell)";
+    });
+    document.querySelectorAll("[data-copy]").forEach(function (b) {
+      b.addEventListener("click", function () {
+        var text = document.getElementById(b.dataset.copy).textContent;
+        (navigator.clipboard ? navigator.clipboard.writeText(text) : Promise.reject()).then(function () {
+          b.textContent = "Copied"; setTimeout(function () { b.textContent = "Copy"; }, 1500);
+        }, function () { b.textContent = "Select & copy"; });
+      });
+    });
+  })();
+</script>
 </body>
 </html>
