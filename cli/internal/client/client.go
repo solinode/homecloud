@@ -3,6 +3,8 @@ package client
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -21,6 +23,7 @@ type Profile struct {
 	AccessKeyID     string `json:"access_key_id"`
 	SecretAccessKey string `json:"secret_access_key"`
 	Region          string `json:"region,omitempty"`
+	CAFile          string `json:"ca_file,omitempty"` // extra CA to trust (self-signed servers)
 }
 
 func CredentialsFile() string { return filepath.Join(core.DefaultDataDir(), "credentials") }
@@ -67,7 +70,20 @@ func New() (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
-	return &Client{P: p, HTTP: &http.Client{Timeout: 10 * time.Minute}}, nil
+	hc := &http.Client{Timeout: 10 * time.Minute}
+	if p.CAFile != "" {
+		pem, err := os.ReadFile(p.CAFile)
+		if err != nil {
+			return nil, fmt.Errorf("read ca_file: %w", err)
+		}
+		pool, err := x509.SystemCertPool()
+		if err != nil {
+			pool = x509.NewCertPool()
+		}
+		pool.AppendCertsFromPEM(pem)
+		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
+	}
+	return &Client{P: p, HTTP: hc}, nil
 }
 
 // APIError mirrors the server's error body.
