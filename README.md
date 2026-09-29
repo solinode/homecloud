@@ -134,11 +134,23 @@ Run `homecloud --help` or `homecloud <service> --help` for every command.
 
 ### Use it from AWS tools
 
-The S3 endpoint speaks the S3 protocol, so existing tools work unchanged:
+HomeCloud speaks the AWS protocols on its API port, so the AWS CLI, SDKs (boto3, JS, Go, Java) and Terraform work unchanged with HomeCloud credentials and IAM:
 
 ```bash
-homecloud s3 credentials          # endpoint + keys
-aws --endpoint-url http://localhost:9500 s3 ls
+eval "$(homecloud aws-env)"       # AWS_ENDPOINT_URL, keys and region
+aws s3 ls
+aws lambda invoke --function-name hello out.json
+```
+
+See [docs/aws-compat.md](docs/aws-compat.md) for the supported services and operations.
+
+### Run it as a service, back it up, upgrade it
+
+```bash
+homecloud service install         # launchd (macOS) or systemd (Linux)
+homecloud backup -o backup.tar.gz # state, keys and every Docker volume
+homecloud restore backup.tar.gz   # with the server stopped
+homecloud upgrade                 # verified update from GitHub releases
 ```
 
 ---

@@ -12,7 +12,14 @@ HomeCloud is rebuilt from a prototype CLI into a self-hosted cloud: one `homeclo
 - **Serverless and integration:** Lambda (Python, Node.js) with function URLs, API Gateway with JWT authorizers, SQS, SNS, EventBridge schedules and patterns, Step Functions.
 - **Security and management:** IAM (users, groups, JSON policies, access keys, simulator), Cognito user pools, KMS, Secrets Manager, Parameter Store, CloudWatch metrics/logs/alarms, CloudTrail, CloudFormation-style stacks.
 
+### AWS compatibility
+- The API port speaks the AWS protocols (SigV4, awsJson, awsQuery, REST), so the AWS CLI, SDKs and Terraform work against HomeCloud with IAM enforced: STS, IAM, S3, Lambda, DynamoDB, SQS, SNS, Secrets Manager, Parameter Store, KMS, CloudWatch, CloudWatch Logs, EventBridge (and Scheduler) and Step Functions. See docs/aws-compat.md.
+- IAM roles with trust policies and temporary credentials; functions receive role credentials.
+- ARNs use the `aws` partition and the default region is `us-east-1`; existing installations are migrated at startup (with a backup).
+- Lambda runs on AWS's official runtime images: warm environments, Go/Java/Ruby/.NET/custom runtimes, container images, versions, aliases, layers, async invocation with destinations, concurrency limits.
+
 ### Tooling
+- `homecloud aws-env`, `service install`, `backup`/`restore` and `upgrade`.
 - New CLI covering every service (`homecloud <service> ...`), `homecloud serve`, `configure`, `doctor`, and `api` for raw calls.
 - Web console with pages for every service, embedded in the binary.
 - Cross-compiled releases for Linux, macOS and Windows (amd64/arm64), CI with unit, race and end-to-end tests, arch-aware install scripts.

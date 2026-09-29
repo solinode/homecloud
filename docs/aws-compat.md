@@ -25,11 +25,27 @@ calls from inside them reach HomeCloud.
 
 ## Coverage
 
-| Service | Protocol | Status |
-|---|---|---|
-| STS | awsQuery | GetCallerIdentity, AssumeRole, GetSessionToken |
+| Service | Signing name | Protocol | Notes |
+|---|---|---|---|
+| STS | sts | awsQuery | GetCallerIdentity, AssumeRole, GetSessionToken |
+| IAM | iam | awsQuery | Users, groups, roles, managed policies (with versions, `arn:aws:iam::aws:policy/...`), inline policies, access keys, instance profiles, permissions boundaries, conditions, simulation |
+| S3 | s3 | restXml | Objects, multipart, presigned URLs (SigV4 and SigV2), chunked/trailer uploads, versioning, lifecycle, policy, tagging, website; path and virtual-host addressing |
+| Lambda | lambda | restJson1 | Functions (zip, S3, container image), invoke (sync/async/tail), versions, aliases, layers, permissions, concurrency, destinations, event source mappings (SQS, DynamoDB streams), function URLs |
+| DynamoDB | dynamodb | awsJson 1.0 | Tables, GSIs/LSIs, all item ops with expressions, batch, transactions, PartiQL, TTL, streams |
+| SQS | sqs | awsJson 1.0 + awsQuery | Standard and FIFO queues, DLQs and redrive, batch ops, long polling |
+| SNS | sns | awsQuery | Topics (incl. FIFO), subscriptions (sqs, lambda, http/s, email), filter policies, signed messages |
+| Secrets Manager | secretsmanager | awsJson 1.1 | Versions and staging labels, rotation via Lambda, resource policies |
+| SSM Parameter Store | ssm | awsJson 1.1 | Parameters, hierarchies, versions and labels, SecureString |
+| KMS | kms | awsJson 1.1 | Symmetric, RSA, ECC and HMAC keys, aliases, rotation, data keys, grants |
+| CloudWatch | monitoring | awsJson 1.0 + awsQuery | Metrics, GetMetricData with math, alarms, dashboards |
+| CloudWatch Logs | logs | awsJson 1.1 | Groups, streams, events, filter patterns, Logs Insights, metric and subscription filters |
+| EventBridge | events | awsJson 1.1 | Buses, rules with full pattern syntax, targets with transforms |
+| EventBridge Scheduler | scheduler | restJson1 | Schedules and groups |
+| Step Functions | states | awsJson 1.0 | State machines, executions, task tokens, service integrations |
 
-Other services are being added; see the table in `CHANGELOG.md`.
+Notes:
+- Terraform's S3 support prefixes the endpoint host with the account ID, so use `http://localhost:PORT`, not an IP address.
+- `StartSyncExecution` clients must disable host-prefix injection (`AWS_DISABLE_HOST_PREFIX_INJECTION=true`).
 
 ## Adding operations (for contributors)
 
