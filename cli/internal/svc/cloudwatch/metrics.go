@@ -10,6 +10,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -20,13 +21,57 @@ import (
 )
 
 const (
-	retention      = 24 * time.Hour
-	sampleInterval = 30 * time.Second
+	// retention is how long HomeCloud's own samples (HC/ namespaces) are kept;
+	// custom metrics are kept for customRetention, the oldest timestamp PutMetricData accepts.
+	retention       = 24 * time.Hour
+	customRetention = 15 * 24 * time.Hour
+	sampleInterval  = 30 * time.Second
 )
 
+func retentionFor(ns string) time.Duration {
+	if strings.HasPrefix(ns, "HC/") {
+		return retention
+	}
+	return customRetention
+}
+
+// Point is one datapoint: a value (N == 0), or a statistic set / repeated
+// value (N samples with sum S, minimum Lo and maximum Hi; V is their mean).
 type Point struct {
-	T time.Time `json:"t"`
-	V float64   `json:"v"`
+	T  time.Time `json:"t"`
+	V  float64   `json:"v"`
+	N  float64   `json:"n,omitempty"`
+	S  float64   `json:"s,omitempty"`
+	Lo float64   `json:"lo,omitempty"`
+	Hi float64   `json:"hi,omitempty"`
+}
+
+func (p Point) count() float64 {
+	if p.N > 0 {
+		return p.N
+	}
+	return 1
+}
+
+func (p Point) sum() float64 {
+	if p.N > 0 {
+		return p.S
+	}
+	return p.V
+}
+
+func (p Point) min() float64 {
+	if p.N > 0 {
+		return p.Lo
+	}
+	return p.V
+}
+
+func (p Point) max() float64 {
+	if p.N > 0 {
+		return p.Hi
+	}
+	return p.V
 }
 
 type Series struct {
@@ -34,6 +79,8 @@ type Series struct {
 	Name       string            `json:"name"`
 	Dimensions map[string]string `json:"dimensions"`
 	Unit       string            `json:"unit"`
+	HighRes    bool              `json:"high_res,omitempty"`
+	Updated    time.Time         `json:"updated,omitempty"`
 	Points     []Point           `json:"points,omitempty"`
 }
 
@@ -61,6 +108,8 @@ type Service struct {
 	prev   map[string]uint64 // last cumulative counter values, for deltas
 	logs   *logStore
 	Notify Notifier
+	// Deliver sends log subscription payloads to a Lambda function ARN.
+	Deliver func(ctx context.Context, arn string, payload []byte) error
 }
 
 func New(env *svc.Env) (*Service, error) {
@@ -107,13 +156,22 @@ func (s *Service) save() {
 
 const maxSeries = 20000
 
-// Put records one datapoint. Points outside [now-24h, now+2h] are dropped.
+// Put records one datapoint. Points outside the retention window or more
+// than 2 hours in the future are dropped.
 func (s *Service) Put(ns, name string, dims map[string]string, unit string, v float64, t time.Time) {
-	if t.IsZero() {
-		t = time.Now().UTC()
+	s.PutPoint(ns, name, dims, unit, Point{T: t, V: v}, false)
+}
+
+// PutPoint records a datapoint (possibly a statistic set).
+func (s *Service) PutPoint(ns, name string, dims map[string]string, unit string, p Point, highRes bool) {
+	if p.T.IsZero() {
+		p.T = time.Now().UTC()
 	}
-	if t.Before(time.Now().Add(-retention)) || t.After(time.Now().Add(2*time.Hour)) || math.IsNaN(v) || math.IsInf(v, 0) {
+	if p.T.Before(time.Now().Add(-retentionFor(ns))) || p.T.After(time.Now().Add(2*time.Hour)) || !finite(p.V, p.N, p.S, p.Lo, p.Hi) {
 		return
+	}
+	if len(dims) == 0 {
+		dims = nil
 	}
 	k := seriesKey(ns, name, dims)
 	s.mu.Lock()
@@ -126,22 +184,36 @@ func (s *Service) Put(ns, name string, dims map[string]string, unit string, v fl
 		x = &Series{Namespace: ns, Name: name, Dimensions: dims, Unit: unit}
 		s.series[k] = x
 	}
+	if unit != "" && unit != "None" {
+		x.Unit = unit
+	}
+	x.HighRes = x.HighRes || highRes
+	x.Updated = time.Now().UTC()
 	// Keep points ordered even when a timestamp arrives late.
 	i := len(x.Points)
-	for i > 0 && x.Points[i-1].T.After(t) {
+	for i > 0 && x.Points[i-1].T.After(p.T) {
 		i--
 	}
 	x.Points = append(x.Points, Point{})
 	copy(x.Points[i+1:], x.Points[i:])
-	x.Points[i] = Point{T: t, V: v}
+	x.Points[i] = p
+}
+
+func finite(vs ...float64) bool {
+	for _, v := range vs {
+		if math.IsNaN(v) || math.IsInf(v, 0) {
+			return false
+		}
+	}
+	return true
 }
 
 // prune drops expired points and series that no longer have any.
 func (s *Service) prune() {
-	cut := time.Now().Add(-retention)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	for k, x := range s.series {
+		cut := time.Now().Add(-retentionFor(x.Namespace))
 		i := 0
 		for i < len(x.Points) && x.Points[i].T.Before(cut) {
 			i++
@@ -197,7 +269,17 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
+// RegisterAWS serves CloudWatch Logs ("logs") and CloudWatch metrics, alarms
+// and dashboards ("monitoring") over the AWS protocols.
+func (s *Service) RegisterAWS() {
+	s.registerLogsAWS()
+	s.registerMetricsAWS()
+}
+
 func (s *Service) collect(ctx context.Context) {
+	if s.env.Docker == nil {
+		return
+	}
 	cs, err := s.env.Docker.ManagedContainers()
 	if err != nil {
 		log.Printf("cloudwatch: list containers: %v", err)
@@ -267,41 +349,117 @@ func (d Datapoint) Stat(name string) float64 {
 
 // Statistics aggregates a series into buckets of period between start and end.
 func (s *Service) Statistics(ns, name string, dims map[string]string, start, end time.Time, period time.Duration) ([]Datapoint, string) {
+	bs, unit := s.buckets(ns, name, dims, start, end.Add(time.Nanosecond), period, "")
+	out := make([]Datapoint, 0, len(bs))
+	for _, b := range bs {
+		out = append(out, Datapoint{Timestamp: b.T, Average: round(b.Sum / b.Count), Sum: b.Sum, Minimum: b.Min, Maximum: b.Max, SampleCount: int(b.Count)})
+	}
+	return out, unit
+}
+
+// bucket aggregates the points of one period.
+type bucket struct {
+	T                    time.Time
+	Count, Sum, Min, Max float64
+	vals                 []Point
+}
+
+// Stat returns a statistic of the bucket: Average, Sum, Minimum, Maximum,
+// SampleCount or a percentile such as p99 / p99.9. ok is false for unknown statistics.
+func (b bucket) Stat(name string) (float64, bool) {
+	switch name {
+	case "Average", "avg", "Avg":
+		return b.Sum / b.Count, true
+	case "Sum", "sum":
+		return b.Sum, true
+	case "Minimum", "Min", "min":
+		return b.Min, true
+	case "Maximum", "Max", "max":
+		return b.Max, true
+	case "SampleCount", "samplecount":
+		return b.Count, true
+	}
+	if pct, ok := percentileOf(name); ok {
+		pts := append([]Point(nil), b.vals...)
+		sort.Slice(pts, func(i, j int) bool { return pts[i].V < pts[j].V })
+		want := pct / 100 * b.Count
+		acc := 0.0
+		for _, p := range pts {
+			acc += p.count()
+			if acc >= want {
+				return p.V, true
+			}
+		}
+		if len(pts) > 0 {
+			return pts[len(pts)-1].V, true
+		}
+		return 0, true
+	}
+	return 0, false
+}
+
+// percentileOf parses "p99", "p99.9" or "p50".
+func percentileOf(stat string) (float64, bool) {
+	rest, ok := strings.CutPrefix(strings.ToLower(stat), "p")
+	if !ok {
+		return 0, false
+	}
+	f, err := strconv.ParseFloat(rest, 64)
+	if err != nil || f < 0 || f > 100 {
+		return 0, false
+	}
+	return f, true
+}
+
+// validStat reports whether a statistic name is supported.
+func validStat(stat string) bool {
+	_, ok := bucket{Count: 1}.Stat(stat)
+	return ok
+}
+
+// buckets aggregates a series into period-aligned buckets over [start, end).
+// When unit is set, only a series with that unit has data.
+func (s *Service) buckets(ns, name string, dims map[string]string, start, end time.Time, period time.Duration, unit string) ([]bucket, string) {
+	if len(dims) == 0 {
+		dims = nil
+	}
 	s.mu.RLock()
 	x := s.series[seriesKey(ns, name, dims)]
 	var pts []Point
-	unit := ""
+	u := ""
 	if x != nil {
-		pts = append(pts, x.Points...)
-		unit = x.Unit
+		u = x.Unit
+		if unit == "" || unit == u || (unit == "None" && u == "") {
+			pts = append(pts, x.Points...)
+		}
 	}
 	s.mu.RUnlock()
 	if period <= 0 {
 		period = time.Minute
 	}
-	buckets := map[int64]*Datapoint{}
+	byT := map[int64]*bucket{}
 	for _, p := range pts {
-		if p.T.Before(start) || p.T.After(end) {
+		if p.T.Before(start) || !p.T.Before(end) {
 			continue
 		}
-		k := p.T.Truncate(period).Unix()
-		d := buckets[k]
-		if d == nil {
-			d = &Datapoint{Timestamp: time.Unix(k, 0).UTC(), Minimum: p.V, Maximum: p.V}
-			buckets[k] = d
+		k := p.T.Truncate(period).UnixNano()
+		b := byT[k]
+		if b == nil {
+			b = &bucket{T: time.Unix(0, k).UTC(), Min: p.min(), Max: p.max()}
+			byT[k] = b
 		}
-		d.Sum += p.V
-		d.SampleCount++
-		d.Minimum = math.Min(d.Minimum, p.V)
-		d.Maximum = math.Max(d.Maximum, p.V)
+		b.Count += p.count()
+		b.Sum += p.sum()
+		b.Min = math.Min(b.Min, p.min())
+		b.Max = math.Max(b.Max, p.max())
+		b.vals = append(b.vals, p)
 	}
-	out := make([]Datapoint, 0, len(buckets))
-	for _, d := range buckets {
-		d.Average = round(d.Sum / float64(d.SampleCount))
-		out = append(out, *d)
+	out := make([]bucket, 0, len(byT))
+	for _, b := range byT {
+		out = append(out, *b)
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Timestamp.Before(out[j].Timestamp) })
-	return out, unit
+	sort.Slice(out, func(i, j int) bool { return out[i].T.Before(out[j].T) })
+	return out, u
 }
 
 // ---- routes ----

@@ -1,6 +1,7 @@
 package events
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -57,7 +58,9 @@ func TestPattern(t *testing.T) {
 		{map[string]any{"detail": map[string]any{"status": []any{map[string]any{"anything-but": []any{"paid"}}}}}, false},
 	}
 	for i, c := range cases {
-		if got := matchPattern(c.p, ev); got != c.want {
+		pb, _ := json.Marshal(c.p)
+		eb, _ := json.Marshal(ev)
+		if got, err := MatchJSON(pb, eb); err != nil || got != c.want {
 			t.Errorf("case %d: got %v", i, got)
 		}
 	}
