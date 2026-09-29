@@ -32,7 +32,7 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("DELETE /api/v1/iam/users/{name}/policies/{policy}", "iam:DetachUserPolicy", s.detachUserPolicy, iamRes("user/{name}"))
 	r.Handle("PUT /api/v1/iam/users/{name}/inline-policies/{policy}", "iam:PutUserPolicy", s.putInline, iamRes("user/{name}"))
 	r.Handle("DELETE /api/v1/iam/users/{name}/inline-policies/{policy}", "iam:DeleteUserPolicy", s.deleteInline, iamRes("user/{name}"))
-	r.Handle("PUT /api/v1/iam/users/{name}/permissions-boundary", "iam:PutUserPermissionsBoundary", s.putUserBoundary, iamRes("user/{name}"))
+	r.Handle("PUT /api/v1/iam/users/{name}/permissions-boundary", "iam:PutUserPermissionsBoundary", s.putUserBoundary, httpx.Deferred())
 	r.Handle("DELETE /api/v1/iam/users/{name}/permissions-boundary", "iam:DeleteUserPermissionsBoundary", s.deleteUserBoundary, iamRes("user/{name}"))
 	r.Handle("GET /api/v1/iam/users/{name}/access-keys", "iam:ListAccessKeys", s.listKeys, iamRes("user/{name}"))
 	r.Handle("POST /api/v1/iam/users/{name}/access-keys", "iam:CreateAccessKey", s.createKeyRoute, iamRes("user/{name}"))
@@ -527,7 +527,7 @@ func (s *Service) roleRoutes(r *httpx.Router) {
 	r.Handle("PUT /api/v1/iam/roles/{name}/inline-policies/{policy}", "iam:PutRolePolicy", s.putRoleInlineRoute, res)
 	r.Handle("DELETE /api/v1/iam/roles/{name}/inline-policies/{policy}", "iam:DeleteRolePolicy", s.deleteRoleInlineRoute, res)
 	r.Handle("POST /api/v1/iam/roles/{name}/revoke-sessions", "iam:PutRolePolicy", s.revokeRoute, res)
-	r.Handle("PUT /api/v1/iam/roles/{name}/permissions-boundary", "iam:PutRolePermissionsBoundary", s.putRoleBoundary, res)
+	r.Handle("PUT /api/v1/iam/roles/{name}/permissions-boundary", "iam:PutRolePermissionsBoundary", s.putRoleBoundary, httpx.Deferred())
 	r.Handle("DELETE /api/v1/iam/roles/{name}/permissions-boundary", "iam:DeleteRolePermissionsBoundary", s.deleteRoleBoundary, res)
 	r.Handle("PUT /api/v1/iam/roles/{name}/tags", "iam:TagRole", s.tagRoleRoute, res)
 	r.Handle("DELETE /api/v1/iam/roles/{name}/tags", "iam:UntagRole", s.untagRoleRoute, res)
@@ -717,9 +717,37 @@ func boundaryRef(c *httpx.Ctx) (string, error) {
 	return in.Policy, nil
 }
 
+// authorizeBoundary checks action with the iam:PermissionsBoundary condition
+// key set, as the AWS API does, so policies can restrict which boundary is set.
+func authorizeBoundary(c *httpx.Ctx, action, arn, boundary string) error {
+	if c.P == nil {
+		return nil
+	}
+	if c.P.Context == nil {
+		c.P.Context = map[string][]string{}
+	}
+	old, had := c.P.Context["iam:permissionsboundary"]
+	c.P.Context["iam:permissionsboundary"] = []string{core.CanonicalARN(boundary)}
+	defer func() {
+		if had {
+			c.P.Context["iam:permissionsboundary"] = old
+		} else {
+			delete(c.P.Context, "iam:permissionsboundary")
+		}
+	}()
+	return c.Authorize(action, arn)
+}
+
 func (s *Service) putUserBoundary(c *httpx.Ctx) (any, error) {
 	ref, err := boundaryRef(c)
 	if err != nil {
+		return nil, err
+	}
+	arn := s.userARN(c.Param("name"), "/")
+	if u, err := store.Get[User](s.env.Store, cUsers, c.Param("name")); err == nil {
+		arn = u.ARN
+	}
+	if err := authorizeBoundary(c, "iam:PutUserPermissionsBoundary", arn, s.boundaryARN(ref)); err != nil {
 		return nil, err
 	}
 	return userView(s.SetUserBoundary(c.Param("name"), ref))
@@ -734,9 +762,25 @@ func (s *Service) putRoleBoundary(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	arn := s.roleARN(roleName(c.Param("name")), "/")
+	if r, err := s.GetRole(c.Param("name")); err == nil {
+		arn = r.ARN
+	}
+	if err := authorizeBoundary(c, "iam:PutRolePermissionsBoundary", arn, s.boundaryARN(ref)); err != nil {
+		return nil, err
+	}
 	return s.roleResult(s.SetRoleBoundary(c.Param("name"), ref))
 }
 
 func (s *Service) deleteRoleBoundary(c *httpx.Ctx) (any, error) {
 	return s.roleResult(s.SetRoleBoundary(c.Param("name"), ""))
+}
+
+// boundaryARN resolves a boundary policy name or ARN to its ARN (or returns
+// the reference unchanged if it doesn't resolve; setting it then fails).
+func (s *Service) boundaryARN(ref string) string {
+	if p, err := s.resolvePolicy(ref); err == nil {
+		return p.ARN
+	}
+	return ref
 }

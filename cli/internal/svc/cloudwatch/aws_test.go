@@ -400,7 +400,11 @@ func TestCloudWatchBoto3(t *testing.T) {
 import datetime
 cw = boto3.client("cloudwatch")
 now = datetime.datetime.now(datetime.timezone.utc)
-cw.put_metric_data(Namespace="B", MetricData=[{"MetricName": "hits", "Value": v, "Timestamp": now - datetime.timedelta(seconds=5*i), "StorageResolution": 1} for i, v in enumerate([1, 2, 3])])
+# Keep all points inside one 5-minute period so they aggregate into one value.
+base = now.replace(minute=now.minute - now.minute % 5, second=30, microsecond=0)
+if base > now:
+    base -= datetime.timedelta(minutes=5)
+cw.put_metric_data(Namespace="B", MetricData=[{"MetricName": "hits", "Value": v, "Timestamp": base + datetime.timedelta(seconds=5*i), "StorageResolution": 1} for i, v in enumerate([1, 2, 3])])
 r = cw.get_metric_data(MetricDataQueries=[{"Id": "h", "MetricStat": {"Metric": {"Namespace": "B", "MetricName": "hits"}, "Period": 300, "Stat": "Sum"}},
     {"Id": "twice", "Expression": "h * 2"}], StartTime=now - datetime.timedelta(minutes=30), EndTime=now + datetime.timedelta(minutes=5))
 print("gmd", [(x["Id"], [float(v) for v in x["Values"]]) for x in r["MetricDataResults"]])
