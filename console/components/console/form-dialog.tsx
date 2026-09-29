@@ -1,6 +1,6 @@
 "use client"
 
-import { useRef, useState, type ReactNode } from "react"
+import { useEffect, useRef, useState, type ReactNode } from "react"
 import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -40,6 +40,13 @@ export function FormDialog({
   const [pending, setPending] = useState(false)
   // A ref, not state: two quick Enter presses arrive before a re-render.
   const inFlight = useRef(false)
+  const mounted = useRef(true)
+  useEffect(() => {
+    mounted.current = true
+    return () => {
+      mounted.current = false
+    }
+  }, [])
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     e.stopPropagation() // dialogs portal out of, but React-bubble into, an enclosing form
@@ -53,7 +60,7 @@ export function FormDialog({
       toast.error(errorMessage(err))
     } finally {
       inFlight.current = false
-      setPending(false)
+      if (mounted.current) setPending(false)
     }
   }
   return (
