@@ -1,5 +1,17 @@
 # ☁️ HomeCloud — The Cloud, Owned by You
 
+<p align="center">
+  <a href="https://homecloud.pages.dev"><img src="docs/images/landing.png" alt="HomeCloud: your own AWS, on your hardware" width="100%"></a>
+</p>
+
+<p align="center">
+  <a href="https://homecloud.pages.dev"><b>Website</b></a> ·
+  <a href="#-quick-start"><b>Quick start</b></a> ·
+  <a href="docs/aws-compat.md"><b>AWS compatibility</b></a> ·
+  <a href="docs/architecture.md"><b>Architecture</b></a> ·
+  <a href="https://discord.gg/pemra9uaC9"><b>Discord</b></a>
+</p>
+
 **An open-source, self-hosted cloud platform.** HomeCloud runs AWS-style services (compute, object storage, managed databases, serverless functions, queues, pub/sub, key-value tables, networking, identity, monitoring) on your own hardware, from one binary, managed through a web console, a CLI and a REST API.
 
 **Speaks AWS.** The AWS CLI, the AWS SDKs and Terraform work against HomeCloud unchanged: point `AWS_ENDPOINT_URL` at it and use a HomeCloud access key. IAM policies, roles and temporary credentials are enforced exactly as in the console.
@@ -23,6 +35,31 @@ No third parties. No vendor lock-in. No surprise billing.
          alt="Coderabbit" height="40"/>
   </a>
 </p>
+
+---
+
+## 🖥️ The console
+
+A web console modeled on the one you know, with a page for every service. It is built into the binary: run `homecloud serve` and open http://127.0.0.1:8080.
+
+<p align="center">
+  <img src="docs/images/console-home.png" alt="Console home: every service at a glance" width="100%">
+</p>
+
+<table>
+  <tr>
+    <td width="50%"><img src="docs/images/ec2-instances.png" alt="EC2 instances"><p align="center"><b>EC2</b>: instances running as containers in your VPCs</p></td>
+    <td width="50%"><img src="docs/images/lambda-function.png" alt="Lambda function"><p align="center"><b>Lambda</b>: functions with roles, versions, aliases and an in-browser editor</p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/s3-bucket.png" alt="S3 bucket"><p align="center"><b>S3</b>: buckets and objects, uploads, presigned links, websites</p></td>
+    <td><img src="docs/images/iam-role.png" alt="IAM role"><p align="center"><b>IAM</b>: users, roles, AWS-managed and custom policies</p></td>
+  </tr>
+  <tr>
+    <td><img src="docs/images/dynamodb-table.png" alt="DynamoDB table"><p align="center"><b>DynamoDB</b>: tables, queries and an item editor</p></td>
+    <td><img src="docs/images/cloudwatch.png" alt="CloudWatch"><p align="center"><b>CloudWatch</b>: metrics for every resource, alarms and logs</p></td>
+  </tr>
+</table>
 
 ---
 
