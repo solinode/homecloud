@@ -48,8 +48,9 @@ type Mapping struct {
 func (s *Service) esmRoutes(r *httpx.Router) {
 	r.Handle("GET /api/v1/lambda/event-source-mappings", "lambda:ListEventSourceMappings", s.listMappings)
 	r.Handle("POST /api/v1/lambda/event-source-mappings", "lambda:CreateEventSourceMapping", s.createMapping)
-	r.Handle("PATCH /api/v1/lambda/event-source-mappings/{id}", "lambda:UpdateEventSourceMapping", s.updateMapping)
-	r.Handle("DELETE /api/v1/lambda/event-source-mappings/{id}", "lambda:DeleteEventSourceMapping", s.deleteMapping)
+	res := httpx.Res("arn:hc:lambda:local-1:{account}:event-source-mapping:{id}")
+	r.Handle("PATCH /api/v1/lambda/event-source-mappings/{id}", "lambda:UpdateEventSourceMapping", s.updateMapping, res)
+	r.Handle("DELETE /api/v1/lambda/event-source-mappings/{id}", "lambda:DeleteEventSourceMapping", s.deleteMapping, res)
 }
 
 func (s *Service) listMappings(c *httpx.Ctx) (any, error) {

@@ -121,7 +121,10 @@ var builtinPolicies = []struct {
 	Doc               PolicyDocument
 }{
 	{"AdministratorAccess", "Full access to every HomeCloud service and resource.", doc("Allow", "*")},
-	{"ReadOnlyAccess", "Read-only access to every HomeCloud service.", doc("Allow", "*:Describe*", "*:List*", "*:Get*")},
+	{"ReadOnlyAccess", "Read-only access to every HomeCloud service (secret values excluded).", PolicyDocument{Version: "2012-10-17", Statement: []Statement{
+		{Effect: "Allow", Action: StringList{"*:Describe*", "*:List*", "*:Get*"}, Resource: StringList{"*"}},
+		{Effect: "Deny", Action: StringList{"secretsmanager:GetSecretValue", "kms:Decrypt"}, Resource: StringList{"*"}},
+	}}},
 	{"IAMFullAccess", "Full access to users, groups, policies and access keys.", doc("Allow", "iam:*")},
 	{"EC2FullAccess", "Full access to compute instances, images, volumes and security groups.", doc("Allow", "ec2:*")},
 	{"AutoScalingFullAccess", "Full access to Auto Scaling groups.", doc("Allow", "autoscaling:*")},

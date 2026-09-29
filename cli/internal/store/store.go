@@ -13,7 +13,10 @@ import (
 	"sync"
 )
 
-var ErrNotFound = errors.New("not found")
+var (
+	ErrNotFound = errors.New("not found")
+	ErrConflict = errors.New("document kept changing during update; try again")
+)
 
 type Store struct {
 	mu   sync.RWMutex // guards data
@@ -32,10 +35,12 @@ func Open(path string) (*Store, error) {
 	if err != nil {
 		return nil, err
 	}
-	if len(b) > 0 {
-		if err := json.Unmarshal(b, &s.data); err != nil {
-			return nil, fmt.Errorf("corrupt state file %s: %w", path, err)
-		}
+	if len(b) == 0 {
+		// Starting fresh would silently mint a new account and orphan every resource.
+		return nil, fmt.Errorf("state file %s is empty; restore it from a backup (or delete it to start over)", path)
+	}
+	if err := json.Unmarshal(b, &s.data); err != nil {
+		return nil, fmt.Errorf("corrupt state file %s: %w", path, err)
 	}
 	return s, nil
 }
@@ -50,10 +55,30 @@ func (s *Store) flush() error {
 		return err
 	}
 	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+	f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
+	if err != nil {
 		return err
 	}
-	return os.Rename(tmp, s.path)
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	// Sync before the rename so a crash leaves either the old or the new state, never an empty file.
+	if err := f.Sync(); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := os.Rename(tmp, s.path); err != nil {
+		return err
+	}
+	if d, err := os.Open(filepath.Dir(s.path)); err == nil {
+		_ = d.Sync()
+		d.Close()
+	}
+	return nil
 }
 
 func Put[T any](s *Store, coll, id string, v T) error {
@@ -150,8 +175,11 @@ func Update[T any](s *Store, coll, id string, fn func(*T) error) (T, error) {
 			s.mu.Unlock()
 			return v, ErrNotFound // deleted while fn ran
 		}
-		if !bytes.Equal(cur, b) && attempt < 10 {
+		if !bytes.Equal(cur, b) {
 			s.mu.Unlock()
+			if attempt >= 10 {
+				return v, ErrConflict
+			}
 			continue // changed underneath us: retry on the new version
 		}
 		s.data[coll][id] = nb

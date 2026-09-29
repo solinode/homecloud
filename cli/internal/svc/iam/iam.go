@@ -97,6 +97,7 @@ type AccessKey struct {
 type session struct {
 	Token    string    `json:"token"`
 	UserName string    `json:"user_name"`
+	UserID   string    `json:"user_id"` // a re-created user with the same name is a different ID
 	Expires  time.Time `json:"expires"`
 }
 
@@ -240,13 +241,13 @@ func (s *Service) Authenticate(r *http.Request) (*httpx.Principal, error) {
 	if token == "" {
 		return nil, core.Errf(http.StatusUnauthorized, "MissingAuthenticationToken", "request is not signed: send 'Authorization: Bearer <session token | access key id>:<secret>'")
 	}
-	var user, keyID string
+	var user, keyID, sessionUserID string
 	if strings.HasPrefix(token, "hcs_") {
 		sess, err := store.Get[session](s.env.Store, cSessions, hashSecret(token))
 		if err != nil || time.Now().After(sess.Expires) {
 			return nil, core.Errf(http.StatusUnauthorized, "ExpiredToken", "session is invalid or expired; sign in again")
 		}
-		user = sess.UserName
+		user, sessionUserID = sess.UserName, sess.UserID
 	} else {
 		id, secret, ok := strings.Cut(token, ":")
 		if !ok {
@@ -265,7 +266,7 @@ func (s *Service) Authenticate(r *http.Request) (*httpx.Principal, error) {
 		}
 	}
 	u, err := store.Get[User](s.env.Store, cUsers, user)
-	if err != nil {
+	if err != nil || (sessionUserID != "" && sessionUserID != u.ID) {
 		return nil, core.Errf(http.StatusUnauthorized, "InvalidClientTokenId", "user %q no longer exists", user)
 	}
 	return s.principal(u, keyID), nil
@@ -387,7 +388,7 @@ func (s *Service) login(c *httpx.Ctx) (any, error) {
 	}
 	token := "hcs_" + core.NewSecret(40)
 	exp := time.Now().Add(sessionTTL)
-	if err := store.Put(s.env.Store, cSessions, hashSecret(token), session{Token: "", UserName: u.Name, Expires: exp}); err != nil {
+	if err := store.Put(s.env.Store, cSessions, hashSecret(token), session{Token: "", UserName: u.Name, UserID: u.ID, Expires: exp}); err != nil {
 		return nil, err
 	}
 	_, _ = store.Update(s.env.Store, cUsers, u.Name, func(u *User) error { n := core.Now(); u.LastLogin = &n; return nil })
@@ -483,6 +484,24 @@ func (s *Service) createUser(c *httpx.Ctx) (any, error) {
 	if store.Has(s.env.Store, cUsers, in.Name) {
 		return nil, core.Conflict("user %q already exists", in.Name)
 	}
+	// Everything the request sets on the new user needs its own permission, or
+	// iam:CreateUser alone would be enough to mint an administrator.
+	userARN := s.env.ARN("iam", "user/"+in.Name)
+	if in.Password != "" {
+		if err := c.Authorize("iam:CreateLoginProfile", userARN); err != nil {
+			return nil, err
+		}
+	}
+	for range in.Policies {
+		if err := c.Authorize("iam:AttachUserPolicy", userARN); err != nil {
+			return nil, err
+		}
+	}
+	for _, g := range in.Groups {
+		if err := c.Authorize("iam:AddUserToGroup", s.env.ARN("iam", "group/"+g)); err != nil {
+			return nil, err
+		}
+	}
 	u := s.newUser(in.Name)
 	u.Tags = in.Tags
 	if in.Password != "" {
@@ -544,6 +563,7 @@ func (s *Service) deleteUser(c *httpx.Ctx) (any, error) {
 			_ = store.Delete(s.env.Store, cKeys, k.AccessKeyID)
 		}
 	}
+	s.endSessions(name)
 	return nil, store.Delete(s.env.Store, cUsers, name)
 }
 
@@ -573,17 +593,33 @@ func (s *Service) setUserPassword(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	return s.updateUser(c.Param("name"), func(u *User) error { return setPassword(u, in.Password) })
+	out, err := s.updateUser(c.Param("name"), func(u *User) error { return setPassword(u, in.Password) })
+	if err == nil {
+		s.endSessions(c.Param("name"))
+	}
+	return out, err
+}
+
+// endSessions signs a user out of every console session.
+func (s *Service) endSessions(user string) {
+	_ = s.env.Store.Retain(cSessions, func(_ string, raw json.RawMessage) bool {
+		var ss session
+		return json.Unmarshal(raw, &ss) != nil || ss.UserName != user
+	})
 }
 
 func (s *Service) deleteUserPassword(c *httpx.Ctx) (any, error) {
-	return s.updateUser(c.Param("name"), func(u *User) error {
+	out, err := s.updateUser(c.Param("name"), func(u *User) error {
 		if u.Root {
 			return core.Conflict("the root user must keep console access")
 		}
 		u.PasswordHash, u.PasswordSetAt = "", nil
 		return nil
 	})
+	if err == nil {
+		s.endSessions(c.Param("name"))
+	}
+	return out, err
 }
 
 func (s *Service) policyArg(c *httpx.Ctx) (string, error) {
@@ -770,6 +806,11 @@ func (s *Service) createGroup(c *httpx.Ctx) (any, error) {
 	}
 	if store.Has(s.env.Store, cGroups, in.Name) {
 		return nil, core.Conflict("group %q already exists", in.Name)
+	}
+	if len(in.Policies) > 0 {
+		if err := c.Authorize("iam:AttachGroupPolicy", s.env.ARN("iam", "group/"+in.Name)); err != nil {
+			return nil, err
+		}
 	}
 	for _, p := range in.Policies {
 		if !store.Has(s.env.Store, cPolicies, p) {

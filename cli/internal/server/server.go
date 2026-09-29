@@ -209,6 +209,9 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, asgSvc, acmSvc, dnsSvc, trailSvc} {
 		s.Routes(rt)
 	}
+	if len(httpx.Unscoped) > 0 {
+		return fmt.Errorf("internal error: routes without a resource ARN: %v", httpx.Unscoped)
+	}
 	started := time.Now()
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, 200, map[string]any{"status": "ok", "version": Version, "region": cfg.Region, "uptime_seconds": int(time.Since(started).Seconds())})
