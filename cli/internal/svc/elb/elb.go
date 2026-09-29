@@ -40,9 +40,12 @@ type Rule struct {
 }
 
 type Listener struct {
-	ID                 string `json:"id"`
-	Port               int    `json:"port"`
-	Protocol           string `json:"protocol"`
+	ID             string `json:"id"`
+	Port           int    `json:"port"`
+	Protocol       string `json:"protocol"` // HTTP | HTTPS
+	CertificateARN string `json:"certificate_arn,omitempty"`
+	// RedirectHTTPSPort makes an HTTP listener redirect every request to the HTTPS listener on this port.
+	RedirectHTTPSPort  int    `json:"redirect_https_port,omitempty"`
 	PublicPort         int    `json:"public_port,omitempty"` // requested host port (0 = any)
 	DefaultTargetGroup string `json:"default_target_group"`
 	Rules              []Rule `json:"rules"`
@@ -97,10 +100,17 @@ type TargetGroup struct {
 // Resolver maps a target ID (e.g. an instance) to its private IP and VPC.
 type Resolver func(id string) (ip, vpcID string, ok bool)
 
+// Certificates supplies TLS material for HTTPS listeners (the ACM service).
+type Certificates interface {
+	KeyPair(arn string) (certChain, key []byte, err error)
+	Exists(arn string) bool
+}
+
 type Service struct {
 	env     *svc.Env
 	vpc     *vpc.Service
 	Resolve Resolver
+	Certs   Certificates
 	mu      sync.Mutex         // serialises config pushes
 	health  map[string]*Target // tg/target -> live health state
 	hmu     sync.Mutex
@@ -129,7 +139,9 @@ func (s *Service) render(lb LoadBalancer) string {
 	b.WriteString(`log_format hc '$remote_addr "$request" $status $body_bytes_sent $request_time "$http_user_agent" upstream=$upstream_addr';` + "\n")
 	used := map[string]bool{}
 	for _, l := range lb.Listeners {
-		used[l.DefaultTargetGroup] = true
+		if l.DefaultTargetGroup != "" {
+			used[l.DefaultTargetGroup] = true
+		}
 		for _, r := range l.Rules {
 			used[r.TargetGroup] = true
 		}
@@ -185,10 +197,25 @@ func (s *Service) render(lb LoadBalancer) string {
 		}
 		writeServer := func(serverName string, rs []Rule, def bool) {
 			fmt.Fprintf(&b, "server {\n  listen %d", l.Port)
+			if l.Protocol == "HTTPS" {
+				b.WriteString(" ssl")
+			}
 			if def {
 				b.WriteString(" default_server")
 			}
 			b.WriteString(";\n")
+			if l.Protocol == "HTTPS" {
+				fmt.Fprintf(&b, "  http2 on;\n  ssl_certificate /etc/nginx/certs/%s.crt;\n  ssl_certificate_key /etc/nginx/certs/%s.key;\n", l.ID, l.ID)
+				b.WriteString("  ssl_protocols TLSv1.2 TLSv1.3;\n  ssl_session_cache shared:hc:10m;\n")
+			}
+			if l.RedirectHTTPSPort > 0 {
+				port := l.RedirectHTTPSPort
+				if hp := lb.PublicPorts[fmt.Sprintf("%d/tcp", port)]; hp > 0 {
+					port = hp
+				}
+				fmt.Fprintf(&b, "  location = /__hc_health { return 200 'ok'; }\n  location / { return 301 https://$host:%d$request_uri; }\n}\n", port)
+				return
+			}
 			if serverName != "" {
 				fmt.Fprintf(&b, "  server_name %s;\n", serverName)
 			}
@@ -225,6 +252,45 @@ func (s *Service) render(lb LoadBalancer) string {
 	return b.String()
 }
 
+// files returns the nginx configuration plus certificates for HTTPS listeners.
+func (s *Service) files(lb LoadBalancer) map[string][]byte {
+	out := map[string][]byte{strings.TrimPrefix(confIn, "/"): []byte(s.render(lb))}
+	for _, l := range lb.Listeners {
+		if l.Protocol != "HTTPS" || s.Certs == nil {
+			continue
+		}
+		cert, key, err := s.Certs.KeyPair(l.CertificateARN)
+		if err != nil {
+			log.Printf("elb: %s: certificate %s: %v", lb.Name, l.CertificateARN, err)
+			continue
+		}
+		out["etc/nginx/certs/"+l.ID+".crt"] = cert
+		out["etc/nginx/certs/"+l.ID+".key"] = key
+	}
+	return out
+}
+
+// UsesCertificate reports whether any listener serves the certificate.
+func (s *Service) UsesCertificate(arn string) bool {
+	for _, lb := range store.List[LoadBalancer](s.env.Store, cLBs) {
+		if slices.ContainsFunc(lb.Listeners, func(l Listener) bool { return l.CertificateARN == arn }) {
+			return true
+		}
+	}
+	return false
+}
+
+// CertificateRenewed pushes fresh certificate material to every balancer using it.
+func (s *Service) CertificateRenewed(arn string) {
+	for _, lb := range store.List[LoadBalancer](s.env.Store, cLBs) {
+		if slices.ContainsFunc(lb.Listeners, func(l Listener) bool { return l.CertificateARN == arn }) {
+			if err := s.push(context.Background(), lb.Name); err != nil {
+				log.Printf("elb: reload %s after certificate renewal: %v", lb.Name, err)
+			}
+		}
+	}
+}
+
 // push writes the configuration into the load balancer and reloads nginx.
 func (s *Service) push(ctx context.Context, name string) error {
 	s.mu.Lock()
@@ -233,7 +299,7 @@ func (s *Service) push(ctx context.Context, name string) error {
 	if err != nil || lb.ContainerID == "" {
 		return err
 	}
-	if err := s.env.Docker.CopyIn(ctx, lb.ContainerID, "/", map[string][]byte{strings.TrimPrefix(confIn, "/"): []byte(s.render(lb))}, 0o644); err != nil {
+	if err := s.env.Docker.CopyIn(ctx, lb.ContainerID, "/", s.files(lb), 0o600); err != nil {
 		return err
 	}
 	if s.env.Docker.State(lb.ContainerID) != "running" {
@@ -282,7 +348,7 @@ func (s *Service) provision(lb LoadBalancer) {
 	}
 	_, _ = store.Update(s.env.Store, cLBs, lb.Name, func(x *LoadBalancer) error { x.ContainerID = cid; return nil })
 	lb.ContainerID = cid
-	if err := s.env.Docker.CopyIn(ctx, cid, "/", map[string][]byte{strings.TrimPrefix(confIn, "/"): []byte(s.render(lb))}, 0o644); err != nil {
+	if err := s.env.Docker.CopyIn(ctx, cid, "/", s.files(lb), 0o600); err != nil {
 		fail(err)
 		return
 	}
@@ -294,6 +360,12 @@ func (s *Service) provision(lb LoadBalancer) {
 		x.State, x.StateReason, x.PublicPorts = "active", "", s.env.Docker.PublishedPorts(cid)
 		return nil
 	})
+	// Redirects point at published host ports, which are only known now.
+	if slices.ContainsFunc(lb.Listeners, func(l Listener) bool { return l.RedirectHTTPSPort > 0 }) {
+		if err := s.push(ctx, lb.Name); err != nil {
+			log.Printf("elb: %s: %v", lb.Name, err)
+		}
+	}
 }
 
 // ---- health checks ----
@@ -455,11 +527,28 @@ func (s *Service) checkListener(l *Listener, vpcID string, taken []Listener) err
 			return core.Conflict("a listener already uses port %d", l.Port)
 		}
 	}
+	l.Protocol = strings.ToUpper(l.Protocol)
 	if l.Protocol == "" {
 		l.Protocol = "HTTP"
 	}
-	if l.Protocol != "HTTP" {
-		return core.BadRequest("only HTTP listeners are supported")
+	switch l.Protocol {
+	case "HTTP":
+		l.CertificateARN = ""
+		if l.RedirectHTTPSPort < 0 || l.RedirectHTTPSPort > 65535 {
+			return core.BadRequest("redirect_https_port must be a port number")
+		}
+		if l.RedirectHTTPSPort > 0 && l.DefaultTargetGroup == "" {
+			l.ID = core.RandHex(12)
+			l.Rules = []Rule{}
+			return nil // a pure redirect listener needs no target group
+		}
+	case "HTTPS":
+		if s.Certs == nil || !s.Certs.Exists(l.CertificateARN) {
+			return core.BadRequest("HTTPS listeners need a valid certificate_arn (see ACM)")
+		}
+		l.RedirectHTTPSPort = 0
+	default:
+		return core.BadRequest("protocol must be HTTP or HTTPS")
 	}
 	tg, err := store.Get[TargetGroup](s.env.Store, cTGs, l.DefaultTargetGroup)
 	if err != nil {

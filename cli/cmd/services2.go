@@ -218,7 +218,9 @@ func elbCommands() {
 	})
 	var listen []string
 	var scheme string
-	c := sub(l, "create NAME", "Create a load balancer; --listen PORT=TARGET_GROUP", cobra.ExactArgs(1), func(a []string) error {
+	var httpsListen []string
+	var redirect int
+	c := sub(l, "create NAME", "Create a load balancer; --listen PORT=TARGET_GROUP, --https PORT=TARGET_GROUP@CERT_ARN", cobra.ExactArgs(1), func(a []string) error {
 		ls := []map[string]any{}
 		for _, x := range listen {
 			p, tg, ok := strings.Cut(x, "=")
@@ -229,10 +231,25 @@ func elbCommands() {
 			fmt.Sscan(p, &port)
 			ls = append(ls, map[string]any{"port": port, "default_target_group": tg})
 		}
+		for _, x := range httpsListen {
+			p, rest, ok := strings.Cut(x, "=")
+			tg, cert, ok2 := strings.Cut(rest, "@")
+			if !ok || !ok2 {
+				return fmt.Errorf("--https must be PORT=TARGET_GROUP@CERTIFICATE_ARN")
+			}
+			var port int
+			fmt.Sscan(p, &port)
+			ls = append(ls, map[string]any{"port": port, "protocol": "HTTPS", "default_target_group": tg, "certificate_arn": cert})
+			if redirect > 0 {
+				ls = append(ls, map[string]any{"port": redirect, "redirect_https_port": port})
+			}
+		}
 		return call("POST", "/api/v1/elb/load-balancers", map[string]any{"name": a[0], "scheme": scheme, "listeners": ls}, nil)
 	})
 	c.Flags().StringSliceVar(&listen, "listen", nil, "listener PORT=TARGET_GROUP")
 	c.Flags().StringVar(&scheme, "scheme", "internet-facing", "internet-facing or internal")
+	c.Flags().StringSliceVar(&httpsListen, "https", nil, "HTTPS listener PORT=TARGET_GROUP@CERTIFICATE_ARN")
+	c.Flags().IntVar(&redirect, "redirect-http", 0, "also listen on this HTTP port and redirect to the HTTPS listener")
 	sub(l, "delete NAME", "Delete a load balancer", cobra.ExactArgs(1), func(a []string) error { return call("DELETE", "/api/v1/elb/load-balancers/"+a[0], nil, nil) })
 	sub(l, "target-groups", "List target groups", cobra.NoArgs, func([]string) error {
 		return call("GET", "/api/v1/elb/target-groups", nil, cols("NAME=name", "PORT=port", "VPC=vpc_id", "HEALTH PATH=health_check.path"))
@@ -531,5 +548,56 @@ func init() {
 	})
 	sub(a, "delete NAME", "Terminate the group's instances and delete it", cobra.ExactArgs(1), func(args []string) error {
 		return call("DELETE", "/api/v1/autoscaling/groups/"+args[0], nil, nil)
+	})
+}
+
+func init() {
+	a := group("acm", "TLS certificates and the HomeCloud private CA")
+	sub(a, "ls", "List certificates", cobra.NoArgs, func([]string) error {
+		return call("GET", "/api/v1/acm/certificates", nil, cols("ID=id", "DOMAIN=domain_name", "TYPE=type", "STATUS=status", "EXPIRES=not_after"))
+	})
+	var sans []string
+	var days int
+	r := sub(a, "request DOMAIN", "Issue a certificate from the HomeCloud private CA", cobra.ExactArgs(1), func(args []string) error {
+		return call("POST", "/api/v1/acm/certificates", map[string]any{"domain_name": args[0], "subject_alternative_names": sans, "valid_days": days}, nil)
+	})
+	r.Flags().StringSliceVar(&sans, "san", nil, "additional DNS names or IP addresses")
+	r.Flags().IntVar(&days, "days", 395, "validity in days")
+	var certFile, keyFile, chainFile string
+	im := sub(a, "import", "Import a certificate issued elsewhere (e.g. Let's Encrypt)", cobra.NoArgs, func([]string) error {
+		read := func(p string) (string, error) {
+			if p == "" {
+				return "", nil
+			}
+			b, err := os.ReadFile(p)
+			return string(b), err
+		}
+		cert, err := read(certFile)
+		if err != nil {
+			return err
+		}
+		key, err := read(keyFile)
+		if err != nil {
+			return err
+		}
+		chain, err := read(chainFile)
+		if err != nil {
+			return err
+		}
+		return call("POST", "/api/v1/acm/certificates/import", map[string]any{"certificate": cert, "private_key": key, "certificate_chain": chain}, nil)
+	})
+	im.Flags().StringVar(&certFile, "cert", "", "PEM certificate file")
+	im.Flags().StringVar(&keyFile, "key", "", "PEM private key file")
+	im.Flags().StringVar(&chainFile, "chain", "", "PEM chain file (optional)")
+	sub(a, "ca", "Print the private CA certificate (trust it on your devices)", cobra.NoArgs, func([]string) error {
+		var out map[string]any
+		if err := api().Do("GET", "/api/v1/acm/ca", nil, &out); err != nil {
+			return err
+		}
+		fmt.Print(out["certificate"])
+		return nil
+	})
+	sub(a, "delete ID", "Delete a certificate", cobra.ExactArgs(1), func(args []string) error {
+		return call("DELETE", "/api/v1/acm/certificates/"+args[0], nil, nil)
 	})
 }

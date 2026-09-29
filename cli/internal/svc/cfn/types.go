@@ -41,6 +41,7 @@ var types = map[string]typeSpec{
 	"HC::AutoScaling::AutoScalingGroup": {Create: "POST /api/v1/autoscaling/groups", IDField: "name", Get: "/api/v1/autoscaling/groups/{id}", Delete: "DELETE /api/v1/autoscaling/groups/{id}"},
 	"HC::RDS::DBInstance": {Create: "POST /api/v1/rds/instances", IDField: "id", Get: "/api/v1/rds/instances/{id}", Delete: "DELETE /api/v1/rds/instances/{id}",
 		WaitField: "status", Ready: []string{"available"}, Failed: []string{"failed"}},
+	"HC::ACM::Certificate": {Create: "POST /api/v1/acm/certificates", IDField: "id", Get: "/api/v1/acm/certificates/{id}", Delete: "DELETE /api/v1/acm/certificates/{id}"},
 	"HC::ELB::TargetGroup": {Create: "POST /api/v1/elb/target-groups", IDField: "name", Get: "/api/v1/elb/target-groups/{id}", Delete: "DELETE /api/v1/elb/target-groups/{id}"},
 	"HC::ELB::LoadBalancer": {Create: "POST /api/v1/elb/load-balancers", IDField: "name", Get: "/api/v1/elb/load-balancers/{id}", Delete: "DELETE /api/v1/elb/load-balancers/{id}",
 		WaitField: "state", Ready: []string{"active"}, Failed: []string{"failed"}},

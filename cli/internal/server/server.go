@@ -18,6 +18,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/acm"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/autoscaling"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cfn"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cloudwatch"
@@ -159,6 +160,9 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	ssmSvc := ssm.New(env, kmsSvc)
 	ecrSvc := ecr.New(env)
 	elbSvc := elb.New(env, vpcSvc)
+	acmSvc := acm.New(env, secSvc)
+	elbSvc.Certs = acmSvc
+	acmSvc.InUse, acmSvc.OnRenew = elbSvc.UsesCertificate, elbSvc.CertificateRenewed
 	ecsSvc := ecs.New(env, vpcSvc, elbSvc, secSvc)
 	elbSvc.Resolve = func(id string) (string, string, bool) {
 		if ip, v, ok := ec2Svc.PrivateIP(id); ok {
@@ -182,7 +186,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 	mux := http.NewServeMux()
 	rt := &httpx.Router{Mux: mux, Auth: iamSvc, Account: account, Audit: trailSvc.Record}
-	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, asgSvc, trailSvc} {
+	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, asgSvc, acmSvc, trailSvc} {
 		s.Routes(rt)
 	}
 	started := time.Now()

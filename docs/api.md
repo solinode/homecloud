@@ -159,6 +159,18 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/elb/target-groups/{name}/targets` | `elasticloadbalancing:RegisterTargets` |
 | DELETE | `/api/v1/elb/target-groups/{name}/targets/{target}` | `elasticloadbalancing:DeregisterTargets` |
 
+## Certificate Manager
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/acm/certificates` | `acm:ListCertificates` |
+| POST | `/api/v1/acm/certificates` | `acm:RequestCertificate` |
+| POST | `/api/v1/acm/certificates/import` | `acm:ImportCertificate` |
+| GET | `/api/v1/acm/certificates/{id}` | `acm:DescribeCertificate` |
+| POST | `/api/v1/acm/certificates/{id}/renew` | `acm:RenewCertificate` |
+| DELETE | `/api/v1/acm/certificates/{id}` | `acm:DeleteCertificate` |
+| GET | `/api/v1/acm/ca` | `acm-pca:GetCertificateAuthorityCertificate` |
+
 ## S3 (object storage)
 
 | Method | Path | IAM action |
