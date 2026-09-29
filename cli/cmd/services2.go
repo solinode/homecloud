@@ -325,3 +325,121 @@ func init() {
 		return nil
 	})
 }
+
+func init() {
+	c := group("cloudformation", "Infrastructure as code: stacks from YAML/JSON templates")
+	c.Aliases = []string{"cfn"}
+	sub(c, "ls", "List stacks", cobra.NoArgs, func([]string) error {
+		return call("GET", "/api/v1/cloudformation/stacks", nil, cols("NAME=name", "STATUS=status", "RESOURCES=resources", "UPDATED=updated_at", "REASON=status_reason"))
+	})
+	var ps []string
+	var noRollback, wait bool
+	deploy := func(name, file string, update bool) error {
+		var b []byte
+		if file != "" {
+			var err error
+			if b, err = os.ReadFile(file); err != nil {
+				return err
+			}
+		}
+		params := map[string]any{}
+		for _, p := range ps {
+			k, v, _ := strings.Cut(p, "=")
+			params[k] = v
+		}
+		c := api()
+		seen := 0
+		if update || file == "" {
+			var before struct {
+				Events []any `json:"events"`
+			}
+			_ = c.Do("GET", "/api/v1/cloudformation/stacks/"+name, nil, &before)
+			seen = len(before.Events)
+		}
+		body := map[string]any{"name": name, "template": string(b), "parameters": params, "disable_rollback": noRollback}
+		method, path := "POST", "/api/v1/cloudformation/stacks"
+		if update {
+			method, path = "PUT", "/api/v1/cloudformation/stacks/"+name
+		}
+		if file == "" {
+			method, path, body = "DELETE", "/api/v1/cloudformation/stacks/"+name, nil
+		}
+		if err := c.Do(method, path, body, nil); err != nil {
+			return err
+		}
+		if !wait {
+			return nil
+		}
+		for {
+			var st struct {
+				Status       string           `json:"status"`
+				StatusReason string           `json:"status_reason"`
+				Events       []map[string]any `json:"events"`
+				Outputs      map[string]any   `json:"outputs"`
+			}
+			if err := c.Do("GET", "/api/v1/cloudformation/stacks/"+name, nil, &st); err != nil {
+				if strings.Contains(err.Error(), "StackNotFound") {
+					return nil
+				}
+				return err
+			}
+			for i := len(st.Events) - 1 - seen; i >= 0; i-- {
+				e := st.Events[i]
+				reason, _ := e["reason"].(string)
+				fmt.Printf("%s  %-32v %-18v %-20v %s\n", format(e["time"]), e["type"], e["logical_id"], e["status"], reason)
+			}
+			seen = len(st.Events)
+			if !strings.HasSuffix(st.Status, "_IN_PROGRESS") {
+				if len(st.Outputs) > 0 {
+					fmt.Println("\nOutputs:")
+					printObject(st.Outputs)
+				}
+				if strings.Contains(st.Status, "FAILED") || strings.Contains(st.Status, "ROLLBACK") {
+					return fmt.Errorf("%s: %s", st.Status, st.StatusReason)
+				}
+				return nil
+			}
+			time.Sleep(time.Second)
+		}
+	}
+	cr := sub(c, "create NAME TEMPLATE_FILE", "Create a stack", cobra.ExactArgs(2), func(a []string) error { return deploy(a[0], a[1], false) })
+	up := sub(c, "update NAME TEMPLATE_FILE", "Update a stack (changed resources are replaced)", cobra.ExactArgs(2), func(a []string) error { return deploy(a[0], a[1], true) })
+	for _, cmd := range []*cobra.Command{cr, up} {
+		cmd.Flags().StringSliceVarP(&ps, "param", "p", nil, "parameter Key=Value")
+		cmd.Flags().BoolVar(&wait, "wait", true, "stream events until the operation finishes")
+	}
+	cr.Flags().BoolVar(&noRollback, "no-rollback", false, "keep created resources when creation fails")
+	sub(c, "describe NAME", "Show a stack's resources and outputs", cobra.ExactArgs(1), func(a []string) error {
+		var st map[string]any
+		if err := api().Do("GET", "/api/v1/cloudformation/stacks/"+a[0], nil, &st); err != nil {
+			return err
+		}
+		if output == "json" {
+			printJSON(st)
+			return nil
+		}
+		fmt.Printf("%s  %v %v\n\n", a[0], st["status"], st["status_reason"])
+		res := []any{}
+		if m, ok := st["resources"].(map[string]any); ok {
+			for _, r := range m {
+				res = append(res, r)
+			}
+		}
+		printList(res, cols("LOGICAL ID=logical_id", "TYPE=type", "PHYSICAL ID=physical_id", "STATUS=status"))
+		if o, ok := st["outputs"].(map[string]any); ok && len(o) > 0 {
+			fmt.Println("\nOutputs:")
+			printObject(o)
+		}
+		return nil
+	})
+	del := sub(c, "delete NAME", "Delete a stack and its resources", cobra.ExactArgs(1), func(a []string) error { return deploy(a[0], "", false) })
+	del.Flags().BoolVar(&wait, "wait", true, "stream events until the stack is gone")
+	sub(c, "types", "List supported resource types", cobra.NoArgs, func([]string) error {
+		var out []string
+		if err := api().Do("GET", "/api/v1/cloudformation/resource-types", nil, &out); err != nil {
+			return err
+		}
+		fmt.Println(strings.Join(out, "\n"))
+		return nil
+	})
+}

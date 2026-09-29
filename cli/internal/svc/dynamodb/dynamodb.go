@@ -63,7 +63,7 @@ type Service struct {
 func New(env *svc.Env) (*Service, error) {
 	db, err := bolt.Open(env.Cfg.Path("dynamodb.db"), 0o600, &bolt.Options{Timeout: 5 * time.Second})
 	if err != nil {
-		return nil, fmt.Errorf("open dynamodb store: %w", err)
+		return nil, fmt.Errorf("open dynamodb store: %w (is another HomeCloud server using %s?)", err, env.Cfg.DataDir)
 	}
 	return &Service{env: env, db: db}, nil
 }

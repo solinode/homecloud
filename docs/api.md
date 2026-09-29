@@ -302,6 +302,18 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/sfn/executions/{id}/stop` | `states:StopExecution` |
 | POST | `/api/v1/sfn/validate` | `states:ValidateStateMachineDefinition` |
 
+## CloudFormation (stacks)
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/cloudformation/stacks` | `cloudformation:ListStacks` |
+| POST | `/api/v1/cloudformation/stacks` | `cloudformation:CreateStack` |
+| GET | `/api/v1/cloudformation/stacks/{name}` | `cloudformation:DescribeStacks` |
+| PUT | `/api/v1/cloudformation/stacks/{name}` | `cloudformation:UpdateStack` |
+| DELETE | `/api/v1/cloudformation/stacks/{name}` | `cloudformation:DeleteStack` |
+| POST | `/api/v1/cloudformation/validate` | `cloudformation:ValidateTemplate` |
+| GET | `/api/v1/cloudformation/resource-types` | `cloudformation:ListTypes` |
+
 ## Secrets Manager
 
 | Method | Path | IAM action |
