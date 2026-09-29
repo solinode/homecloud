@@ -449,7 +449,7 @@ func (s *Service) Exists(name string) bool { return store.Has(s.env.Store, cFunc
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:lambda:local-1:{account}:function:{name}")
+	res := httpx.Res("arn:aws:lambda:{region}:{account}:function:{name}")
 	r.Handle("GET /api/v1/lambda/runtimes", "lambda:ListRuntimes", s.listRuntimes)
 	r.Handle("GET /api/v1/lambda/functions", "lambda:ListFunctions", s.list)
 	r.Handle("POST /api/v1/lambda/functions", "lambda:CreateFunction", s.create)

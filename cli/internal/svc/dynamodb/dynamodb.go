@@ -139,7 +139,7 @@ func expired(t Table, it Item) bool {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:dynamodb:local-1:{account}:table/{name}")
+	res := httpx.Res("arn:aws:dynamodb:{region}:{account}:table/{name}")
 	r.Handle("GET /api/v1/dynamodb/tables", "dynamodb:ListTables", s.listTables)
 	r.Handle("POST /api/v1/dynamodb/tables", "dynamodb:CreateTable", s.createTable)
 	r.Handle("GET /api/v1/dynamodb/tables/{name}", "dynamodb:DescribeTable", s.describe, res)

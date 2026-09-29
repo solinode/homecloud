@@ -184,7 +184,7 @@ func s3err(err error) error {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	b := httpx.Res("arn:hc:s3:::{bucket}")
+	b := httpx.Res("arn:aws:s3:::{bucket}")
 	r.Handle("GET /api/v1/s3/status", "s3:ListAllMyBuckets", s.statusRoute)
 	// Deliberately not a Get* action: read-only policies must not grant MinIO root keys.
 	r.Handle("GET /api/v1/s3/credentials", "s3:AdministerServiceCredentials", s.creds)
@@ -239,12 +239,12 @@ func (s *Service) listBuckets(c *httpx.Ctx) (any, error) {
 	}
 	out := []map[string]any{}
 	for _, b := range bs {
-		if !c.P.Can("s3:ListBucket", "arn:hc:s3:::"+b.Name) && !c.P.Can("s3:ListAllMyBuckets", "*") {
+		if !c.P.Can("s3:ListBucket", "arn:aws:s3:::"+b.Name) && !c.P.Can("s3:ListAllMyBuckets", "*") {
 			continue
 		}
 		m := s.meta(b.Name)
 		out = append(out, map[string]any{"name": b.Name, "created_at": b.CreationDate, "region": s.env.Cfg.Region,
-			"arn": "arn:hc:s3:::" + b.Name, "website": m.Website, "public": s.isPublic(c.R.Context(), cl, b.Name)})
+			"arn": "arn:aws:s3:::" + b.Name, "website": m.Website, "public": s.isPublic(c.R.Context(), cl, b.Name)})
 	}
 	return out, nil
 }
@@ -302,7 +302,7 @@ func (s *Service) createBucket(c *httpx.Ctx) (any, error) {
 		_ = cl.RemoveBucketWithOptions(context.Background(), in.Name, minio.RemoveBucketOptions{ForceDelete: true})
 		return nil, err
 	}
-	return map[string]any{"name": in.Name, "arn": "arn:hc:s3:::" + in.Name}, nil
+	return map[string]any{"name": in.Name, "arn": "arn:aws:s3:::" + in.Name}, nil
 }
 
 func publicReadPolicy(bucket string) string {
@@ -359,7 +359,7 @@ func (s *Service) getBucket(c *httpx.Ctx) (any, error) {
 		}
 	}
 	return map[string]any{
-		"name": name, "arn": "arn:hc:s3:::" + name, "region": s.env.Cfg.Region, "versioning": ver.Status, "created_at": created,
+		"name": name, "arn": "arn:aws:s3:::" + name, "region": s.env.Cfg.Region, "versioning": ver.Status, "created_at": created,
 		"public": s.isPublic(ctx, cl, name), "policy": policy, "object_count": count, "size_bytes": size, "stats_truncated": truncated,
 		"website": m.Website, "index_document": m.IndexDocument, "error_document": m.ErrorDocument, "lifecycle_rules": rules, "tags": m.Tags,
 		"website_url": fmt.Sprintf("http://%s/website/%s/", s.apiHost(), name),
@@ -617,7 +617,7 @@ func (s *Service) headObject(c *httpx.Ctx) (any, error) {
 		return nil, s3err(err)
 	}
 	return map[string]any{"key": st.Key, "size": st.Size, "content_type": st.ContentType, "etag": st.ETag, "last_modified": st.LastModified,
-		"version_id": st.VersionID, "metadata": st.UserMetadata, "arn": "arn:hc:s3:::" + c.Param("bucket") + "/" + st.Key,
+		"version_id": st.VersionID, "metadata": st.UserMetadata, "arn": "arn:aws:s3:::" + c.Param("bucket") + "/" + st.Key,
 		"url": fmt.Sprintf("%s/%s/%s", s.Endpoint(), url.PathEscape(c.Param("bucket")), escapeKey(st.Key))}, nil
 }
 
@@ -727,7 +727,7 @@ func (s *Service) copyObject(c *httpx.Ctx) (any, error) {
 	if in.SourceBucket == "" {
 		in.SourceBucket = c.Param("bucket")
 	}
-	if err := c.Authorize("s3:GetObject", "arn:hc:s3:::"+in.SourceBucket); err != nil {
+	if err := c.Authorize("s3:GetObject", "arn:aws:s3:::"+in.SourceBucket); err != nil {
 		return nil, err
 	}
 	cl, err := s.cl()
@@ -773,7 +773,7 @@ func (s *Service) presign(c *httpx.Ctx) (any, error) {
 	case "", "GET":
 		u, err = signer.PresignedGetObject(c.R.Context(), c.Param("bucket"), in.Key, exp, nil)
 	case "PUT":
-		if err := c.Authorize("s3:PutObject", "arn:hc:s3:::"+c.Param("bucket")); err != nil {
+		if err := c.Authorize("s3:PutObject", "arn:aws:s3:::"+c.Param("bucket")); err != nil {
 			return nil, err
 		}
 		u, err = signer.PresignedPutObject(c.R.Context(), c.Param("bucket"), in.Key, exp)

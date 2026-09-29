@@ -220,7 +220,7 @@ export function StateMachineEditor() {
 
         <Section
           title="Definition"
-          description="Task states can invoke Lambda functions (function ARN or arn:hc:states:::lambda:invoke), send SQS messages and publish to SNS topics."
+          description="Task states can invoke Lambda functions (function ARN or arn:aws:states:::lambda:invoke), send SQS messages and publish to SNS topics."
           actions={
             <Select value="" onValueChange={applyTemplate}>
               <SelectTrigger size="sm" className="h-8 w-56" aria-label="Start from a template">

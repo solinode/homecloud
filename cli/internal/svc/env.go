@@ -12,6 +12,10 @@ type Env struct {
 	Store     *store.Store
 	Docker    *runtime.Docker
 	AccountID string
+	// ContainerAPI is the HomeCloud API endpoint as seen from containers
+	// (AWS_ENDPOINT_URL for functions, tasks and instances). Containers that use
+	// it need runtime.HostAlias in their ExtraHosts.
+	ContainerAPI string
 }
 
 func (e *Env) ARN(service, resource string) string { return core.ARN(e.AccountID, service, resource) }

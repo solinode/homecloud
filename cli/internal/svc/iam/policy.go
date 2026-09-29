@@ -2,7 +2,10 @@ package iam
 
 import (
 	"encoding/json"
+
+	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"path"
+	"slices"
 	"strings"
 )
 
@@ -24,10 +27,42 @@ func (s *StringList) UnmarshalJSON(b []byte) error {
 }
 
 type Statement struct {
-	Sid      string     `json:"Sid,omitempty"`
-	Effect   string     `json:"Effect"`
-	Action   StringList `json:"Action"`
-	Resource StringList `json:"Resource"`
+	Sid       string          `json:"Sid,omitempty"`
+	Effect    string          `json:"Effect"`
+	Principal *Principals     `json:"Principal,omitempty"`
+	Action    StringList      `json:"Action"`
+	Resource  StringList      `json:"Resource,omitempty"`
+	Condition json.RawMessage `json:"Condition,omitempty"` // kept, not evaluated
+}
+
+// Principals is a trust policy's Principal element: "*" or
+// {"AWS": ..., "Service": ..., "Federated": ...}.
+type Principals struct {
+	Any       bool       `json:"-"`
+	AWS       StringList `json:"AWS,omitempty"`
+	Service   StringList `json:"Service,omitempty"`
+	Federated StringList `json:"Federated,omitempty"`
+}
+
+func (p *Principals) UnmarshalJSON(b []byte) error {
+	var star string
+	if json.Unmarshal(b, &star) == nil {
+		if star != "*" {
+			return errf(`Principal must be "*" or an object`)
+		}
+		p.Any = true
+		return nil
+	}
+	type plain Principals
+	return json.Unmarshal(b, (*plain)(p))
+}
+
+func (p Principals) MarshalJSON() ([]byte, error) {
+	if p.Any {
+		return []byte(`"*"`), nil
+	}
+	type plain Principals
+	return json.Marshal(plain(p))
 }
 
 type PolicyDocument struct {
@@ -49,8 +84,74 @@ func (d PolicyDocument) Validate() error {
 		if len(st.Resource) == 0 {
 			return errf("Statement[%d].Resource is required", i)
 		}
+		if st.Principal != nil {
+			return errf("Statement[%d].Principal is only allowed in role trust policies", i)
+		}
 	}
 	return nil
+}
+
+// ValidateTrust checks a role trust (assume role) policy.
+func (d PolicyDocument) ValidateTrust() error {
+	if len(d.Statement) == 0 {
+		return errf("trust policy needs at least one Statement")
+	}
+	for i, st := range d.Statement {
+		if st.Effect != "Allow" && st.Effect != "Deny" {
+			return errf("Statement[%d].Effect must be Allow or Deny", i)
+		}
+		if st.Principal == nil {
+			return errf("Statement[%d].Principal is required in a trust policy", i)
+		}
+		if len(st.Resource) > 0 {
+			return errf("Statement[%d].Resource is not allowed in a trust policy", i)
+		}
+		for _, a := range st.Action {
+			if !strings.HasPrefix(strings.ToLower(a), "sts:") {
+				return errf("Statement[%d].Action %q: trust policies only grant sts: actions", i, a)
+			}
+		}
+	}
+	return nil
+}
+
+// trusts evaluates a trust policy for action (e.g. sts:AssumeRole) by a caller
+// identified by ARN (users/roles), service principal ("lambda.amazonaws.com"),
+// or account. accountRoot is "arn:aws:iam::<account>:root".
+func (d PolicyDocument) trusts(action, callerARN, service, accountID string) decision {
+	result := implicitDeny
+	for _, st := range d.Statement {
+		am := false
+		for _, a := range st.Action {
+			if match(a, action, true) {
+				am = true
+				break
+			}
+		}
+		if !am || st.Principal == nil {
+			continue
+		}
+		pm := st.Principal.Any
+		if service != "" {
+			pm = pm || slices.Contains(st.Principal.Service, service)
+		} else {
+			root := core.ARN(accountID, "iam", "root")
+			for _, a := range st.Principal.AWS {
+				a = core.CanonicalARN(a)
+				if a == "*" || a == accountID || a == root || match(a, callerARN, false) {
+					pm = true
+				}
+			}
+		}
+		if !pm {
+			continue
+		}
+		if st.Effect == "Deny" {
+			return explicitDeny
+		}
+		result = allow
+	}
+	return result
 }
 
 // match reports whether value matches an IAM glob pattern (* and ?).
@@ -79,6 +180,7 @@ const (
 )
 
 func evaluate(docs []PolicyDocument, action, resource string) decision {
+	resource = core.CanonicalARN(resource)
 	result := implicitDeny
 	for _, d := range docs {
 		for _, st := range d.Statement {
@@ -94,7 +196,7 @@ func evaluate(docs []PolicyDocument, action, resource string) decision {
 			}
 			rm := false
 			for _, r := range st.Resource {
-				if match(r, resource, false) {
+				if match(core.CanonicalARN(r), resource, false) {
 					rm = true
 					break
 				}

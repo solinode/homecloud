@@ -23,8 +23,17 @@ const (
 	LabelService  = "homecloud.service"
 	LabelResource = "homecloud.resource"
 	LabelAccount  = "homecloud.account"
-	DefaultRegion = "local-1"
+	DefaultRegion = "us-east-1"
+	// Partition is the ARN partition. HomeCloud uses AWS's so that SDKs and
+	// tools that validate ARNs (Terraform, CDK) accept HomeCloud's.
+	Partition = "aws"
+	// LegacyRegion is the region of installations created before HomeCloud
+	// used AWS-style region names (migrated at startup).
+	LegacyRegion = "local-1"
 )
+
+// Region is the installation's region, set from the config at startup.
+var Region = DefaultRegion
 
 type Config struct {
 	DataDir       string `json:"data_dir"`
@@ -102,8 +111,34 @@ func NewAccountID() string {
 	return randFrom("0123456789", 12)
 }
 
+// globalServices have ARNs without a region, as in AWS.
+var globalServices = map[string]bool{"iam": true, "sts": true, "route53": true, "cloudfront": true, "organizations": true}
+
 func ARN(account, service, resource string) string {
-	return fmt.Sprintf("arn:hc:%s:%s:%s:%s", service, DefaultRegion, account, resource)
+	region := Region
+	if globalServices[service] {
+		region = ""
+	}
+	return fmt.Sprintf("arn:%s:%s:%s:%s:%s", Partition, service, region, account, resource)
+}
+
+// CanonicalARN rewrites an ARN in HomeCloud's legacy form ("arn:hc:<service>:local-1:...")
+// to the current partition and region; other strings are returned unchanged.
+func CanonicalARN(s string) string {
+	if !strings.HasPrefix(s, "arn:hc:") {
+		return s
+	}
+	parts := strings.SplitN(s, ":", 6)
+	if len(parts) < 6 {
+		return s
+	}
+	parts[1] = Partition
+	if globalServices[parts[2]] {
+		parts[3] = ""
+	} else if parts[3] == LegacyRegion {
+		parts[3] = Region
+	}
+	return strings.Join(parts, ":")
 }
 
 func Now() time.Time { return time.Now().UTC().Truncate(time.Second) }

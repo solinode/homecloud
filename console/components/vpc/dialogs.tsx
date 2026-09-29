@@ -31,7 +31,7 @@ import {
 } from "./common"
 import { RuleFields, RulesEditor } from "./rules-editor"
 
-const AZS = ["local-1a", "local-1b", "local-1c"]
+const AZS = ["us-east-1a", "us-east-1b", "us-east-1c"]
 
 /** suggestVpcCidr proposes a 10.x.0.0/16 that does not collide with existing VPCs. */
 function suggestVpcCidr(vpcs: Vpc[] | undefined): string {
@@ -160,7 +160,7 @@ export function CreateSubnetDialog({
   const [vpcId, setVpcId] = useState("")
   const [name, setName] = useState("")
   const [cidr, setCidr] = useState("")
-  const [az, setAz] = useState("local-1a")
+  const [az, setAz] = useState("us-east-1a")
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
 
@@ -172,7 +172,7 @@ export function CreateSubnetDialog({
       setVpcId(initial)
       setName("")
       setCidr(suggestSubnetCidr(vpcs?.find((v) => v.id === initial)))
-      setAz("local-1a")
+      setAz("us-east-1a")
       setTouched(false)
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps

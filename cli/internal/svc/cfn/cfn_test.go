@@ -50,9 +50,9 @@ func TestParseAndOrder(t *testing.T) {
 
 func TestResolve(t *testing.T) {
 	tp, _ := Parse(tmpl)
-	st := &Stack{Name: "demo", ARN: "arn:hc:cloudformation:local-1:123456789012:stack/demo", Resources: map[string]*Resource{
+	st := &Stack{Name: "demo", ARN: "arn:aws:cloudformation:us-east-1:123456789012:stack/demo", Resources: map[string]*Resource{
 		"Jobs":    {PhysicalID: "jobs-dev"},
-		"Uploads": {PhysicalID: "uploads-demo", Attributes: map[string]any{"arn": "arn:hc:s3:::uploads-demo"}},
+		"Uploads": {PhysicalID: "uploads-demo", Attributes: map[string]any{"arn": "arn:aws:s3:::uploads-demo"}},
 	}}
 	ps, err := params(tp, map[string]any{})
 	if err != nil {
@@ -65,7 +65,7 @@ func TestResolve(t *testing.T) {
 	}
 	m := v.(map[string]any)
 	env := m["environment"].(map[string]any)
-	if m["name"] != "worker-dev" || env["QUEUE"] != "jobs-dev" || env["BUCKET_ARN"] != "arn:hc:s3:::uploads-demo" {
+	if m["name"] != "worker-dev" || env["QUEUE"] != "jobs-dev" || env["BUCKET_ARN"] != "arn:aws:s3:::uploads-demo" {
 		t.Fatalf("resolved %v", m)
 	}
 	j, _ := r.resolve(tp.Resources["Jobs"].Properties)

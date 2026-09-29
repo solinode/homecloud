@@ -75,7 +75,7 @@ function sampleEvent(): string {
       source: "my.app",
       account: getSession()?.account_id ?? "000000000000",
       time: new Date().toISOString().replace(/\.\d+Z$/, "Z"),
-      region: "local-1",
+      region: "us-east-1",
       resources: [],
       detail: { order_id: "o-1001", total: 42 },
     },

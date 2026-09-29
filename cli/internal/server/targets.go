@@ -61,10 +61,10 @@ func (t *targets) Publish(topic, subject, message string) (map[string]any, error
 	return map[string]any{"MessageId": id}, nil
 }
 
-// parse splits "arn:hc:<service>:<region>:<account>:<resource>".
+// parse splits "arn:aws:<service>:<region>:<account>:<resource>".
 func parse(arn string) (service, resource string, ok bool) {
-	parts := strings.SplitN(arn, ":", 6)
-	if len(parts) != 6 || parts[0] != "arn" || parts[1] != "hc" {
+	parts := strings.SplitN(core.CanonicalARN(arn), ":", 6)
+	if len(parts) != 6 || parts[0] != "arn" || parts[1] != core.Partition {
 		return "", "", false
 	}
 	return parts[2], parts[5], true

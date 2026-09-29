@@ -252,7 +252,7 @@ func (s *Service) scale(g Group, live []ec2.Instance) Group {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:autoscaling:local-1:{account}:autoScalingGroup:{name}")
+	res := httpx.Res("arn:aws:autoscaling:{region}:{account}:autoScalingGroup:{name}")
 	r.Handle("GET /api/v1/autoscaling/groups", "autoscaling:DescribeAutoScalingGroups", s.list)
 	r.Handle("POST /api/v1/autoscaling/groups", "autoscaling:CreateAutoScalingGroup", s.create)
 	r.Handle("GET /api/v1/autoscaling/groups/{name}", "autoscaling:DescribeAutoScalingGroups", s.get, res)

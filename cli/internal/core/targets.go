@@ -15,8 +15,8 @@ import (
 // TargetAction returns the IAM action needed to deliver to a target ARN
 // (Lambda function, SQS queue, SNS topic or state machine), or "".
 func TargetAction(arn string) string {
-	parts := strings.SplitN(arn, ":", 6)
-	if len(parts) != 6 || parts[0] != "arn" || parts[1] != "hc" {
+	parts := strings.SplitN(CanonicalARN(arn), ":", 6)
+	if len(parts) != 6 || parts[0] != "arn" || parts[1] != Partition {
 		return ""
 	}
 	switch parts[2] {

@@ -86,12 +86,15 @@ type Policy struct {
 }
 
 type AccessKey struct {
-	AccessKeyID string     `json:"access_key_id"`
-	UserName    string     `json:"user_name"`
-	SecretHash  string     `json:"secret_hash,omitempty"`
-	Status      string     `json:"status"` // Active | Inactive
-	CreatedAt   time.Time  `json:"created_at"`
-	LastUsed    *time.Time `json:"last_used,omitempty"`
+	AccessKeyID string `json:"access_key_id"`
+	UserName    string `json:"user_name"`
+	SecretHash  string `json:"secret_hash,omitempty"`
+	// SecretCT is the secret encrypted under the master key, needed to verify
+	// AWS signatures (keys created before it existed gain it on first use).
+	SecretCT  string     `json:"secret_ct,omitempty"`
+	Status    string     `json:"status"` // Active | Inactive
+	CreatedAt time.Time  `json:"created_at"`
+	LastUsed  *time.Time `json:"last_used,omitempty"`
 }
 
 type session struct {
@@ -107,7 +110,10 @@ type account struct {
 }
 
 type Service struct {
-	env      *svc.Env
+	env *svc.Env
+	// Seal encrypts access key secrets and temporary credentials at rest.
+	Seal     Sealer
+	roleMu   sync.Mutex
 	failMu   sync.Mutex
 	failures map[string][]time.Time // client IP -> recent failed sign-ins
 }
@@ -226,6 +232,9 @@ func hashSecret(secret string) string {
 func (s *Service) createKey(user string) (AccessKey, string, error) {
 	secret := core.NewSecret(40)
 	k := AccessKey{AccessKeyID: core.NewAccessKeyID(), UserName: user, SecretHash: hashSecret(secret), Status: "Active", CreatedAt: core.Now()}
+	if s.Seal != nil {
+		k.SecretCT = s.Seal.Encrypt([]byte(secret))
+	}
 	return k, secret, store.Put(s.env.Store, cKeys, k.AccessKeyID, k)
 }
 
@@ -261,9 +270,11 @@ func (s *Service) Authenticate(r *http.Request) (*httpx.Principal, error) {
 			return nil, core.Errf(http.StatusUnauthorized, "InvalidClientTokenId", "access key %s is inactive", id)
 		}
 		user, keyID = k.UserName, id
-		if k.LastUsed == nil || time.Since(*k.LastUsed) > time.Minute {
-			_, _ = store.Update(s.env.Store, cKeys, id, func(k *AccessKey) error { n := core.Now(); k.LastUsed = &n; return nil })
+		if k.SecretCT == "" && s.Seal != nil {
+			// Keys created before AWS signature support gain an encrypted secret on first use.
+			_, _ = store.Update(s.env.Store, cKeys, id, func(k *AccessKey) error { k.SecretCT = s.Seal.Encrypt([]byte(secret)); return nil })
 		}
+		s.touchKey(k)
 	}
 	u, err := store.Get[User](s.env.Store, cUsers, user)
 	if err != nil || (sessionUserID != "" && sessionUserID != u.ID) {
@@ -275,6 +286,13 @@ func (s *Service) Authenticate(r *http.Request) (*httpx.Principal, error) {
 // Refresh re-reads a principal's user, access key and policies, so long-running
 // work (CloudFormation stacks) acts with the caller's current permissions.
 func (s *Service) Refresh(p *httpx.Principal) (*httpx.Principal, error) {
+	if strings.HasPrefix(p.AccessKey, tempKeyPrefix) {
+		t, err := store.Get[tempCred](s.env.Store, cTempCreds, p.AccessKey)
+		if err != nil || time.Now().After(t.Expires) {
+			return nil, fmt.Errorf("temporary credentials %s have expired", p.AccessKey)
+		}
+		return s.tempPrincipal(t)
+	}
 	u, err := store.Get[User](s.env.Store, cUsers, p.UserName)
 	if err != nil {
 		return nil, fmt.Errorf("user %s no longer exists", p.UserName)
@@ -331,7 +349,7 @@ func validName(kind, n string) error {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	iamRes := func(kind string) httpx.Opt { return httpx.Res("arn:hc:iam:local-1:{account}:" + kind) }
+	iamRes := func(kind string) httpx.Opt { return httpx.Res("arn:aws:iam::{account}:" + kind) }
 
 	r.Handle("POST /api/v1/auth/login", "", s.login, httpx.Public())
 	r.Handle("POST /api/v1/auth/logout", "sts:Logout", s.logout)
@@ -369,6 +387,7 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("PUT /api/v1/iam/policies/{name}", "iam:CreatePolicyVersion", s.updatePolicy, iamRes("policy/{name}"))
 	r.Handle("DELETE /api/v1/iam/policies/{name}", "iam:DeletePolicy", s.deletePolicy, iamRes("policy/{name}"))
 	r.Handle("POST /api/v1/iam/simulate", "iam:SimulatePrincipalPolicy", s.simulate)
+	s.roleRoutes(r)
 }
 
 func (s *Service) login(c *httpx.Ctx) (any, error) {
@@ -412,7 +431,8 @@ func (s *Service) logout(c *httpx.Ctx) (any, error) {
 }
 
 func (s *Service) whoami(c *httpx.Ctx) (any, error) {
-	return map[string]any{"account_id": c.P.AccountID, "user_name": c.P.UserName, "arn": c.P.ARN, "root": c.P.Root, "region": s.env.Cfg.Region}, nil
+	return map[string]any{"account_id": c.P.AccountID, "user_name": c.P.UserName, "arn": c.P.ARN, "root": c.P.Root, "region": s.env.Cfg.Region,
+		"role_name": c.P.RoleName, "session_name": c.P.SessionName}, nil
 }
 
 func (s *Service) summary(c *httpx.Ctx) (any, error) {
@@ -431,6 +451,7 @@ func (s *Service) summary(c *httpx.Ctx) (any, error) {
 		"customer_policies": customer,
 		"managed_policies":  len(policies) - customer,
 		"access_keys":       len(store.List[AccessKey](s.env.Store, cKeys)),
+		"roles":             len(store.List[Role](s.env.Store, cRoles)),
 	}, nil
 }
 
@@ -541,7 +562,7 @@ func (s *Service) getUser(c *httpx.Ctx) (any, error) {
 	keys := []AccessKey{}
 	for _, k := range store.List[AccessKey](s.env.Store, cKeys) {
 		if k.UserName == u.Name {
-			k.SecretHash = ""
+			k.SecretHash, k.SecretCT = "", ""
 			keys = append(keys, k)
 		}
 	}
@@ -710,7 +731,7 @@ func (s *Service) listKeys(c *httpx.Ctx) (any, error) {
 	out := []AccessKey{}
 	for _, k := range store.List[AccessKey](s.env.Store, cKeys) {
 		if k.UserName == c.Param("name") {
-			k.SecretHash = ""
+			k.SecretHash, k.SecretCT = "", ""
 			out = append(out, k)
 		}
 	}
@@ -758,7 +779,7 @@ func (s *Service) updateKey(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	k, err := store.Update(s.env.Store, cKeys, c.Param("key"), func(k *AccessKey) error { k.Status = in.Status; return nil })
-	k.SecretHash = ""
+	k.SecretHash, k.SecretCT = "", ""
 	return k, err
 }
 
@@ -911,7 +932,13 @@ func (s *Service) attachments(name string) map[string][]string {
 			groups = append(groups, g.Name)
 		}
 	}
-	return map[string][]string{"users": users, "groups": groups}
+	roles := []string{}
+	for _, r := range store.List[Role](s.env.Store, cRoles) {
+		if slices.Contains(r.AttachedPolicies, name) {
+			roles = append(roles, r.Name)
+		}
+	}
+	return map[string][]string{"users": users, "groups": groups, "roles": roles}
 }
 
 func (s *Service) listPolicies(c *httpx.Ctx) (any, error) {
@@ -923,7 +950,7 @@ func (s *Service) listPolicies(c *httpx.Ctx) (any, error) {
 		}
 		a := s.attachments(p.Name)
 		out = append(out, map[string]any{"name": p.Name, "arn": p.ARN, "description": p.Description, "managed": p.Managed,
-			"created_at": p.CreatedAt, "updated_at": p.UpdatedAt, "attachment_count": len(a["users"]) + len(a["groups"])})
+			"created_at": p.CreatedAt, "updated_at": p.UpdatedAt, "attachment_count": len(a["users"]) + len(a["groups"]) + len(a["roles"])})
 	}
 	return out, nil
 }
@@ -1000,8 +1027,8 @@ func (s *Service) deletePolicy(c *httpx.Ctx) (any, error) {
 	if p.Managed {
 		return nil, core.Conflict("managed policy %q cannot be deleted", name)
 	}
-	if a := s.attachments(name); len(a["users"])+len(a["groups"]) > 0 {
-		return nil, core.Errf(http.StatusConflict, "DeleteConflict", "policy %q is still attached to %d user(s) and %d group(s)", name, len(a["users"]), len(a["groups"]))
+	if a := s.attachments(name); len(a["users"])+len(a["groups"])+len(a["roles"]) > 0 {
+		return nil, core.Errf(http.StatusConflict, "DeleteConflict", "policy %q is still attached to %d user(s), %d group(s) and %d role(s)", name, len(a["users"]), len(a["groups"]), len(a["roles"]))
 	}
 	return nil, store.Delete(s.env.Store, cPolicies, name)
 }

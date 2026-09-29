@@ -19,6 +19,8 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { CopyButton } from "@/components/console/copy-button"
 import { useSession } from "@/components/console/auth"
 import { logout } from "@/lib/api"
+import { useApi } from "@/lib/hooks"
+import type { Health } from "@/lib/types/common"
 import { SERVICES, servicesByCategory, type ServiceDef } from "@/lib/services"
 import { cn } from "@/lib/utils"
 
@@ -315,6 +317,7 @@ function AccountMenu() {
 }
 
 export function Topbar({ onMenu, showMenu }: { onMenu?: () => void; showMenu?: boolean }) {
+  const region = useApi<Health>("/api/v1/health").data?.region ?? "us-east-1"
   return (
     <header className="bg-topbar text-topbar-foreground sticky top-0 z-40 flex h-12 shrink-0 items-center gap-2 border-b border-black/20 px-2 sm:px-3">
       {showMenu && (
@@ -339,7 +342,7 @@ export function Topbar({ onMenu, showMenu }: { onMenu?: () => void; showMenu?: b
       <div className="flex items-center gap-1">
         <Tooltip>
           <TooltipTrigger asChild>
-            <span className="hidden h-6 items-center rounded border border-white/20 px-2 font-mono text-xs text-white/80 sm:inline-flex">local-1</span>
+            <span className="hidden h-6 items-center rounded border border-white/20 px-2 font-mono text-xs text-white/80 sm:inline-flex">{region}</span>
           </TooltipTrigger>
           <TooltipContent>Region</TooltipContent>
         </Tooltip>

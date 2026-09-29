@@ -315,7 +315,7 @@ func (s *Service) VerifyToken(poolID, token, audience string) (map[string]any, e
 // ---- admin routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:cognito-idp:local-1:{account}:userpool/{pool}")
+	res := httpx.Res("arn:aws:cognito-idp:{region}:{account}:userpool/{pool}")
 	r.Handle("GET /api/v1/cognito/user-pools", "cognito-idp:ListUserPools", s.listPools)
 	r.Handle("POST /api/v1/cognito/user-pools", "cognito-idp:CreateUserPool", s.createPool)
 	r.Handle("GET /api/v1/cognito/user-pools/{pool}", "cognito-idp:DescribeUserPool", s.getPool, res)
@@ -394,7 +394,7 @@ func (s *Service) createPool(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	id := core.DefaultRegion + "_" + strings.ToUpper(core.RandHex(9))
+	id := core.Region + "_" + strings.ToUpper(core.RandHex(9))
 	p := Pool{ID: id, ARN: s.env.ARN("cognito-idp", "userpool/"+id), Name: in.Name, PasswordPolicy: pp, AutoConfirm: in.AutoConfirm == nil || *in.AutoConfirm,
 		SelfSignUp: in.SelfSignUp == nil || *in.SelfSignUp, Groups: []Group{}, KeyID: core.RandHex(16),
 		PrivateKeyCT: s.secrets.Encrypt(x509.MarshalPKCS1PrivateKey(key)), CreatedAt: core.Now()}

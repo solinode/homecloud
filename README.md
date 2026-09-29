@@ -113,7 +113,7 @@ homecloud sqs create jobs --dlq jobs-dlq
 homecloud lambda trigger resize jobs
 
 # Schedules and events
-homecloud events schedule nightly 'cron(0 3 ? * * *)' --target arn:hc:lambda:local-1:<account>:function:resize
+homecloud events schedule nightly 'cron(0 3 ? * * *)' --target arn:aws:lambda:us-east-1:<account>:function:resize
 
 # Containers behind a load balancer
 docker tag myapi localhost:5500/myapi:1 && docker push localhost:5500/myapi:1

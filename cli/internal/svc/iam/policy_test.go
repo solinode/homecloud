@@ -10,17 +10,17 @@ func TestEvaluate(t *testing.T) {
 	if err := json.Unmarshal([]byte(`{"Version":"2012-10-17","Statement":[
 		{"Effect":"Allow","Action":"s3:*","Resource":"*"},
 		{"Effect":"Allow","Action":["ec2:Describe*"],"Resource":["*"]},
-		{"Effect":"Deny","Action":"s3:DeleteBucket","Resource":"arn:hc:s3:::prod-*"}]}`), &d); err != nil {
+		{"Effect":"Deny","Action":"s3:DeleteBucket","Resource":"arn:aws:s3:::prod-*"}]}`), &d); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
 		action, resource string
 		want             decision
 	}{
-		{"s3:GetObject", "arn:hc:s3:::photos", allow},
-		{"S3:getobject", "arn:hc:s3:::photos", allow},
-		{"s3:DeleteBucket", "arn:hc:s3:::prod-data", explicitDeny},
-		{"s3:DeleteBucket", "arn:hc:s3:::dev-data", allow},
+		{"s3:GetObject", "arn:aws:s3:::photos", allow},
+		{"S3:getobject", "arn:aws:s3:::photos", allow},
+		{"s3:DeleteBucket", "arn:aws:s3:::prod-data", explicitDeny},
+		{"s3:DeleteBucket", "arn:aws:s3:::dev-data", allow},
 		{"ec2:DescribeInstances", "*", allow},
 		{"ec2:RunInstances", "*", implicitDeny},
 		{"iam:CreateUser", "*", implicitDeny},
@@ -33,10 +33,10 @@ func TestEvaluate(t *testing.T) {
 }
 
 func TestMatchSlashes(t *testing.T) {
-	if !match("arn:hc:iam:local-1:1:user/*", "arn:hc:iam:local-1:1:user/alice", false) {
+	if !match("arn:aws:iam::1:user/*", "arn:aws:iam::1:user/alice", false) {
 		t.Error("wildcard should cross the slash")
 	}
-	if match("arn:hc:iam:local-1:1:user/bob", "arn:hc:iam:local-1:1:user/alice", false) {
+	if match("arn:aws:iam::1:user/bob", "arn:aws:iam::1:user/alice", false) {
 		t.Error("different users must not match")
 	}
 }

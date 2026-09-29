@@ -147,7 +147,7 @@ export function SendEvents() {
                   id={`res-${i}`}
                   value={e.resources}
                   onChange={(x) => set(i, { resources: x.target.value })}
-                  placeholder="arn:hc:dynamodb:local-1:123456789012:table/orders"
+                  placeholder="arn:aws:dynamodb:us-east-1:123456789012:table/orders"
                   className="font-mono text-[13px]"
                   spellCheck={false}
                 />

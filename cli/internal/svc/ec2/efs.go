@@ -48,7 +48,7 @@ func nzFS(m []FSMount) []FSMount {
 }
 
 func (s *Service) efsRoutes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:elasticfilesystem:local-1:{account}:file-system/{id}")
+	res := httpx.Res("arn:aws:elasticfilesystem:{region}:{account}:file-system/{id}")
 	r.Handle("GET /api/v1/efs/file-systems", "elasticfilesystem:DescribeFileSystems", s.listFS)
 	r.Handle("POST /api/v1/efs/file-systems", "elasticfilesystem:CreateFileSystem", s.createFS)
 	r.Handle("GET /api/v1/efs/file-systems/{id}", "elasticfilesystem:DescribeFileSystems", s.getFS, res)

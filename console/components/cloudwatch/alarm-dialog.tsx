@@ -38,7 +38,7 @@ function ActionsEditor({ id, values, onChange, showErrors }: { id: string; value
                 id={i === 0 ? id : undefined}
                 className="h-8 font-mono text-[13px]"
                 value={v}
-                placeholder="https://hooks.example.com/alert or arn:hc:sns:local-1:...:topic"
+                placeholder="https://hooks.example.com/alert or arn:aws:sns:us-east-1:...:topic"
                 aria-invalid={!!err}
                 onChange={(e) => onChange(values.map((x, j) => (j === i ? e.target.value : x)))}
               />

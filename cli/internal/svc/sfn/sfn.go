@@ -236,7 +236,7 @@ func (s *Service) prune(machine string) {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:states:local-1:{account}:stateMachine:{name}")
+	res := httpx.Res("arn:aws:states:{region}:{account}:stateMachine:{name}")
 	r.Handle("GET /api/v1/sfn/state-machines", "states:ListStateMachines", s.list)
 	r.Handle("POST /api/v1/sfn/state-machines", "states:CreateStateMachine", s.create)
 	r.Handle("GET /api/v1/sfn/state-machines/{name}", "states:DescribeStateMachine", s.get, res)
@@ -500,7 +500,7 @@ func taskPermissions(m *Machine, account string) [][2]string {
 				if v == "*" || strings.HasPrefix(v, "arn:") {
 					return v
 				}
-				return fmt.Sprintf("arn:hc:%s:local-1:%s:%s", service, account, v)
+				return core.ARN(account, service, v)
 			}
 			switch r := st.Resource; {
 			case strings.HasSuffix(r, ":lambda:invoke") || strings.HasSuffix(r, ":lambda:invoke.waitForTaskToken"):

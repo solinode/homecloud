@@ -57,7 +57,7 @@ type Service struct {
 func New(env *svc.Env) *Service { return &Service{env: env} }
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:events:local-1:{account}:rule/{name}")
+	res := httpx.Res("arn:aws:events:{region}:{account}:rule/{name}")
 	r.Handle("GET /api/v1/events/rules", "events:ListRules", s.list)
 	r.Handle("PUT /api/v1/events/rules/{name}", "events:PutRule", s.put, res)
 	r.Handle("GET /api/v1/events/rules/{name}", "events:DescribeRule", s.get, res)
