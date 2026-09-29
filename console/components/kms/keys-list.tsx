@@ -17,7 +17,8 @@ import { useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { KmsKey } from "@/lib/types"
 
 import { CreateKeyDialog } from "./create-key-dialog"
-import { KeyStateBadge, ManagedBadge, isServiceManaged, keyHref, useKeyActions, useKmsKeys } from "./shared"
+import { AliasesView } from "./aliases-view"
+import { KIND_LABEL, KeyStateBadge, ManagedBadge, isServiceManaged, isSymmetric, keyHref, keyKind, useKeyActions, useKmsKeys } from "./shared"
 
 function Aliases({ k }: { k: KmsKey }) {
   if (!k.aliases?.length) return <span className="text-muted-foreground">-</span>
@@ -64,10 +65,29 @@ const columns: Column<KmsKey>[] = [
     hideBelow: "md",
   },
   {
+    id: "type",
+    header: "Key type",
+    cell: (k) => (
+      <span className="whitespace-nowrap">
+        {KIND_LABEL[keyKind(k.key_spec)]}
+        {!isSymmetric(k) && <span className="text-muted-foreground ml-1 font-mono text-xs">{k.key_spec}</span>}
+      </span>
+    ),
+    value: (k) => `${keyKind(k.key_spec)} ${k.key_spec}`,
+    hideBelow: "md",
+  },
+  {
     id: "rotation",
     header: "Rotation",
-    cell: (k) => (k.rotation_enabled ? "Enabled" : <span className="text-muted-foreground">Disabled</span>),
-    value: (k) => (k.rotation_enabled ? 1 : 0),
+    cell: (k) =>
+      !isSymmetric(k) ? (
+        <span className="text-muted-foreground">-</span>
+      ) : k.rotation_enabled ? (
+        <span className="whitespace-nowrap">Every {k.rotation_period_days ?? 365} days</span>
+      ) : (
+        <span className="text-muted-foreground">Disabled</span>
+      ),
+    value: (k) => (isSymmetric(k) && k.rotation_enabled ? (k.rotation_period_days ?? 365) : 0),
     hideBelow: "lg",
   },
   { id: "versions", header: "Versions", cell: (k) => <span className="tabular-nums">{k.key_versions}</span>, value: (k) => k.key_versions, hideBelow: "lg" },
@@ -81,11 +101,12 @@ const columns: Column<KmsKey>[] = [
   { id: "created", header: "Created", cell: (k) => <TimeAgo value={k.created_at} />, value: (k) => k.created_at, hideBelow: "sm" },
 ]
 
-type View = "customer" | "managed"
+type View = "customer" | "managed" | "aliases"
 
 export function KeysList() {
   const router = useRouter()
-  const view: View = useQueryParam("view") === "managed" ? "managed" : "customer"
+  const viewParam = useQueryParam("view")
+  const view: View = viewParam === "managed" || viewParam === "aliases" ? viewParam : "customer"
   const setParam = useSetQueryParam()
   const { data, error, isLoading, isValidating, mutate } = useKmsKeys()
   const [selected, setSelected] = useState<string[]>([])
@@ -105,11 +126,16 @@ export function KeysList() {
 
   const items: ActionItem[] = [
     { label: "View details", onSelect: () => sel && router.push(keyHref(sel.id)), disabled: !sel },
-    { label: "Encrypt / decrypt", onSelect: () => sel && router.push(keyHref(sel.id, "crypto")), disabled: !sel },
+    { label: sel && !isSymmetric(sel) ? "Cryptographic operations" : "Encrypt / decrypt", onSelect: () => sel && router.push(keyHref(sel.id, "crypto")), disabled: !sel },
     { separator: true },
     { label: "Enable", onSelect: () => sel && actions.enable(sel), disabled: locked || sel?.state !== "Disabled" },
     { label: "Disable", onSelect: () => sel && actions.disable(sel), disabled: locked || sel?.state !== "Enabled" },
-    { label: "Rotate key material now", onSelect: () => sel && actions.rotate(sel), disabled: locked || pendingDeletion },
+    {
+      label: "Rotate key material now",
+      onSelect: () => sel && actions.rotate(sel),
+      disabled: locked || pendingDeletion || !sel || !isSymmetric(sel) || sel.state !== "Enabled",
+      hint: sel && !isSymmetric(sel) ? "Only symmetric encryption keys support rotation." : undefined,
+    },
     { separator: true },
     pendingDeletion
       ? { label: "Cancel key deletion", onSelect: () => sel && actions.cancelDeletion(sel), disabled: locked }
@@ -121,7 +147,7 @@ export function KeysList() {
       <PageHeader
         title="Key Management Service"
         description="Create and control the encryption keys that protect your data. HomeCloud services such as Parameter Store use their own managed keys."
-        breadcrumbs={[{ label: "KMS", href: "/kms/" }, { label: view === "managed" ? "HomeCloud managed keys" : "Customer managed keys" }]}
+        breadcrumbs={[{ label: "KMS", href: "/kms/" }, { label: view === "managed" ? "HomeCloud managed keys" : view === "aliases" ? "Aliases" : "Customer managed keys" }]}
         actions={
           <Button variant="outline" size="sm" asChild>
             <Link href="/kms/crypto/">
@@ -135,7 +161,7 @@ export function KeysList() {
         value={view}
         onValueChange={(v) => {
           setSelected([])
-          setParam("view", v === "managed" ? "managed" : null)
+          setParam("view", v === "customer" ? null : v)
         }}
       >
         <TabsList>
@@ -145,9 +171,13 @@ export function KeysList() {
           <TabsTrigger value="managed">
             HomeCloud managed keys{data ? <span className="text-muted-foreground text-xs">({counts.managed})</span> : null}
           </TabsTrigger>
+          <TabsTrigger value="aliases">Aliases</TabsTrigger>
         </TabsList>
       </Tabs>
 
+      {view === "aliases" ? (
+        <AliasesView keys={data} />
+      ) : (
       <DataTable
         title={view === "managed" ? "HomeCloud managed keys" : "Customer managed keys"}
         description={
@@ -198,6 +228,7 @@ export function KeysList() {
           )
         }
       />
+      )}
 
       {actions.dialogs}
       <CreateKeyDialog open={creating} onOpenChange={setCreating} />

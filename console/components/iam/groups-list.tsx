@@ -55,8 +55,12 @@ export function GroupsList() {
     {
       id: "perms",
       header: "Permissions",
-      value: (g) => g.attached_policies.length,
-      cell: (g) => (g.attached_policies.length ? pluralize(g.attached_policies.length, "policy", "policies") : <span className="text-muted-foreground">Not defined</span>),
+      value: (g) => g.attached_policies.length + Object.keys(g.inline_policies ?? {}).length,
+      cell: (g) => {
+        const inline = Object.keys(g.inline_policies ?? {}).length
+        if (!g.attached_policies.length && !inline) return <span className="text-muted-foreground">Not defined</span>
+        return [g.attached_policies.length ? pluralize(g.attached_policies.length, "policy", "policies") : "", inline ? `${inline} inline` : ""].filter(Boolean).join(", ")
+      },
     },
     { id: "created", header: "Created", value: (g) => g.created_at, cell: (g) => <TimeAgo value={g.created_at} />, hideBelow: "sm" },
   ]

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, Loader2, Plus, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, Loader2, Plus, ShieldCheck, ShieldOff, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -27,8 +27,21 @@ import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, api, errorMessage, seg } from "@/lib/api"
 import { formatBytes, formatDate, formatNumber } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
-import type { DynamoTable, TableIndex } from "@/lib/types"
-import { KeySchema, TABLES_PATH, indexes, keyLabel } from "./common"
+import type { DynamoTable, StreamViewType, TableIndex, UpdateTableInput } from "@/lib/types"
+import { cn } from "@/lib/utils"
+import {
+  DELETION_PROTECTED_MESSAGE,
+  KeySchema,
+  STREAM_VIEW_TYPES,
+  StreamViewTypeSelect,
+  TABLES_PATH,
+  allIndexes,
+  indexes,
+  keyLabel,
+  localIndexes,
+  projectionLabel,
+  streamViewLabel,
+} from "./common"
 import { IndexRowEditor, emptyIndexRow, indexRowErrors, rowToIndex, type IndexRow } from "./create-table"
 import { ItemExplorer } from "./item-explorer"
 import { DeleteTableDialog } from "./tables-list"
@@ -138,7 +151,7 @@ function BackButton() {
 }
 
 function OverviewTab({ table }: { table: DynamoTable }) {
-  const gsis = indexes(table)
+  const all = allIndexes(table)
   return (
     <div className="flex flex-col gap-4">
       <Section title="General information">
@@ -162,8 +175,20 @@ function OverviewTab({ table }: { table: DynamoTable }) {
               ),
             },
             { label: "Created", value: <span>{formatDate(table.created_at)} (<TimeAgo value={table.created_at} />)</span> },
-            { label: "Secondary indexes", value: gsis.length ? gsis.map((g) => g.name).join(", ") : "None" },
+            { label: "Secondary indexes", value: all.length ? all.map((g) => `${g.name}${g.local ? " (local)" : ""}`).join(", ") : "None" },
+            { label: "DynamoDB stream", value: table.stream_arn ? `On · ${streamViewLabel(table.stream_view_type)}` : "Off" },
+            {
+              label: "Deletion protection",
+              value: table.deletion_protection ? (
+                <span className="inline-flex items-center gap-1">
+                  <ShieldCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" /> On
+                </span>
+              ) : (
+                "Off"
+              ),
+            },
             { label: "Amazon Resource Name (ARN)", value: <CopyableText value={table.arn} />, wide: true },
+            ...(table.stream_arn ? [{ label: "Latest stream ARN", value: <CopyableText value={table.stream_arn} />, wide: true }] : []),
           ]}
         />
       </Section>
@@ -176,6 +201,7 @@ function OverviewTab({ table }: { table: DynamoTable }) {
 
 function IndexesTab({ table }: { table: DynamoTable }) {
   const gsis = indexes(table)
+  const lsis = localIndexes(table)
   const [creating, setCreating] = useState(false)
   const [removing, setRemoving] = useState<TableIndex | null>(null)
 
@@ -183,7 +209,7 @@ function IndexesTab({ table }: { table: DynamoTable }) {
     <div className="flex flex-col gap-4">
       <Section
         title={`Global secondary indexes (${gsis.length})`}
-        description="Query items by attributes other than the primary key. Indexes are evaluated on read, so a new index covers existing items immediately."
+        description="Query items by attributes other than the primary key. A new index is backfilled from existing items when it is created."
         actions={
           <Button size="sm" onClick={() => setCreating(true)}>
             <Plus /> Create index
@@ -192,32 +218,7 @@ function IndexesTab({ table }: { table: DynamoTable }) {
         flush
       >
         {gsis.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b">
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Name</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Partition key</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Sort key</th>
-                  <th className="px-4 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {gsis.map((g) => (
-                  <tr key={g.name} className="border-b last:border-0">
-                    <td className="px-4 py-2 font-medium">{g.name}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{keyLabel(g.partition_key)}</td>
-                    <td className="px-3 py-2 whitespace-nowrap">{g.sort_key ? keyLabel(g.sort_key) : <span className="text-muted-foreground">-</span>}</td>
-                    <td className="px-4 py-2 text-right">
-                      <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => setRemoving(g)}>
-                        <Trash2 /> Delete
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <IndexTable indexes={gsis} onDelete={setRemoving} />
         ) : (
           <EmptyState
             title="No secondary indexes"
@@ -228,6 +229,17 @@ function IndexesTab({ table }: { table: DynamoTable }) {
               </Button>
             }
           />
+        )}
+      </Section>
+      <Section
+        title={`Local secondary indexes (${lsis.length})`}
+        description="Alternate sort keys within a partition. Local indexes are defined when the table is created and cannot be added or removed later."
+        flush
+      >
+        {lsis.length ? (
+          <IndexTable indexes={lsis} />
+        ) : (
+          <p className="text-muted-foreground px-4 py-6 text-center text-sm">This table has no local secondary indexes.</p>
         )}
       </Section>
       <CreateIndexDialog table={table} open={creating} onOpenChange={setCreating} />
@@ -248,6 +260,49 @@ function IndexesTab({ table }: { table: DynamoTable }) {
   )
 }
 
+/** IndexTable lists secondary indexes; onDelete adds a delete action per row. */
+function IndexTable({ indexes, onDelete }: { indexes: TableIndex[]; onDelete?: (ix: TableIndex) => void }) {
+  const th = "text-muted-foreground px-3 py-2 text-left text-xs font-semibold whitespace-nowrap"
+  return (
+    <div className="overflow-x-auto">
+      <table className="w-full text-sm">
+        <thead>
+          <tr className="bg-muted/40 border-b">
+            <th className={cn(th, "px-4")}>Name</th>
+            <th className={th}>Status</th>
+            <th className={th}>Partition key</th>
+            <th className={th}>Sort key</th>
+            <th className={th}>Projected attributes</th>
+            {onDelete && <th className="px-4 py-2" />}
+          </tr>
+        </thead>
+        <tbody>
+          {indexes.map((g) => (
+            <tr key={g.name} className="border-b last:border-0">
+              <td className="px-4 py-2 font-medium whitespace-nowrap">{g.name}</td>
+              <td className="px-3 py-2">
+                <StatusBadge status={g.status || "ACTIVE"} />
+              </td>
+              <td className="px-3 py-2 whitespace-nowrap">{keyLabel(g.partition_key)}</td>
+              <td className="px-3 py-2 whitespace-nowrap">{g.sort_key ? keyLabel(g.sort_key) : <span className="text-muted-foreground">-</span>}</td>
+              <td className="max-w-64 truncate px-3 py-2" title={projectionLabel(g.projection)}>
+                {projectionLabel(g.projection)}
+              </td>
+              {onDelete && (
+                <td className="px-4 py-2 text-right">
+                  <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => onDelete(g)}>
+                    <Trash2 /> Delete
+                  </Button>
+                </td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
 function CreateIndexDialog({ table, open, onOpenChange }: { table: DynamoTable; open: boolean; onOpenChange: (o: boolean) => void }) {
   const [row, setRow] = useState<IndexRow>(emptyIndexRow())
   const [submitted, setSubmitted] = useState(false)
@@ -261,13 +316,13 @@ function CreateIndexDialog({ table, open, onOpenChange }: { table: DynamoTable; 
 
   const errors = indexRowErrors(
     row,
-    indexes(table).map((g) => g.name),
+    allIndexes(table).map((g) => g.name),
   )
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitted(true)
-    if (errors.name || errors.pk) return
+    if (Object.values(errors).some(Boolean)) return
     setPending(true)
     try {
       const ix = rowToIndex(row)
@@ -288,9 +343,11 @@ function CreateIndexDialog({ table, open, onOpenChange }: { table: DynamoTable; 
         <form onSubmit={submit} className="flex flex-col gap-4">
           <DialogHeader>
             <DialogTitle>Create global secondary index</DialogTitle>
-            <DialogDescription>Items that lack the index partition key attribute are not returned by queries on the index.</DialogDescription>
+            <DialogDescription>
+              Existing items are backfilled into the index. Items that lack the index partition key attribute are not returned by queries on the index.
+            </DialogDescription>
           </DialogHeader>
-          <IndexRowEditor row={row} onChange={(p) => setRow({ ...row, ...p })} nameError={submitted ? errors.name : undefined} pkError={submitted ? errors.pk : undefined} />
+          <IndexRowEditor row={row} onChange={(p) => setRow({ ...row, ...p })} errors={submitted ? errors : {}} />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
               Cancel
@@ -385,6 +442,10 @@ function SettingsTab({ table, onDelete }: { table: DynamoTable; onDelete: () => 
         </form>
       </Section>
 
+      <StreamSection table={table} />
+
+      <DeletionProtectionSection table={table} />
+
       <Section title="Tags">
         <form onSubmit={saveTags} className="flex flex-col gap-3">
           <TagsEditor rows={tagRows} onChange={(r) => (setTagRows(r), setTagErr(null))} />
@@ -400,12 +461,152 @@ function SettingsTab({ table, onDelete }: { table: DynamoTable; onDelete: () => 
 
       <Section title="Delete table" className="border-destructive/40">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-muted-foreground text-sm">Deleting the table removes all of its items and indexes permanently.</p>
-          <Button variant="destructive" size="sm" onClick={onDelete} className="shrink-0">
+          <p className="text-muted-foreground text-sm">
+            {table.deletion_protection ? DELETION_PROTECTED_MESSAGE : "Deleting the table removes all of its items and indexes permanently."}
+          </p>
+          <Button variant="destructive" size="sm" onClick={onDelete} className="shrink-0" disabled={table.deletion_protection}>
             <Trash2 /> Delete table
           </Button>
         </div>
       </Section>
     </div>
+  )
+}
+
+function StreamSection({ table }: { table: DynamoTable }) {
+  const path = `${TABLES_PATH}/${seg(table.name)}`
+  const current = table.stream_arn ? table.stream_view_type : undefined
+  const [on, setOn] = useState(!!current)
+  const [view, setView] = useState<StreamViewType>(current ?? "NEW_AND_OLD_IMAGES")
+  const [pending, setPending] = useState(false)
+  // Pick up changes made elsewhere.
+  useEffect(() => {
+    setOn(!!current)
+    setView(current ?? "NEW_AND_OLD_IMAGES")
+  }, [current])
+
+  const target: StreamViewType | "" = on ? view : ""
+  const dirty = target !== (current ?? "")
+  const history = [...(table.streams ?? [])].reverse()
+  const latest = history[0]
+
+  const save = async (e: React.FormEvent) => {
+    e.preventDefault()
+    setPending(true)
+    try {
+      const body: UpdateTableInput = { stream_view_type: target }
+      await api.patch(path, body)
+      toast.success(!target ? "Stream disabled" : current ? `Stream view type changed to ${streamViewLabel(target)}` : "Stream enabled")
+      await revalidate(TABLES_PATH)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Section
+      title="DynamoDB stream"
+      description="Captures item-level changes in order. Stream records can be read with the DynamoDB Streams API or delivered to Lambda for 24 hours."
+    >
+      <form onSubmit={save} className="flex flex-col gap-4">
+        <div className="flex items-center gap-2">
+          <Switch id="stream-on" checked={on} onCheckedChange={setOn} />
+          <Label htmlFor="stream-on">{on ? "Enabled" : "Disabled"}</Label>
+        </div>
+        {on && (
+          <Field label="View type" htmlFor="stream-view" help={STREAM_VIEW_TYPES.find((s) => s.value === view)?.help}>
+            <StreamViewTypeSelect id="stream-view" value={view} onChange={setView} />
+          </Field>
+        )}
+        {current && on && view !== current && (
+          <p className="text-muted-foreground text-xs">Changing the view type disables the current stream and starts a new one with a new ARN.</p>
+        )}
+        <div>
+          <Button type="submit" size="sm" disabled={pending || !dirty}>
+            {pending && <Loader2 className="animate-spin" />}
+            Save stream settings
+          </Button>
+        </div>
+        {latest && (
+          <KeyValueGrid
+            columns={3}
+            className="border-t pt-4"
+            items={[
+              { label: "Latest stream label", value: <span className="font-mono text-[13px]">{latest.label}</span> },
+              { label: "View type", value: streamViewLabel(latest.view_type) },
+              {
+                label: "Status",
+                value: latest.disabled ? <StatusBadge status="disabled" label="Disabled" tone="neutral" /> : <StatusBadge status="ENABLED" label="Enabled" />,
+              },
+              { label: "Latest stream ARN", value: <CopyableText value={`${table.arn}/stream/${latest.label}`} />, wide: true },
+            ]}
+          />
+        )}
+        {history.length > 1 && (
+          <div className="overflow-x-auto rounded-md border">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-muted/40 border-b">
+                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Stream label</th>
+                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">View type</th>
+                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Created</th>
+                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Disabled</th>
+                </tr>
+              </thead>
+              <tbody>
+                {history.map((s) => (
+                  <tr key={s.label} className="border-b last:border-0">
+                    <td className="px-3 py-1.5 font-mono text-[13px] whitespace-nowrap">{s.label}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap">{streamViewLabel(s.view_type)}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap">
+                      <TimeAgo value={s.created} />
+                    </td>
+                    <td className="px-3 py-1.5 whitespace-nowrap">
+                      {s.disabled ? <TimeAgo value={s.disabled} /> : <span className="text-muted-foreground">Active</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </form>
+    </Section>
+  )
+}
+
+function DeletionProtectionSection({ table }: { table: DynamoTable }) {
+  const path = `${TABLES_PATH}/${seg(table.name)}`
+  const on = !!table.deletion_protection
+  const [pending, setPending] = useState(false)
+
+  const toggle = async (next: boolean) => {
+    setPending(true)
+    try {
+      const body: UpdateTableInput = { deletion_protection: next }
+      const t = await api.patch<DynamoTable>(path, body)
+      if (!!t?.deletion_protection !== next) throw new Error("The server did not apply the deletion protection change.")
+      toast.success(next ? "Deletion protection turned on" : "Deletion protection turned off")
+      await revalidate(TABLES_PATH)
+    } catch (err) {
+      toast.error(errorMessage(err))
+    } finally {
+      setPending(false)
+    }
+  }
+
+  return (
+    <Section title="Deletion protection" description="Protects the table from being deleted by accident from the console, the CLI or the AWS SDKs.">
+      <div className="flex items-center gap-2">
+        <Switch id="del-protect" checked={on} onCheckedChange={toggle} disabled={pending} />
+        <Label htmlFor="del-protect" className="inline-flex items-center gap-1.5">
+          {on ? <ShieldCheck className="size-4 text-emerald-600 dark:text-emerald-400" /> : <ShieldOff className="text-muted-foreground size-4" />}
+          {on ? "On" : "Off"}
+        </Label>
+        {pending && <Loader2 className="text-muted-foreground size-4 animate-spin" />}
+      </div>
+    </Section>
   )
 }

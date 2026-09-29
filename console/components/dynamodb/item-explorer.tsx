@@ -19,7 +19,7 @@ import { formatNumber, pluralize } from "@/lib/format"
 import { revalidate } from "@/lib/hooks"
 import type { Condition, ConditionOp, DynamoItem, DynamoTable, KeyDef, PageInput, PageResult, QueryInput } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { AttrValue, KeySchema, TABLES_PATH, compactJson, indexes, itemKey, keyError, keyId, keySkeleton, parseKeyValue, primaryKeys } from "./common"
+import { AttrValue, KeySchema, TABLES_PATH, compactJson, allIndexes, itemKey, keyError, keyId, keySkeleton, parseKeyValue, primaryKeys } from "./common"
 
 type Mode = "scan" | "query"
 type ValueType = "S" | "N" | "BOOL"
@@ -81,7 +81,7 @@ function coerce(type: ValueType, raw: string): { value?: unknown; error?: string
 
 export function ItemExplorer({ table }: { table: DynamoTable }) {
   const path = `${TABLES_PATH}/${seg(table.name)}`
-  const gsis = indexes(table)
+  const gsis = allIndexes(table)
 
   // ---- form ----
   const [mode, setMode] = useState<Mode>("scan")
@@ -319,7 +319,7 @@ export function ItemExplorer({ table }: { table: DynamoTable }) {
                     <SelectItem value="__table">Table: {table.name}</SelectItem>
                     {gsis.map((g) => (
                       <SelectItem key={g.name} value={g.name}>
-                        Index: {g.name}
+                        {g.local ? "Local index" : "Index"}: {g.name}
                       </SelectItem>
                     ))}
                   </SelectContent>

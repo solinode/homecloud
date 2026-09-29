@@ -26,7 +26,11 @@ import { revalidate, useAction, useApi, useQueryParam } from "@/lib/hooks"
 import type { Secret, SecretValue } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
+import { useKmsKeys } from "@/components/kms/shared"
+
 import { DeleteSecretDialog, ManagedWarning } from "./delete-secret-dialog"
+import { EncryptionField, SecretKeyRef } from "./encryption"
+import { ResourcePolicySection, RotationSection } from "./rotation"
 import { ManagedBadge } from "./secret-list"
 import { draftError, draftFromValue, draftValue, ModeToggle, parseKeyValue, SecretValueEditor, type SecretDraft, type SecretMode } from "./value-editor"
 
@@ -35,7 +39,7 @@ function StageBadges({ stages }: { stages: string[] }) {
   return (
     <div className="flex flex-wrap gap-1">
       {stages.map((s) => (
-        <StatusBadge key={s} status={s} label={s} tone={s === "AWSCURRENT" ? "success" : "neutral"} className="font-mono normal-case" />
+        <StatusBadge key={s} status={s} label={s} tone={s === "AWSCURRENT" ? "success" : s === "AWSPENDING" ? "info" : "neutral"} className="font-mono normal-case" />
       ))}
     </div>
   )
@@ -323,6 +327,68 @@ function TagsSection({ secret, onSaved }: { secret: Secret; onSaved: () => void 
   )
 }
 
+function VersionsSection({ secret, viewVersion, onView }: { secret: Secret; viewVersion: string | null; onView: (id: string) => void }) {
+  const keys = useKmsKeys()
+  const customKeys = secret.versions.some((v) => v.kms_key) || !!secret.kms_key_id
+  return (
+    <Section
+      title={`Versions (${secret.versions.length})`}
+      description="Staging labels mark the current (AWSCURRENT), previous (AWSPREVIOUS) and rotating (AWSPENDING) versions. Up to 100 versions are kept; the oldest unlabelled ones are removed first."
+      flush
+    >
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
+              <th className="px-4 py-2 font-semibold">Version ID</th>
+              <th className="hidden px-3 py-2 font-semibold sm:table-cell">Staging labels</th>
+              {customKeys && <th className="hidden px-3 py-2 font-semibold lg:table-cell">Encryption key</th>}
+              <th className="hidden px-3 py-2 font-semibold sm:table-cell">Created</th>
+              <th className="hidden px-3 py-2 font-semibold md:table-cell">Last retrieved</th>
+              <th className="px-4 py-2" />
+            </tr>
+          </thead>
+          <tbody>
+            {secret.versions.map((v) => (
+              <tr key={v.id} className="border-b last:border-0">
+                <td className="max-w-[14rem] px-4 py-2 sm:max-w-none">
+                  <CopyableText value={v.id} className="break-all" />
+                  <div className="mt-1 sm:hidden">
+                    <StageBadges stages={v.stages} />
+                  </div>
+                </td>
+                <td className="hidden px-3 py-2 sm:table-cell">
+                  <StageBadges stages={v.stages} />
+                </td>
+                {customKeys && (
+                  <td className="hidden px-3 py-2 lg:table-cell">
+                    {/* A rotation's AWSPENDING placeholder has no value (and so no key) until the function stores one. */}
+                    {!v.kms_key && secret.kms_key_id ? <span className="text-muted-foreground">-</span> : <SecretKeyRef arn={v.kms_key} keys={keys.data} />}
+                  </td>
+                )}
+                <td className="hidden px-3 py-2 whitespace-nowrap sm:table-cell">{formatDate(v.created_at)}</td>
+                <td className="hidden px-3 py-2 whitespace-nowrap md:table-cell">{v.last_accessed ? <TimeAgo value={v.last_accessed} /> : <span className="text-muted-foreground">Never</span>}</td>
+                <td className="px-4 py-2 text-right">
+                  <Button variant="outline" size="sm" disabled={!!secret.deletion_date || viewVersion === v.id} onClick={() => onView(v.id)}>
+                    Retrieve
+                  </Button>
+                </td>
+              </tr>
+            ))}
+            {secret.versions.length === 0 && (
+              <tr>
+                <td colSpan={6} className="text-muted-foreground px-4 py-3">
+                  No versions yet.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+    </Section>
+  )
+}
+
 export function SecretDetail() {
   const name = useQueryParam("name")
   const router = useRouter()
@@ -430,6 +496,7 @@ export function SecretDetail() {
             { label: "Secret name", value: <CopyableText value={secret.name} /> },
             { label: "Secret ARN", value: <CopyableText value={secret.arn} />, wide: false },
             { label: "Managed by", value: secret.managed_by ? <ManagedBadge by={secret.managed_by} /> : "" },
+            { label: "Encryption key", value: <EncryptionField secret={secret} editable={!secret.managed_by && !secret.deletion_date} onSaved={refresh} /> },
             { label: "Description", value: <DescriptionField secret={secret} onSaved={refresh} />, wide: true },
             { label: "Created", value: formatDate(secret.created_at) },
             { label: "Last changed", value: <TimeAgo value={secret.updated_at} /> },
@@ -441,38 +508,11 @@ export function SecretDetail() {
 
       <SecretValueSection secret={secret} onChanged={() => mutate()} viewVersion={viewVersion} onViewVersionDone={() => setViewVersion(null)} />
 
-      <Section title={`Versions (${secret.versions.length})`} description="The last 10 versions are kept." flush>
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                <th className="px-4 py-2 font-semibold">Version ID</th>
-                <th className="px-3 py-2 font-semibold">Staging labels</th>
-                <th className="hidden px-3 py-2 font-semibold sm:table-cell">Created</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {secret.versions.map((v) => (
-                <tr key={v.id} className="border-b last:border-0">
-                  <td className="px-4 py-2">
-                    <CopyableText value={v.id} />
-                  </td>
-                  <td className="px-3 py-2">
-                    <StageBadges stages={v.stages} />
-                  </td>
-                  <td className="hidden px-3 py-2 whitespace-nowrap sm:table-cell">{formatDate(v.created_at)}</td>
-                  <td className="px-4 py-2 text-right">
-                    <Button variant="outline" size="sm" disabled={!!secret.deletion_date || viewVersion === v.id} onClick={() => setViewVersion(v.id)}>
-                      Retrieve
-                    </Button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </Section>
+      <VersionsSection secret={secret} viewVersion={viewVersion} onView={setViewVersion} />
+
+      <RotationSection secret={secret} />
+
+      <ResourcePolicySection secret={secret} />
 
       <TagsSection secret={secret} onSaved={refresh} />
 

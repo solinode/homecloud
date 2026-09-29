@@ -72,6 +72,20 @@ export function SecretList() {
       hideBelow: "md",
     },
     { id: "managed", header: "Managed by", value: (s) => s.managed_by ?? "", cell: (s) => <ManagedBadge by={s.managed_by} />, hideBelow: "sm" },
+    {
+      id: "rotation",
+      header: "Rotation",
+      value: (s) => (s.rotation_error ? "failed" : s.rotation_enabled ? "enabled" : "disabled"),
+      cell: (s) =>
+        s.rotation_error ? (
+          <StatusBadge status="failed" label="Failed" tone="danger" />
+        ) : s.rotation_enabled ? (
+          <span className="whitespace-nowrap">Enabled</span>
+        ) : (
+          <span className="text-muted-foreground">Disabled</span>
+        ),
+      hideBelow: "lg",
+    },
     { id: "accessed", header: "Last retrieved", value: (s) => s.last_accessed ?? "", cell: (s) => <TimeAgo value={s.last_accessed} />, hideBelow: "lg" },
     { id: "updated", header: "Last changed", value: (s) => s.updated_at, cell: (s) => <TimeAgo value={s.updated_at} />, hideBelow: "sm" },
     { id: "versions", header: "Versions", value: (s) => s.versions.length, cell: (s) => <span className="tabular-nums">{s.versions.length}</span>, hideBelow: "lg" },
@@ -92,7 +106,7 @@ export function SecretList() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Secrets"
-        description="Store, retrieve and version credentials, API keys and other secrets. Values are encrypted at rest with AES-256-GCM."
+        description="Store, retrieve, rotate and version credentials, API keys and other secrets. Values are encrypted at rest with AES-256-GCM or a KMS key you choose."
         breadcrumbs={[{ label: "Secrets Manager", href: "/secrets/" }, { label: "Secrets" }]}
       />
       <DataTable

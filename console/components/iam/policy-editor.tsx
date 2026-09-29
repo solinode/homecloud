@@ -4,10 +4,10 @@ import { useState } from "react"
 import { Plus } from "lucide-react"
 
 import { JsonEditor, jsonError } from "@/components/console/json-editor"
-import type { PolicyDocument } from "@/lib/types"
+import type { PolicyDocument, PolicyStatement } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { COMMON_ACTIONS, asList, policyJson, validatePolicy } from "./common"
+import { COMMON_ACTIONS, asList, policyJson, statementsOf, validatePolicy } from "./common"
 
 /** policyTextError returns the first JSON or schema error of a policy text. */
 export function policyTextError(text: string): string | null {
@@ -28,14 +28,17 @@ function addAction(text: string, action: string): string {
     return text
   }
   if (!doc || typeof doc !== "object") return text
-  if (!Array.isArray(doc.Statement)) doc.Statement = []
-  const st = doc.Statement.find((s) => s && s.Effect === "Allow" && asList(s.Resource).length === 1 && asList(s.Resource)[0] === "*")
+  // A single statement object becomes an array so another can be added.
+  const list: PolicyStatement[] = statementsOf<PolicyStatement>(doc).filter((s) => s && typeof s === "object")
+  const st = list.find((s) => s.Effect === "Allow" && s.Action !== undefined && !s.Condition && asList(s.Resource).length === 1 && asList(s.Resource)[0] === "*")
   if (st) {
     const acts = asList(st.Action)
     if (!acts.includes(action)) st.Action = [...acts, action]
   } else {
-    doc.Statement.push({ Effect: "Allow", Action: [action], Resource: ["*"] })
+    list.push({ Effect: "Allow", Action: [action], Resource: ["*"] })
   }
+  const wasObject = !!doc.Statement && typeof doc.Statement === "object" && !Array.isArray(doc.Statement)
+  doc.Statement = list.length === 1 && wasObject ? list[0] : list
   if (!doc.Version) doc.Version = "2012-10-17"
   return policyJson(doc)
 }
@@ -48,7 +51,7 @@ export function PolicyEditor({ value, onChange, rows = 18 }: { value: string; on
   let present: string[] = []
   if (!invalid) {
     try {
-      present = ((JSON.parse(value) as PolicyDocument).Statement ?? []).flatMap((s) => asList(s?.Action))
+      present = statementsOf<PolicyStatement>(JSON.parse(value) as PolicyDocument).flatMap((s) => asList(s?.Action))
     } catch {
       present = []
     }

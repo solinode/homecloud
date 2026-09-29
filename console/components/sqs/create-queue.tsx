@@ -18,7 +18,18 @@ import type { CreateQueueInput, Queue } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 import { QUEUES_PATH, humanSeconds, queueHref, useQueues } from "./common"
-import { ConfigurationFields, DEFAULT_CONFIG, DeadLetterFields, configToInput, retentionSeconds, validateConfig, type QueueConfig } from "./queue-config"
+import {
+  AccessPolicyFields,
+  ConfigurationFields,
+  DEFAULT_CONFIG,
+  DeadLetterFields,
+  EncryptionFields,
+  RedriveAllowFields,
+  configToInput,
+  retentionSeconds,
+  validateConfig,
+  type QueueConfig,
+} from "./queue-config"
 
 const BASE_RE = /^[a-zA-Z0-9_-]{1,80}$/
 
@@ -79,6 +90,10 @@ export function CreateQueue() {
   }
 
   const cfgErrors = submitted ? validateConfig(config) : {}
+  const onChange = (p: Partial<QueueConfig>) => setConfig((c) => ({ ...c, ...p }))
+  // The new queue's ARN, from the prefix of an existing one (for the example access policy).
+  const sample = queues.data?.[0]?.arn
+  const arn = sample && name ? `${sample.slice(0, sample.lastIndexOf(":") + 1)}${name}` : ""
   const ret = retentionSeconds(config)
 
   return (
@@ -148,18 +163,23 @@ export function CreateQueue() {
           </Section>
 
           <Section title="Configuration" description="Set the visibility timeout, message retention period and other attributes.">
-            <ConfigurationFields config={config} onChange={(p) => setConfig((c) => ({ ...c, ...p }))} errors={cfgErrors} fifo={fifo} />
+            <ConfigurationFields config={config} onChange={onChange} errors={cfgErrors} fifo={fifo} />
+          </Section>
+
+          <Section title="Encryption" description="Server-side encryption of messages at rest.">
+            <EncryptionFields config={config} onChange={onChange} errors={cfgErrors} />
           </Section>
 
           <Section title="Dead-letter queue" description="Move messages that can't be processed to another queue for inspection.">
-            <DeadLetterFields
-              config={config}
-              onChange={(p) => setConfig((c) => ({ ...c, ...p }))}
-              errors={cfgErrors}
-              fifo={fifo}
-              queues={queues.data}
-              self={name}
-            />
+            <DeadLetterFields config={config} onChange={onChange} errors={cfgErrors} fifo={fifo} queues={queues.data} self={name} />
+          </Section>
+
+          <Section title="Redrive allow policy" description="Which source queues can use this queue as their dead-letter queue.">
+            <RedriveAllowFields config={config} onChange={onChange} errors={cfgErrors} fifo={fifo} queues={queues.data} self={name} />
+          </Section>
+
+          <Section title="Access policy" description="Optional resource policy document.">
+            <AccessPolicyFields config={config} onChange={onChange} errors={cfgErrors} arn={arn} />
           </Section>
 
           <Section title="Tags" description="Key/value labels for organizing and finding queues.">
@@ -184,8 +204,19 @@ export function CreateQueue() {
                 <SummaryItem label="Receive wait time">{cfgValue(config.wait, (n) => (n ? humanSeconds(n) : "Short polling"))}</SummaryItem>
                 <SummaryItem label="Maximum message size">{config.maxSizeKB ? `${config.maxSizeKB} KB` : "-"}</SummaryItem>
                 {fifo && <SummaryItem label="Content-based deduplication">{config.dedup ? "Enabled" : "Disabled"}</SummaryItem>}
+                {fifo && (
+                  <SummaryItem label="Deduplication / throughput">
+                    {config.dedupScope === "queue" ? "Queue" : "Message group"} / {config.throughputLimit === "perQueue" ? "per queue" : "per message group"}
+                  </SummaryItem>
+                )}
+                <SummaryItem label="Encryption">
+                  {config.sse === "sqs" ? "SSE-SQS" : config.sse === "kms" ? <span className="break-all">SSE-KMS ({config.kmsKey || "?"})</span> : "Disabled"}
+                </SummaryItem>
                 <SummaryItem label="Dead-letter queue">
                   {config.dlqEnabled ? (config.dlq ? `${config.dlq} after ${config.maxReceives || "?"} receives` : "Not chosen") : "Disabled"}
+                </SummaryItem>
+                <SummaryItem label="Redrive allow policy">
+                  {config.allow === "byQueue" ? `By queue (${config.allowSources.length})` : config.allow === "denyAll" ? "Deny all" : "Allow all"}
                 </SummaryItem>
               </dl>
               {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}

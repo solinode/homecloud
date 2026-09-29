@@ -17,7 +17,7 @@ import { api, seg } from "@/lib/api"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { PolicySummary } from "@/lib/types"
 
-import { IAM, LINK, PolicyTypeBadge, policyHref } from "./common"
+import { IAM, LINK, PolicyTypeBadge, policyHref, policyTypeLabel } from "./common"
 
 export function PoliciesList() {
   const { data, error, isLoading, isValidating, mutate } = useApi<PolicySummary[]>(`${IAM}/policies`)
@@ -41,7 +41,19 @@ export function PoliciesList() {
         </Link>
       ),
     },
-    { id: "type", header: "Type", value: (p) => (p.managed ? "HomeCloud managed" : "Customer managed"), cell: (p) => <PolicyTypeBadge managed={p.managed} /> },
+    { id: "type", header: "Type", value: (p) => policyTypeLabel(p.managed), cell: (p) => <PolicyTypeBadge managed={p.managed} /> },
+    { id: "path", header: "Path", value: (p) => p.path ?? "/", cell: (p) => <span className="font-mono text-xs">{p.path ?? "/"}</span>, hideBelow: "lg" },
+    {
+      id: "arn",
+      header: "ARN",
+      value: (p) => p.arn,
+      cell: (p) => (
+        <span className="text-muted-foreground block max-w-[22rem] truncate font-mono text-xs" title={p.arn}>
+          {p.arn}
+        </span>
+      ),
+      hideBelow: "lg",
+    },
     {
       id: "used",
       header: "Used as",
@@ -73,7 +85,7 @@ export function PoliciesList() {
         selection="single"
         selected={selected}
         onSelectedChange={setSelected}
-        searchPlaceholder="Filter policies by name or description"
+        searchPlaceholder="Filter policies by name, ARN or description"
         defaultSort={{ id: "name" }}
         filters={
           <Select value={scope} onValueChange={(v) => setParam("scope", v === "all" ? null : v)}>
@@ -82,7 +94,7 @@ export function PoliciesList() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="all">All types</SelectItem>
-              <SelectItem value="managed">HomeCloud managed</SelectItem>
+              <SelectItem value="managed">AWS managed</SelectItem>
               <SelectItem value="local">Customer managed</SelectItem>
             </SelectContent>
           </Select>
@@ -97,7 +109,7 @@ export function PoliciesList() {
                   icon: <Trash2 />,
                   destructive: true,
                   disabled: !sel || sel.managed,
-                  hint: sel?.managed ? "HomeCloud managed policies cannot be deleted" : undefined,
+                  hint: sel?.managed ? "AWS managed policies cannot be deleted" : undefined,
                   onSelect: () => setConfirm(true),
                 },
               ]}
@@ -130,7 +142,7 @@ export function PoliciesList() {
         title={`Delete ${sel?.name}?`}
         description={
           sel?.attachment_count
-            ? `This policy is attached to ${sel.attachment_count} user(s) or group(s). Detach it from every entity before deleting it.`
+            ? `This policy is attached to ${sel.attachment_count} user(s), group(s) or role(s). Detach it from every entity before deleting it.`
             : "The policy is permanently deleted. This cannot be undone."
         }
         confirmText={sel?.name}

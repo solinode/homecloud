@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { AlertTriangle, ArrowRight, CheckCircle2, FileText, FlaskConical, Info, KeyRound, ShieldCheck, UserCog, UserPlus, Users, UsersRound } from "lucide-react"
+import { AlertTriangle, ArrowRight, CheckCircle2, FileText, FlaskConical, Info, KeyRound, Server, ShieldCheck, UserCog, UserPlus, Users, UsersRound } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { CopyableText } from "@/components/console/copy-button"
@@ -275,6 +275,7 @@ export function IamDashboard() {
                 { href: "/iam/groups/?create=1", label: "Create user group", icon: UsersRound },
                 { href: createRoleHref(), label: "Create role", icon: UserCog },
                 { href: "/iam/policies/create/", label: "Create policy", icon: FileText },
+                { href: "/iam/instance-profiles/?create=1", label: "Create instance profile", icon: Server },
                 { href: `${userHref(session.user.name)}&tab=credentials`, label: "My security credentials", icon: ShieldCheck },
                 { href: "/iam/simulator/", label: "Policy simulator", icon: FlaskConical },
               ].map((q) => (

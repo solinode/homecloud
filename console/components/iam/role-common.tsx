@@ -2,9 +2,9 @@
 
 import { Building2, Cloud, Globe, User, UserCog } from "lucide-react"
 
-import type { IamRole, TrustPolicyDocument, TrustPrincipal } from "@/lib/types"
+import type { IamRole, TrustPolicyDocument, TrustPrincipal, TrustStatement } from "@/lib/types"
 
-import { asList } from "./common"
+import { asList, statementsOf } from "./common"
 
 export const roleHref = (n: string) => `/iam/role/?name=${encodeURIComponent(n)}`
 export const createRoleHref = (service?: string) => `/iam/roles/create/${service ? `?service=${encodeURIComponent(service)}` : ""}`
@@ -47,8 +47,10 @@ const strList = (v: unknown) =>
 /** validateTrustPolicy mirrors PolicyDocument.ValidateTrust in the API. */
 export function validateTrustPolicy(parsed: unknown): string | null {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "The trust policy must be a JSON object"
-  const st = (parsed as { Statement?: unknown }).Statement
-  if (!Array.isArray(st) || st.length === 0) return "Statement must be a non-empty array"
+  const raw = (parsed as { Statement?: unknown }).Statement
+  if (raw === undefined || raw === null) return "Statement is required"
+  const st = Array.isArray(raw) ? raw : [raw]
+  if (st.length === 0) return "Statement must not be empty"
   for (let i = 0; i < st.length; i++) {
     const s = st[i] as Record<string, unknown> | null
     if (!s || typeof s !== "object" || Array.isArray(s)) return `Statement[${i}] must be an object`
@@ -66,10 +68,12 @@ export function validateTrustPolicy(parsed: unknown): string | null {
       if (!keys.length) return `Statement[${i}].Principal must name at least one principal`
       for (const k of keys) if (!strList((p as Record<string, unknown>)[k])) return `Statement[${i}].Principal.${k} must be a string or a non-empty array of strings`
     }
-    if (s.Resource !== undefined) return `Statement[${i}].Resource is not allowed in a trust policy`
-    if (!strList(s.Action)) return `Statement[${i}].Action must be a string or a non-empty array of strings`
-    const bad = asList(s.Action as string | string[]).find((a) => !a.toLowerCase().startsWith("sts:"))
-    if (bad) return `Statement[${i}].Action "${bad}": trust policies only grant sts: actions`
+    if (s.Resource !== undefined || s.NotResource !== undefined) return `Statement[${i}].Resource is not allowed in a trust policy`
+    if (s.Action !== undefined && s.NotAction !== undefined) return `Statement[${i}] cannot have both Action and NotAction`
+    const ak = s.NotAction !== undefined ? "NotAction" : "Action"
+    if (!strList(s[ak])) return `Statement[${i}].${ak} must be a string or a non-empty array of strings`
+    const bad = asList(s[ak] as string | string[]).find((a) => !a.toLowerCase().startsWith("sts:"))
+    if (bad) return `Statement[${i}].${ak} "${bad}": trust policies only grant sts: actions`
   }
   return null
 }
@@ -104,7 +108,7 @@ export function trustedEntities(doc: TrustPolicyDocument | null | undefined): Tr
       out.push(e)
     }
   }
-  for (const st of doc?.Statement ?? []) {
+  for (const st of statementsOf<TrustStatement>(doc)) {
     if (!st || st.Effect !== "Allow") continue
     const p: TrustPrincipal | undefined = st.Principal
     if (p === "*") {

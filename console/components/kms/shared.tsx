@@ -10,11 +10,17 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { Field } from "@/components/console/form-field"
 import { StatusBadge } from "@/components/console/status-badge"
-import { api, errorMessage, seg } from "@/lib/api"
+import { api, apiUrl, errorMessage, seg } from "@/lib/api"
 import { formatDate } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { KmsKey } from "@/lib/types"
 import { cn } from "@/lib/utils"
+
+/** apiOrigin is the API origin for AWS CLI snippets (--endpoint-url). */
+export function apiOrigin(): string {
+  if (typeof window === "undefined") return ""
+  return new URL(apiUrl("/"), window.location.origin).origin
+}
 
 export const KMS_PATH = "/api/v1/kms"
 export const KEYS_PATH = `${KMS_PATH}/keys`
@@ -27,7 +33,37 @@ export function keyIdFromArn(ref: string): string {
   return i >= 0 ? ref.slice(i + 5) : ref
 }
 
-export const isServiceManaged = (k: Pick<KmsKey, "managed" | "aliases">) => k.managed || (k.aliases ?? []).some((a) => a.startsWith("alias/hc/"))
+export const isServiceManaged = (k: Pick<KmsKey, "managed" | "aliases">) =>
+  k.managed || (k.aliases ?? []).some((a) => a.startsWith("alias/hc/") || a.startsWith("alias/aws/"))
+
+// ---- key types ----
+
+export const SYMMETRIC_SPEC = "SYMMETRIC_DEFAULT"
+
+/** isSymmetric: a SYMMETRIC_DEFAULT encryption key (the only kind that encrypts via the native API, seals secrets/parameters and rotates). */
+export const isSymmetric = (k: Pick<KmsKey, "key_spec" | "key_usage">) => (k.key_spec || SYMMETRIC_SPEC) === SYMMETRIC_SPEC && (k.key_usage || "ENCRYPT_DECRYPT") === "ENCRYPT_DECRYPT"
+
+export type KeyKind = "symmetric" | "asymmetric" | "hmac"
+
+export function keyKind(spec: string): KeyKind {
+  if (!spec || spec === SYMMETRIC_SPEC) return "symmetric"
+  if (spec.startsWith("HMAC_")) return "hmac"
+  return "asymmetric"
+}
+
+export const KIND_LABEL: Record<KeyKind, string> = { symmetric: "Symmetric", asymmetric: "Asymmetric", hmac: "HMAC" }
+
+export const USAGE_LABEL: Record<string, string> = {
+  ENCRYPT_DECRYPT: "Encrypt and decrypt",
+  SIGN_VERIFY: "Sign and verify",
+  GENERATE_VERIFY_MAC: "Generate and verify MAC",
+}
+
+/** keyTypeLabel is a short description such as "Symmetric" or "Asymmetric · RSA_2048". */
+export function keyTypeLabel(k: Pick<KmsKey, "key_spec">): string {
+  const kind = keyKind(k.key_spec)
+  return kind === "symmetric" ? KIND_LABEL.symmetric : `${KIND_LABEL[kind]} · ${k.key_spec}`
+}
 
 /** keyLabel is the first alias (friendlier) or the key id. */
 export const keyLabel = (k: Pick<KmsKey, "id" | "aliases">) => k.aliases?.[0] ?? k.id
@@ -119,6 +155,7 @@ export function KeyPicker({
   className,
   disabled,
   extra,
+  symmetricOnly,
 }: {
   id?: string
   keys: KmsKey[] | undefined
@@ -130,8 +167,10 @@ export function KeyPicker({
   disabled?: boolean
   /** Extra items shown first (e.g. a "default key" sentinel). */
   extra?: { value: string; label: string; hint?: string }[]
+  /** Only symmetric encryption keys (what Encrypt, Secrets Manager and SecureString parameters accept). */
+  symmetricOnly?: boolean
 }) {
-  const list = (keys ?? []).filter((k) => !onlyEnabled || k.state === "Enabled" || k.id === value)
+  const list = (keys ?? []).filter((k) => (!onlyEnabled || k.state === "Enabled" || k.id === value) && (!symmetricOnly || isSymmetric(k) || k.id === value))
   const customer = list.filter((k) => !isServiceManaged(k))
   const managed = list.filter((k) => isServiceManaged(k))
   const item = (k: KmsKey) => (
@@ -165,7 +204,7 @@ export function KeyPicker({
             {managed.map(item)}
           </SelectGroup>
         )}
-        {!extra?.length && list.length === 0 && <div className="text-muted-foreground px-2 py-1.5 text-sm">{onlyEnabled ? "No enabled keys" : "No keys"}</div>}
+        {!extra?.length && list.length === 0 && <div className="text-muted-foreground px-2 py-1.5 text-sm">{symmetricOnly ? "No enabled symmetric keys" : onlyEnabled ? "No enabled keys" : "No keys"}</div>}
       </SelectContent>
     </Select>
   )
@@ -201,8 +240,11 @@ export function useKeyActions(onChanged?: () => void) {
   const enable = (k: KmsKey) => call(() => api.post(`${KEYS_PATH}/${seg(k.id)}/enable`), `Key ${keyLabel(k)} enabled`)
   const disable = (k: KmsKey) => call(() => api.post(`${KEYS_PATH}/${seg(k.id)}/disable`), `Key ${keyLabel(k)} disabled`)
   const rotate = (k: KmsKey) => call(() => api.post(`${KEYS_PATH}/${seg(k.id)}/rotate`), `Key ${keyLabel(k)} rotated to a new key version`)
-  const setRotation = (k: KmsKey, on: boolean) =>
-    call(() => api.patch(`${KEYS_PATH}/${seg(k.id)}`, { rotation_enabled: on }), on ? "Automatic rotation enabled" : "Automatic rotation disabled")
+  const setRotation = (k: KmsKey, on: boolean, periodDays?: number) =>
+    call(
+      () => api.patch(`${KEYS_PATH}/${seg(k.id)}`, { rotation_enabled: on, ...(on && periodDays ? { rotation_period_days: periodDays } : {}) }),
+      on ? (periodDays && k.rotation_enabled ? `Rotation period set to ${periodDays} days` : "Automatic rotation enabled") : "Automatic rotation disabled",
+    )
   const cancelDeletion = (k: KmsKey) => call(() => api.post(`${KEYS_PATH}/${seg(k.id)}/cancel-deletion`), `Deletion of ${keyLabel(k)} cancelled; the key is disabled`)
   const scheduleDeletion = (k: KmsKey) => {
     setDays("30")

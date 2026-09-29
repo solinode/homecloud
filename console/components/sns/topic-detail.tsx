@@ -9,6 +9,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
@@ -25,7 +26,9 @@ import { formatDate, formatNumber } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { TopicDetail as TopicDetailT } from "@/lib/types"
 
-import { SNS_PATH, SNS_POLL, topicPath } from "./common"
+import { QueueTypeBadge } from "@/components/sqs/common"
+
+import { SNS_PATH, SNS_POLL, isPending, topicPath } from "./common"
 import { PublishPanel } from "./publish-panel"
 import { SubscriptionsTable } from "./subscriptions"
 
@@ -70,10 +73,13 @@ export function TopicDetail() {
   }
   if (isLoading || !topic) return <DetailSkeleton />
 
+  const pendingCount = (topic.subscription_list ?? []).filter(isPending).length
+
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
         title={topic.name}
+        badge={<QueueTypeBadge fifo={topic.fifo} />}
         description={topic.display_name || undefined}
         breadcrumbs={crumbs}
         actions={
@@ -99,7 +105,21 @@ export function TopicDetail() {
             { label: "Name", value: topic.name },
             { label: "Display name", value: <DisplayNameField topic={topic} /> },
             { label: "Type", value: topic.fifo ? "FIFO" : "Standard" },
-            { label: "Subscriptions", value: formatNumber(topic.subscriptions) },
+            {
+              label: "Subscriptions",
+              value: (
+                <span>
+                  {formatNumber(topic.subscriptions)}
+                  {pendingCount > 0 && <span className="text-amber-700 dark:text-amber-300"> ({pendingCount} pending confirmation)</span>}
+                </span>
+              ),
+            },
+            ...(topic.fifo
+              ? [
+                  { label: "Content-based deduplication", value: <DedupField topic={topic} /> },
+                  { label: "Throughput scope", value: topic.attributes?.FifoThroughputScope === "MessageGroup" ? "Message group" : "Topic" },
+                ]
+              : []),
             { label: "Messages published", value: formatNumber(topic.messages_published) },
             { label: "Created", value: <span>{formatDate(topic.created_at)} (<TimeAgo value={topic.created_at} />)</span> },
             { label: "ARN", value: <CopyableText value={topic.arn} />, wide: true },
@@ -159,6 +179,30 @@ export function TopicDetail() {
       />
       <TagsDialog topic={tagging ? topic : null} onClose={() => setTagging(false)} />
     </div>
+  )
+}
+
+function DedupField({ topic }: { topic: TopicDetailT }) {
+  const [pending, setPending] = useState(false)
+  const on = !!topic.content_based_deduplication
+  const toggle = async (v: boolean) => {
+    setPending(true)
+    try {
+      await api.patch(topicPath(topic.name), { attributes: { ContentBasedDeduplication: String(v) } })
+      toast.success(`Content-based deduplication ${v ? "enabled" : "disabled"}`)
+      await revalidate(SNS_PATH)
+    } catch (e) {
+      toast.error(errorMessage(e))
+    } finally {
+      setPending(false)
+    }
+  }
+  return (
+    <span className="inline-flex items-center gap-2">
+      <Switch checked={on} onCheckedChange={toggle} disabled={pending} aria-label="Content-based deduplication" />
+      {on ? "Enabled" : "Disabled"}
+      {pending && <Loader2 className="text-muted-foreground size-3.5 animate-spin" />}
+    </span>
   )
 }
 
