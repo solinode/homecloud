@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
@@ -45,6 +46,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ssm"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/trail"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
+	"github.com/homecloudhq/homecloud/cli/internal/system"
 	"github.com/homecloudhq/homecloud/cli/internal/web"
 )
 
@@ -236,9 +238,11 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		return err
 	}
 
+	backup := &system.Backup{Cfg: cfg, Docker: dk, AccountID: account, Version: Version,
+		Snapshots: map[string]func(io.Writer) error{"dynamodb.db": ddb.Snapshot}}
 	mux := http.NewServeMux()
 	rt := &httpx.Router{Mux: mux, Auth: iamSvc, Account: account, Audit: trailSvc.Record}
-	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, asgSvc, acmSvc, dnsSvc, trailSvc} {
+	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, asgSvc, acmSvc, dnsSvc, trailSvc, backup} {
 		s.Routes(rt)
 	}
 	iamSvc.RegisterAWS()
