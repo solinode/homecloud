@@ -20,12 +20,14 @@ import (
 	"sync"
 	"time"
 
+	docker "github.com/fsouza/go-dockerclient"
 	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
 	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/secrets"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
 	"github.com/minio/minio-go/v7/pkg/lifecycle"
@@ -69,7 +71,7 @@ func (s *Service) Endpoint() string {
 }
 
 // Start ensures the MinIO container runs and waits until it answers.
-func (s *Service) Start(ctx context.Context, networks []string) error {
+func (s *Service) Start(ctx context.Context, vpcs []vpc.VPC) error {
 	creds, _, err := s.secrets.Value(rootSecret, "", "")
 	if err != nil {
 		creds = fmt.Sprintf(`{"user":"hc-%s","password":"%s"}`, strings.ToLower(core.RandHex(8)), core.NewSecret(32))
@@ -109,8 +111,8 @@ func (s *Service) Start(ctx context.Context, networks []string) error {
 			return fmt.Errorf("start MinIO: %w", err)
 		}
 	}
-	for _, n := range networks {
-		s.ConnectNetwork(n)
+	for _, v := range vpcs {
+		s.ConnectNetwork(v)
 	}
 	opts := &minio.Options{Creds: credentials.NewStaticV4(s.user, s.pass, ""), Region: signingRegion}
 	cl, err := minio.New(fmt.Sprintf("127.0.0.1:%d", s.env.Cfg.S3Port), opts)
@@ -137,9 +139,20 @@ func (s *Service) Start(ctx context.Context, networks []string) error {
 	return nil
 }
 
-// ConnectNetwork makes S3 reachable inside a VPC as s3.internal.
-func (s *Service) ConnectNetwork(network string) {
-	if err := s.env.Docker.Connect(network, containerName, "s3.internal"); err != nil {
+// ConnectNetwork makes S3 reachable inside a VPC as s3.internal, at the VPC's
+// reserved S3 address (a dynamic address could collide with reserved ones).
+func (s *Service) ConnectNetwork(v vpc.VPC) {
+	want := vpc.S3Address(v.CIDR)
+	if c, err := s.env.Docker.Inspect(containerName); err == nil && c.NetworkSettings != nil {
+		if ep, ok := c.NetworkSettings.Networks[v.Network]; ok {
+			if ep.IPAddress == want {
+				return
+			}
+			_ = s.env.Docker.C.DisconnectNetwork(v.Network, docker.NetworkConnectionOptions{Container: containerName, Force: true})
+		}
+	}
+	network := v.Network
+	if err := s.env.Docker.ConnectIP(network, containerName, want, "s3.internal"); err != nil {
 		log.Printf("s3: connect to %s: %v", network, err)
 	}
 }
@@ -173,7 +186,8 @@ func s3err(err error) error {
 func (s *Service) Routes(r *httpx.Router) {
 	b := httpx.Res("arn:hc:s3:::{bucket}")
 	r.Handle("GET /api/v1/s3/status", "s3:ListAllMyBuckets", s.statusRoute)
-	r.Handle("GET /api/v1/s3/credentials", "s3:GetServiceCredentials", s.creds)
+	// Deliberately not a Get* action: read-only policies must not grant MinIO root keys.
+	r.Handle("GET /api/v1/s3/credentials", "s3:AdministerServiceCredentials", s.creds)
 	r.Handle("GET /api/v1/s3/buckets", "s3:ListAllMyBuckets", s.listBuckets)
 	r.Handle("POST /api/v1/s3/buckets", "s3:CreateBucket", s.createBucket)
 	r.Handle("GET /api/v1/s3/buckets/{bucket}", "s3:GetBucketLocation", s.getBucket, b)
@@ -433,6 +447,9 @@ func (s *Service) putWebsite(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	name := c.Param("bucket")
+	if err := s.mustExist(c, name); err != nil {
+		return nil, err
+	}
 	m := s.meta(name)
 	m.Website, m.IndexDocument, m.ErrorDocument = in.Enabled, in.IndexDocument, in.ErrorDocument
 	if m.IndexDocument == "" {
@@ -479,10 +496,17 @@ func (s *Service) listObjects(c *httpx.Ctx) (any, error) {
 	prefix := c.Query("prefix")
 	recursive := c.Query("recursive") == "true"
 	limit := c.QueryInt("limit", 1000)
+	if limit <= 0 || limit > 1000 {
+		limit = 1000
+	}
 	objects := []map[string]any{}
 	prefixes := []string{}
 	truncated := false
-	for o := range cl.ListObjects(c.R.Context(), c.Param("bucket"), minio.ListObjectsOptions{Prefix: prefix, Recursive: recursive, WithVersions: c.Query("versions") == "true"}) {
+	last := ""
+	ctx, cancel := context.WithCancel(c.R.Context())
+	defer cancel()
+	for o := range cl.ListObjects(ctx, c.Param("bucket"), minio.ListObjectsOptions{Prefix: prefix, Recursive: recursive,
+		WithVersions: c.Query("versions") == "true", StartAfter: c.Query("start_after")}) {
 		if o.Err != nil {
 			return nil, s3err(o.Err)
 		}
@@ -490,6 +514,7 @@ func (s *Service) listObjects(c *httpx.Ctx) (any, error) {
 			truncated = true
 			break
 		}
+		last = o.Key
 		if strings.HasSuffix(o.Key, "/") && o.Size == 0 && !recursive {
 			if o.Key != prefix {
 				prefixes = append(prefixes, o.Key)
@@ -499,7 +524,11 @@ func (s *Service) listObjects(c *httpx.Ctx) (any, error) {
 		objects = append(objects, map[string]any{"key": o.Key, "size": o.Size, "last_modified": o.LastModified, "etag": o.ETag,
 			"storage_class": "STANDARD", "version_id": o.VersionID, "is_latest": o.IsLatest, "delete_marker": o.IsDeleteMarker})
 	}
-	return map[string]any{"bucket": c.Param("bucket"), "prefix": prefix, "prefixes": prefixes, "objects": objects, "truncated": truncated}, nil
+	out := map[string]any{"bucket": c.Param("bucket"), "prefix": prefix, "prefixes": prefixes, "objects": objects, "truncated": truncated}
+	if truncated {
+		out["next_start_after"] = last // pass as start_after to get the next page
+	}
+	return out, nil
 }
 
 func objectKey(c *httpx.Ctx) (string, error) {
@@ -608,6 +637,9 @@ func (s *Service) putTags(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	if err := s.mustExist(c, c.Param("bucket")); err != nil {
+		return nil, err
+	}
 	m := s.meta(c.Param("bucket"))
 	m.Tags = in.Tags
 	return m, store.Put(s.env.Store, cBuckets, m.Name, m)
@@ -628,21 +660,34 @@ func (s *Service) deleteObject(c *httpx.Ctx) (any, error) {
 		// permanent=true also removes old versions and delete markers, so the
 		// prefix disappears even from versioned buckets.
 		permanent := c.Query("permanent") == "true"
+		lctx, cancel := context.WithCancel(ctx)
+		defer cancel()
 		objs := make(chan minio.ObjectInfo)
+		var listErr error
 		go func() {
 			defer close(objs)
-			for o := range cl.ListObjects(ctx, bucket, minio.ListObjectsOptions{Prefix: key, Recursive: true, WithVersions: permanent}) {
-				if o.Err == nil {
-					objs <- o
+			for o := range cl.ListObjects(lctx, bucket, minio.ListObjectsOptions{Prefix: key, Recursive: true, WithVersions: permanent}) {
+				if o.Err != nil {
+					listErr = o.Err
+					return
+				}
+				select {
+				case objs <- o:
+				case <-lctx.Done():
+					return
 				}
 			}
 		}()
-		n := 0
-		for e := range cl.RemoveObjects(ctx, bucket, objs, minio.RemoveObjectsOptions{}) {
+		for e := range cl.RemoveObjects(lctx, bucket, objs, minio.RemoveObjectsOptions{}) {
 			if e.Err != nil {
+				cancel()
+				for range objs { // let the lister finish
+				}
 				return nil, s3err(e.Err)
 			}
-			n++
+		}
+		if listErr != nil {
+			return nil, s3err(listErr)
 		}
 		return map[string]any{"deleted_prefix": key}, nil
 	}
@@ -741,7 +786,23 @@ func (s *Service) presign(c *httpx.Ctx) (any, error) {
 	return map[string]any{"url": u.String(), "expires_at": time.Now().Add(exp).UTC()}, nil
 }
 
+func (s *Service) mustExist(c *httpx.Ctx, bucket string) error {
+	cl, err := s.cl()
+	if err != nil {
+		return err
+	}
+	ok, err := cl.BucketExists(c.R.Context(), bucket)
+	if err != nil {
+		return s3err(err)
+	}
+	if !ok {
+		return core.Errf(http.StatusNotFound, "NoSuchBucket", "bucket %q does not exist", bucket)
+	}
+	return nil
+}
+
 // website serves a bucket with website hosting enabled, without authentication.
+// As in AWS, the bucket must also allow public reads.
 func (s *Service) website(c *httpx.Ctx) (any, error) {
 	bucket, key := c.Param("bucket"), c.Param("key")
 	m := s.meta(bucket)
@@ -751,6 +812,9 @@ func (s *Service) website(c *httpx.Ctx) (any, error) {
 	cl, err := s.cl()
 	if err != nil {
 		return nil, err
+	}
+	if !s.isPublic(c.R.Context(), cl, bucket) {
+		return nil, core.Errf(http.StatusForbidden, "AccessDenied", "bucket %q hosts a website but does not allow public reads", bucket)
 	}
 	if key == "" || strings.HasSuffix(key, "/") {
 		key += m.IndexDocument

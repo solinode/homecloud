@@ -8,6 +8,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
+	"os"
 	"regexp"
 	"slices"
 	"strconv"
@@ -100,6 +102,8 @@ type Task struct {
 }
 
 type ECS struct {
+	// DNSFor returns resolver addresses for containers in a VPC (Route 53).
+	DNSFor  func(vpcID string) []string
 	env     *svc.Env
 	vpc     *vpc.Service
 	elb     *elb.Service
@@ -115,6 +119,8 @@ func New(env *svc.Env, v *vpc.Service, lb *elb.Service, sec *secrets.Service) *E
 	}
 	return e
 }
+
+func (e *ECS) taskLogFile(id string) string { return e.env.Cfg.Path("ecs-logs", id+".log") }
 
 // PrivateIP resolves a running task for load balancer targets.
 func (e *ECS) PrivateIP(id string) (string, string, bool) {
@@ -194,7 +200,12 @@ func (e *ECS) launch(ctx context.Context, td TaskDefinition, service, subnet str
 	if service != "" {
 		aliases = append(aliases, service+".ecs.internal")
 	}
+	var dns []string
+	if e.DNSFor != nil {
+		dns = e.DNSFor(pl.VPC.ID)
+	}
 	cid, err := e.env.Docker.Run(ctx, runtime.RunSpec{
+		DNS:  dns,
 		Name: svc.ContainerName("ecs", id[:12]), Image: td.Image, Cmd: td.Command, Entrypoint: td.Entrypoint, Env: env,
 		Labels:   runtime.Labels("ecs", id, map[string]string{"homecloud.ecs.service": service, "homecloud.ecs.taskdef": t.TaskDefinition}),
 		NanoCPUs: int64(min(td.CPU, e.hostCPU) * 1e9), MemoryMB: td.MemoryMB,
@@ -227,6 +238,13 @@ func (e *ECS) stopTask(t Task, reason string) {
 			ec := c.State.ExitCode
 			code = &ec
 		}
+		// Keep the output, then remove the container: a stopped container still
+		// holds its static IP, which the VPC is about to hand out again.
+		if out, err := e.env.Docker.Logs(t.ContainerID, 5000, time.Time{}); err == nil && out != "" {
+			_ = os.MkdirAll(e.env.Cfg.Path("ecs-logs"), 0o700)
+			_ = os.WriteFile(e.taskLogFile(t.ID), []byte(out), 0o600)
+		}
+		_ = e.env.Docker.Remove(t.ContainerID)
 	}
 	e.vpc.Release("task:" + t.ID)
 	_, _ = store.Update(e.env.Store, cTasks, t.ID, func(x *Task) error {
@@ -253,16 +271,23 @@ func (e *ECS) Run(ctx context.Context) {
 }
 
 func (e *ECS) reconcile(ctx context.Context) {
+	defer core.Recover("ecs reconcile")
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	tasks := store.List[Task](e.env.Store, cTasks)
 	// Detect tasks whose containers exited.
 	for i, t := range tasks {
+		if t.LastStatus == "PROVISIONING" && time.Since(t.CreatedAt) > 15*time.Minute {
+			e.stopTask(t, "Task did not start (interrupted launch)")
+			tasks[i].LastStatus = "STOPPED"
+			continue
+		}
 		if t.LastStatus != "RUNNING" {
 			if t.LastStatus == "STOPPED" && t.StoppedAt != nil && time.Since(*t.StoppedAt) > taskTTL {
 				if t.ContainerID != "" {
 					_ = e.env.Docker.Remove(t.ContainerID)
 				}
+				_ = os.Remove(e.taskLogFile(t.ID))
 				_ = store.Delete(e.env.Store, cTasks, t.ID)
 			}
 			continue
@@ -334,18 +359,21 @@ func (e *ECS) reconcile(ctx context.Context) {
 func (e *ECS) Routes(r *httpx.Router) {
 	r.Handle("GET /api/v1/ecs/task-definitions", "ecs:ListTaskDefinitions", e.listTDs)
 	r.Handle("POST /api/v1/ecs/task-definitions", "ecs:RegisterTaskDefinition", e.registerTD)
-	r.Handle("GET /api/v1/ecs/task-definitions/{key}", "ecs:DescribeTaskDefinition", e.getTD)
-	r.Handle("DELETE /api/v1/ecs/task-definitions/{key}", "ecs:DeregisterTaskDefinition", e.deregisterTD)
+	tdRes := httpx.Res("arn:hc:ecs:local-1:{account}:task-definition/{key}")
+	svcRes := httpx.Res("arn:hc:ecs:local-1:{account}:service/{name}")
+	taskRes := httpx.Res("arn:hc:ecs:local-1:{account}:task/{id}")
+	r.Handle("GET /api/v1/ecs/task-definitions/{key}", "ecs:DescribeTaskDefinition", e.getTD, tdRes)
+	r.Handle("DELETE /api/v1/ecs/task-definitions/{key}", "ecs:DeregisterTaskDefinition", e.deregisterTD, tdRes)
 	r.Handle("GET /api/v1/ecs/services", "ecs:ListServices", e.listServices)
 	r.Handle("POST /api/v1/ecs/services", "ecs:CreateService", e.createService)
-	r.Handle("GET /api/v1/ecs/services/{name}", "ecs:DescribeServices", e.getService)
-	r.Handle("PATCH /api/v1/ecs/services/{name}", "ecs:UpdateService", e.updateService)
-	r.Handle("DELETE /api/v1/ecs/services/{name}", "ecs:DeleteService", e.deleteService)
+	r.Handle("GET /api/v1/ecs/services/{name}", "ecs:DescribeServices", e.getService, svcRes)
+	r.Handle("PATCH /api/v1/ecs/services/{name}", "ecs:UpdateService", e.updateService, svcRes)
+	r.Handle("DELETE /api/v1/ecs/services/{name}", "ecs:DeleteService", e.deleteService, svcRes)
 	r.Handle("GET /api/v1/ecs/tasks", "ecs:ListTasks", e.listTasks)
 	r.Handle("POST /api/v1/ecs/tasks", "ecs:RunTask", e.runTask)
-	r.Handle("GET /api/v1/ecs/tasks/{id}", "ecs:DescribeTasks", e.getTask)
-	r.Handle("POST /api/v1/ecs/tasks/{id}/stop", "ecs:StopTask", e.stopTaskRoute)
-	r.Handle("GET /api/v1/ecs/tasks/{id}/logs", "logs:GetLogEvents", e.taskLogs)
+	r.Handle("GET /api/v1/ecs/tasks/{id}", "ecs:DescribeTasks", e.getTask, taskRes)
+	r.Handle("POST /api/v1/ecs/tasks/{id}/stop", "ecs:StopTask", e.stopTaskRoute, taskRes)
+	r.Handle("GET /api/v1/ecs/tasks/{id}/logs", "logs:GetLogEvents", e.taskLogs, taskRes)
 }
 
 var familyRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,255}$`)
@@ -370,6 +398,21 @@ func (e *ECS) listTDs(c *httpx.Ctx) (any, error) {
 	return out, nil
 }
 
+// authorizeSecrets requires the caller to be able to read every secret a task
+// definition injects: running the task discloses them to its code and logs.
+func (e *ECS) authorizeSecrets(c *httpx.Ctx, td TaskDefinition) error {
+	for _, s := range td.Secrets {
+		name, _, _ := strings.Cut(s.ValueFrom, ":")
+		if err := c.Authorize("secretsmanager:GetSecretValue", e.env.ARN("secretsmanager", "secret:"+name)); err != nil {
+			return err
+		}
+		if _, _, err := e.secrets.Value(name, "", ""); err != nil {
+			return core.BadRequest("secret %q for %s: %v", s.ValueFrom, s.Name, err)
+		}
+	}
+	return nil
+}
+
 func (e *ECS) registerTD(c *httpx.Ctx) (any, error) {
 	var in TaskDefinition
 	if err := c.Bind(&in); err != nil {
@@ -390,11 +433,8 @@ func (e *ECS) registerTD(c *httpx.Ctx) (any, error) {
 	if in.CPU < 0.125 || in.CPU > 16 || in.MemoryMB < 64 || in.MemoryMB > 122880 {
 		return nil, core.BadRequest("cpu must be 0.125-16 vCPU and memory_mb 64-122880")
 	}
-	for _, s := range in.Secrets {
-		name, _, _ := strings.Cut(s.ValueFrom, ":")
-		if _, _, err := e.secrets.Value(name, "", ""); err != nil {
-			return nil, core.BadRequest("secret %q for %s: %v", s.ValueFrom, s.Name, err)
-		}
+	if err := e.authorizeSecrets(c, in); err != nil {
+		return nil, err
 	}
 	rev := 1
 	for _, td := range store.List[TaskDefinition](e.env.Store, cTaskDefs) {
@@ -491,6 +531,17 @@ func (e *ECS) createService(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if td.Status != "ACTIVE" {
+		return nil, core.BadRequest("task definition %s is inactive", in.TaskDefinition)
+	}
+	if err := e.authorizeSecrets(c, td); err != nil {
+		return nil, err
+	}
+	if in.LoadBalancer != nil {
+		if err := c.Authorize("elasticloadbalancing:RegisterTargets", e.env.ARN("elasticloadbalancing", "targetgroup/"+in.LoadBalancer.TargetGroup)); err != nil {
+			return nil, err
+		}
+	}
 	if in.DesiredCount < 0 || in.DesiredCount > 50 {
 		return nil, core.BadRequest("desired_count must be 0-50")
 	}
@@ -548,6 +599,12 @@ func (e *ECS) updateService(c *httpx.Ctx) (any, error) {
 	if in.TaskDefinition != "" {
 		var err error
 		if td, err = e.lookupTD(in.TaskDefinition); err != nil {
+			return nil, err
+		}
+		if td.Status != "ACTIVE" {
+			return nil, core.BadRequest("task definition %s is inactive", in.TaskDefinition)
+		}
+		if err := e.authorizeSecrets(c, td); err != nil {
 			return nil, err
 		}
 	}
@@ -633,6 +690,9 @@ func (e *ECS) runTask(c *httpx.Ctx) (any, error) {
 	if td.Status != "ACTIVE" {
 		return nil, core.BadRequest("task definition %s is inactive", in.TaskDefinition)
 	}
+	if err := e.authorizeSecrets(c, td); err != nil {
+		return nil, err
+	}
 	if len(in.Command) > 0 {
 		td.Command = in.Command
 	}
@@ -647,8 +707,8 @@ func (e *ECS) runTask(c *httpx.Ctx) (any, error) {
 		td.Environment = env
 	}
 	t, err := e.launch(c.R.Context(), td, "", in.SubnetID, in.SecurityGroups)
-	if err != nil && t.ID == "" {
-		return nil, err
+	if err != nil {
+		return nil, core.Errf(http.StatusBadRequest, "TaskFailedToStart", "%v", err)
 	}
 	return t, nil
 }
@@ -677,6 +737,10 @@ func (e *ECS) taskLogs(c *httpx.Ctx) (any, error) {
 	}
 	if t.ContainerID == "" {
 		return map[string]string{"output": ""}, nil
+	}
+	if t.LastStatus == "STOPPED" {
+		b, _ := os.ReadFile(e.taskLogFile(t.ID))
+		return map[string]string{"output": string(b)}, nil
 	}
 	var buf strings.Builder
 	err = e.env.Docker.C.Logs(docker.LogsOptions{Container: t.ContainerID, OutputStream: &buf, ErrorStream: &buf, Stdout: true, Stderr: true, Tail: strconv.Itoa(c.QueryInt("tail", 500)), Timestamps: true})

@@ -2,6 +2,7 @@ package dynamodb
 
 import (
 	"bytes"
+	"math"
 	"sort"
 	"testing"
 )
@@ -39,5 +40,24 @@ func TestConditions(t *testing.T) {
 		if got := c.c.eval(it); got != c.want {
 			t.Errorf("case %d: got %v", i, got)
 		}
+	}
+}
+
+func TestNegativeZeroIsZero(t *testing.T) {
+	a, _ := encodeKey(KeyDef{Name: "n", Type: "N"}, 0.0)
+	b, _ := encodeKey(KeyDef{Name: "n", Type: "N"}, math.Copysign(0, -1))
+	if !bytes.Equal(a, b) {
+		t.Fatal("-0 and 0 encode differently")
+	}
+}
+
+func TestPageResumesAfterDeletedStartKey(t *testing.T) {
+	tb := Table{PartitionKey: KeyDef{Name: "p", Type: "S"}, SortKey: &KeyDef{Name: "n", Type: "N"}}
+	items := []Item{{"p": "a", "n": 1.0}, {"p": "a", "n": 3.0}} // item n=2 was deleted
+	s := &Service{}
+	out := s.page(tb, items, pageInput{StartKey: Item{"p": "a", "n": 2.0}}, 2, tb.SortKey, true)
+	got := out["items"].([]Item)
+	if len(got) != 1 || got[0]["n"] != 3.0 {
+		t.Fatalf("resumed at %v", got)
 	}
 }

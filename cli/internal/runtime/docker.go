@@ -90,6 +90,7 @@ type RunSpec struct {
 	Restart    string // "", "unless-stopped", "always"
 	WorkingDir string
 	Hostname   string
+	DNS        []string // upstream servers for Docker's embedded DNS
 	Start      bool
 }
 
@@ -125,6 +126,7 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 		mounts = append(mounts, docker.HostMount{Type: "volume", Source: m.Volume, Target: m.Target, ReadOnly: m.ReadOnly})
 	}
 	hc := &docker.HostConfig{
+		DNS:          s.DNS,
 		Memory:       s.MemoryMB * 1024 * 1024,
 		PortBindings: bindings,
 		Mounts:       mounts,
@@ -428,7 +430,16 @@ func (d *Docker) Stats(ctx context.Context, id string) (*Usage, error) {
 
 // Connect attaches a container to a network with DNS aliases; already-connected is not an error.
 func (d *Docker) Connect(network, container string, aliases ...string) error {
-	err := d.C.ConnectNetwork(network, docker.NetworkConnectionOptions{Container: container, EndpointConfig: &docker.EndpointConfig{Aliases: aliases}})
+	return d.ConnectIP(network, container, "", aliases...)
+}
+
+// ConnectIP is Connect with a fixed IPv4 address (empty for automatic).
+func (d *Docker) ConnectIP(network, container, ip string, aliases ...string) error {
+	ep := &docker.EndpointConfig{Aliases: aliases}
+	if ip != "" {
+		ep.IPAMConfig = &docker.EndpointIPAMConfig{IPv4Address: ip}
+	}
+	err := d.C.ConnectNetwork(network, docker.NetworkConnectionOptions{Container: container, EndpointConfig: ep})
 	if err != nil && (strings.Contains(err.Error(), "already exists") || strings.Contains(err.Error(), "already attached")) {
 		return nil
 	}

@@ -57,14 +57,14 @@ var engines = []Engine{
 			return map[string]string{"MYSQL_ROOT_PASSWORD": p, "MYSQL_USER": u, "MYSQL_PASSWORD": p, "MYSQL_DATABASE": db}
 		},
 		probe: func(u, p, db string) []string {
-			return sh("mysqladmin ping -h127.0.0.1 -uroot -p" + q(p) + " --silent")
+			return sh("MYSQL_PWD=" + q(p) + " mysqladmin ping -h127.0.0.1 -uroot --silent")
 		},
 		dump: func(u, p string) []string {
-			return sh("mysqldump -h127.0.0.1 -uroot -p" + q(p) + " --all-databases --single-transaction --routines --events 2>/dev/null")
+			return sh("MYSQL_PWD=" + q(p) + " mysqldump -h127.0.0.1 -uroot --all-databases --single-transaction --routines --events")
 		},
-		restore: func(u, p string) []string { return sh("mysql -h127.0.0.1 -uroot -p" + q(p) + " 2>&1") },
+		restore: func(u, p string) []string { return sh("MYSQL_PWD=" + q(p) + " mysql -h127.0.0.1 -uroot") },
 		query: func(u, p, db, sql string) []string {
-			return sh("mysql -h127.0.0.1 -uroot -p" + q(p) + " -D " + q(db) + " --batch -e " + q(sql) + " 2>&1 | grep -v 'Using a password'")
+			return sh("MYSQL_PWD=" + q(p) + " mysql -h127.0.0.1 -uroot -D " + q(db) + " --batch -e " + q(sql))
 		},
 	},
 	{
@@ -75,14 +75,14 @@ var engines = []Engine{
 			return map[string]string{"MARIADB_ROOT_PASSWORD": p, "MARIADB_USER": u, "MARIADB_PASSWORD": p, "MARIADB_DATABASE": db}
 		},
 		probe: func(u, p, db string) []string {
-			return sh("mariadb-admin ping -h127.0.0.1 -uroot -p" + q(p) + " --silent")
+			return sh("MYSQL_PWD=" + q(p) + " mariadb-admin ping -h127.0.0.1 -uroot --silent")
 		},
 		dump: func(u, p string) []string {
-			return sh("mariadb-dump -h127.0.0.1 -uroot -p" + q(p) + " --all-databases --single-transaction --routines --events")
+			return sh("MYSQL_PWD=" + q(p) + " mariadb-dump -h127.0.0.1 -uroot --all-databases --single-transaction --routines --events")
 		},
-		restore: func(u, p string) []string { return sh("mariadb -h127.0.0.1 -uroot -p" + q(p) + " 2>&1") },
+		restore: func(u, p string) []string { return sh("MYSQL_PWD=" + q(p) + " mariadb -h127.0.0.1 -uroot") },
 		query: func(u, p, db, sql string) []string {
-			return sh("mariadb -h127.0.0.1 -uroot -p" + q(p) + " -D " + q(db) + " --batch -e " + q(sql) + " 2>&1")
+			return sh("MYSQL_PWD=" + q(p) + " mariadb -h127.0.0.1 -uroot -D " + q(db) + " --batch -e " + q(sql))
 		},
 	},
 	{

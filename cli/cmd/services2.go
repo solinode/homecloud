@@ -601,3 +601,50 @@ func init() {
 		return call("DELETE", "/api/v1/acm/certificates/"+args[0], nil, nil)
 	})
 }
+
+func init() {
+	r := group("route53", "DNS hosted zones")
+	sub(r, "zones", "List hosted zones", cobra.NoArgs, func([]string) error {
+		return call("GET", "/api/v1/route53/zones", nil, cols("ID=id", "NAME=name", "PRIVATE=private", "RECORDS=record_count"))
+	})
+	var private bool
+	cz := sub(r, "create-zone NAME", "Create a hosted zone (public zones are served to your LAN on the DNS port)", cobra.ExactArgs(1), func(a []string) error {
+		return call("POST", "/api/v1/route53/zones", map[string]any{"name": a[0], "private": private}, nil)
+	})
+	cz.Flags().BoolVar(&private, "private", false, "answer only inside VPCs")
+	sub(r, "records ZONE_ID", "List a zone's records", cobra.ExactArgs(1), func(a []string) error {
+		var out map[string]any
+		if err := api().Do("GET", "/api/v1/route53/zones/"+a[0], nil, &out); err != nil {
+			return err
+		}
+		z, _ := out["zone"].(map[string]any)
+		printList(z["records"], cols("NAME=name", "TYPE=type", "TTL=ttl", "VALUES=values", "ALIAS=alias"))
+		return nil
+	})
+	var ttl int
+	var alias string
+	up := sub(r, "upsert ZONE_ID NAME TYPE [VALUE...]", "Create or replace a record; --alias targets an instance, task, database or load balancer", cobra.MinimumNArgs(3), func(a []string) error {
+		rec := map[string]any{"name": a[1], "type": a[2], "ttl": ttl, "values": a[3:], "alias": alias}
+		return call("POST", "/api/v1/route53/zones/"+a[0]+"/changes", map[string]any{"changes": []any{map[string]any{"action": "UPSERT", "record": rec}}}, nil)
+	})
+	up.Flags().IntVar(&ttl, "ttl", 300, "time to live in seconds")
+	up.Flags().StringVar(&alias, "alias", "", "resource to follow (A records only)")
+	sub(r, "delete-record ZONE_ID NAME TYPE", "Delete a record", cobra.ExactArgs(3), func(a []string) error {
+		var out map[string]any
+		if err := api().Do("GET", "/api/v1/route53/zones/"+a[0], nil, &out); err != nil {
+			return err
+		}
+		z, _ := out["zone"].(map[string]any)
+		recs, _ := z["records"].([]any)
+		for _, x := range recs {
+			rm, _ := x.(map[string]any)
+			if rm["name"] == a[1] && strings.EqualFold(fmt.Sprint(rm["type"]), a[2]) {
+				return call("POST", "/api/v1/route53/zones/"+a[0]+"/changes", map[string]any{"changes": []any{map[string]any{"action": "DELETE", "record": rm}}}, nil)
+			}
+		}
+		return fmt.Errorf("no %s record named %s", a[2], a[1])
+	})
+	sub(r, "delete-zone ZONE_ID", "Delete a zone and its records", cobra.ExactArgs(1), func(a []string) error {
+		return call("DELETE", "/api/v1/route53/zones/"+a[0]+"?force=true", nil, nil)
+	})
+}

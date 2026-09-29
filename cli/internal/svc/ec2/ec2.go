@@ -80,6 +80,8 @@ type Volume struct {
 func volumeName(id string) string { return "hc-" + id }
 
 type Service struct {
+	// DNSFor returns resolver addresses for containers in a VPC (Route 53).
+	DNSFor  func(vpcID string) []string
 	env     *svc.Env
 	vpc     *vpc.Service
 	hostCPU float64
@@ -138,6 +140,7 @@ func (s *Service) sync(i Instance) Instance {
 			return nil
 		})
 		if want == "terminated" {
+			s.releaseVolumes(i)
 			s.vpc.Release(i.ID)
 		}
 	}
@@ -185,14 +188,16 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("GET /api/v1/ec2/instance-types", "ec2:DescribeInstanceTypes", s.listTypes)
 	r.Handle("GET /api/v1/ec2/images", "ec2:DescribeImages", s.listImages)
 	r.Handle("POST /api/v1/ec2/images", "ec2:RegisterImage", s.registerImage)
-	r.Handle("GET /api/v1/ec2/images/{id}", "ec2:DescribeImages", s.getImage)
-	r.Handle("DELETE /api/v1/ec2/images/{id}", "ec2:DeregisterImage", s.deregisterImage)
+	imgRes := httpx.Res("arn:hc:ec2:local-1:{account}:image/{id}")
+	volRes := httpx.Res("arn:hc:ec2:local-1:{account}:volume/{id}")
+	r.Handle("GET /api/v1/ec2/images/{id}", "ec2:DescribeImages", s.getImage, imgRes)
+	r.Handle("DELETE /api/v1/ec2/images/{id}", "ec2:DeregisterImage", s.deregisterImage, imgRes)
 
 	s.efsRoutes(r)
 	r.Handle("GET /api/v1/ec2/volumes", "ec2:DescribeVolumes", s.listVolumes)
 	r.Handle("POST /api/v1/ec2/volumes", "ec2:CreateVolume", s.createVolumeRoute)
-	r.Handle("GET /api/v1/ec2/volumes/{id}", "ec2:DescribeVolumes", s.getVolume)
-	r.Handle("DELETE /api/v1/ec2/volumes/{id}", "ec2:DeleteVolume", s.deleteVolume)
+	r.Handle("GET /api/v1/ec2/volumes/{id}", "ec2:DescribeVolumes", s.getVolume, volRes)
+	r.Handle("DELETE /api/v1/ec2/volumes/{id}", "ec2:DeleteVolume", s.deleteVolume, volRes)
 }
 
 func (s *Service) listRoute(c *httpx.Ctx) (any, error) {
@@ -240,10 +245,36 @@ func (s *Service) image(id string) (Image, error) {
 	return im, nil
 }
 
+// checkTags rejects user tags in the reserved hc: namespace (used by HomeCloud
+// itself, e.g. hc:autoscaling:groupName decides Auto Scaling membership).
+func checkTags(t core.Tags) error {
+	for k := range t {
+		if strings.HasPrefix(strings.ToLower(k), "hc:") {
+			return core.BadRequest("tag keys starting with hc: are reserved")
+		}
+	}
+	return nil
+}
+
 func (s *Service) run(c *httpx.Ctx) (any, error) {
 	var in RunInput
 	if err := c.Bind(&in); err != nil {
 		return nil, err
+	}
+	if err := checkTags(in.Tags); err != nil {
+		return nil, err
+	}
+	for _, v := range in.Volumes {
+		if v.VolumeID != "" {
+			if err := c.Authorize("ec2:AttachVolume", s.env.ARN("ec2", "volume/"+v.VolumeID)); err != nil {
+				return nil, err
+			}
+		}
+	}
+	for _, m := range in.FileSystems {
+		if err := c.Authorize("elasticfilesystem:ClientMount", s.env.ARN("elasticfilesystem", "file-system/"+m.FileSystemID)); err != nil {
+			return nil, err
+		}
 	}
 	return s.Launch(in)
 }
@@ -297,6 +328,15 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 			if in.Count > 1 {
 				return nil, core.BadRequest("an existing volume can only be attached when count is 1")
 			}
+			n := 0
+			for _, o := range in.Volumes {
+				if o.VolumeID == v.VolumeID {
+					n++
+				}
+			}
+			if n > 1 {
+				return nil, core.BadRequest("volume %s is listed twice", v.VolumeID)
+			}
 		}
 	}
 
@@ -327,6 +367,11 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 			SecurityGroups: sgs, UserData: in.UserData, KeepAlive: img.KeepAlive, Volumes: []VolumeAttachment{}, FileSystems: nzFS(in.FileSystems),
 			PublicPorts: map[string]int{}, PublicHost: s.env.Cfg.PublicHost, LaunchTime: core.Now(), Tags: in.Tags,
 		}
+		// undo releases what this instance claimed if a later step fails.
+		undo := func() {
+			s.releaseVolumes(inst)
+			s.vpc.Release(id)
+		}
 		for _, v := range in.Volumes {
 			del := v.VolumeID == ""
 			if v.DeleteOnTermination != nil {
@@ -340,18 +385,27 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 				}
 				vol, err := s.createVolume("", size, pl.Subnet.AvailabilityZone, nil)
 				if err != nil {
-					return nil, err
+					undo()
+					return launched, err
 				}
 				volID = vol.ID
 			}
-			_, _ = store.Update(s.env.Store, cVolumes, volID, func(x *Volume) error {
+			// Claim atomically: two launches must not both attach the same volume.
+			if _, err := store.Update(s.env.Store, cVolumes, volID, func(x *Volume) error {
+				if x.State != "available" {
+					return core.Conflict("volume %s is %s", x.ID, x.State)
+				}
 				x.State, x.AttachedTo, x.MountPath = "in-use", id, v.MountPath
 				return nil
-			})
+			}); err != nil {
+				undo()
+				return launched, err
+			}
 			inst.Volumes = append(inst.Volumes, VolumeAttachment{VolumeID: volID, MountPath: v.MountPath, DeleteOnTermination: del})
 		}
 		if err := store.Put(s.env.Store, cInstances, id, inst); err != nil {
-			return nil, err
+			undo()
+			return launched, err
 		}
 		launched = append(launched, inst)
 		go s.launch(inst, pl.Network)
@@ -365,13 +419,20 @@ func (s *Service) launch(inst Instance, network string) {
 	defer cancel()
 	fail := func(err error) {
 		log.Printf("ec2: launch %s failed: %v", inst.ID, err)
+		already := false
 		_, _ = store.Update(s.env.Store, cInstances, inst.ID, func(x *Instance) error {
+			if x.State == "terminated" { // terminated while launching: already cleaned up
+				already = true
+				return nil
+			}
 			n := core.Now()
 			x.State, x.StateReason, x.TerminatedAt = "terminated", "Server.LaunchFailure: "+err.Error(), &n
 			return nil
 		})
-		s.releaseVolumes(inst)
-		s.vpc.Release(inst.ID)
+		if !already {
+			s.releaseVolumes(inst)
+			s.vpc.Release(inst.ID)
+		}
 	}
 	mounts := []runtime.Mount{}
 	for _, v := range inst.Volumes {
@@ -386,6 +447,7 @@ func (s *Service) launch(inst Instance, network string) {
 		"vpc-id": inst.VpcID, "subnet-id": inst.SubnetID, "security-groups": inst.SecurityGroups, "tags": inst.Tags,
 	}, "", "  ")
 	spec := runtime.RunSpec{
+		DNS:      s.dns(inst.VpcID),
 		Name:     svc.ContainerName("ec2", inst.ID),
 		Image:    inst.ImageRef,
 		Labels:   runtime.Labels("ec2", inst.ID, map[string]string{"homecloud.name": inst.Name}),
@@ -465,11 +527,21 @@ func (s *Service) transition(id string, from []string, fn func(i Instance) error
 	// Docker can take a while (stop waits for the process); finish in the background
 	// and let clients poll, as with EC2's pending/stopping states.
 	go func() {
+		defer core.Recover("ec2 " + during + " " + id)
+		// Only settle the state if nothing (e.g. a terminate) changed it meanwhile.
 		if err := fn(i); err != nil {
-			_, _ = store.Update(s.env.Store, cInstances, id, func(x *Instance) error { x.State, x.StateReason = i.State, err.Error(); return nil })
+			_, _ = store.Update(s.env.Store, cInstances, id, func(x *Instance) error {
+				if x.State == during {
+					x.State, x.StateReason = i.State, err.Error()
+				}
+				return nil
+			})
 			return
 		}
 		_, _ = store.Update(s.env.Store, cInstances, id, func(x *Instance) error {
+			if x.State != during {
+				return nil
+			}
 			x.State, x.StateReason = after, ""
 			if after == "running" {
 				x.PublicPorts = s.env.Docker.PublishedPorts(x.ContainerID)
@@ -539,6 +611,9 @@ func (s *Service) modify(c *httpx.Ctx) (any, error) {
 		Tags         core.Tags `json:"tags"`
 	}
 	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	if err := checkTags(in.Tags); err != nil {
 		return nil, err
 	}
 	i, err := s.get(c.Param("id"))
@@ -776,3 +851,48 @@ func (s *Service) PrivateIP(id string) (string, string, bool) {
 
 // Instances returns every instance with its state reconciled against Docker.
 func (s *Service) Instances() []Instance { return s.list() }
+
+func (s *Service) dns(vpcID string) []string {
+	if s.DNSFor == nil {
+		return nil
+	}
+	return s.DNSFor(vpcID)
+}
+
+// Recover settles instances whose launch or state change was interrupted by a restart.
+func (s *Service) Recover() {
+	for _, i := range store.List[Instance](s.env.Store, cInstances) {
+		switch i.State {
+		case "pending", "stopping", "shutting-down":
+		default:
+			continue
+		}
+		state := "terminated"
+		if i.ContainerID != "" {
+			switch s.env.Docker.State(i.ContainerID) {
+			case "running":
+				state = "running"
+			case "exited", "created":
+				state = "stopped"
+			}
+		}
+		if i.State == "shutting-down" {
+			if i.ContainerID != "" {
+				_ = s.env.Docker.Remove(i.ContainerID)
+			}
+			state = "terminated"
+		}
+		_, _ = store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error {
+			x.State = state
+			if state == "terminated" {
+				n := core.Now()
+				x.TerminatedAt, x.StateReason = &n, "Server.Restart: interrupted by a HomeCloud restart"
+			}
+			return nil
+		})
+		if state == "terminated" {
+			s.releaseVolumes(i)
+			s.vpc.Release(i.ID)
+		}
+	}
+}

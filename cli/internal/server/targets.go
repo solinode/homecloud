@@ -82,9 +82,9 @@ func (t *targets) exists(arn string) bool {
 		_, ok := t.sqs.QueueARN(res)
 		return ok
 	case "sns":
-		return strings.HasPrefix(arn, "arn:hc:sns:")
+		return t.sns.TopicExists(res)
 	case "states":
-		return strings.HasPrefix(res, "stateMachine:")
+		return t.sfn.Exists(strings.TrimPrefix(res, "stateMachine:"))
 	}
 	return false
 }

@@ -119,6 +119,13 @@ func (s *Service) put(c *httpx.Ctx) (any, error) {
 		return nil, core.BadRequest("a rule has at most 5 targets")
 	}
 	for i, t := range in.Targets {
+		action := core.TargetAction(t.ARN)
+		if action == "" {
+			return nil, core.BadRequest("target %s is not a Lambda function, SQS queue, SNS topic or state machine ARN", t.ARN)
+		}
+		if err := c.Authorize(action, t.ARN); err != nil {
+			return nil, err
+		}
 		if s.Exists != nil && !s.Exists(t.ARN) {
 			return nil, core.BadRequest("target %s does not exist (use a Lambda function, SQS queue, SNS topic or state machine ARN)", t.ARN)
 		}
@@ -172,6 +179,7 @@ func uuid() string {
 }
 
 func (s *Service) fire(ctx context.Context, r Rule, ev map[string]any) {
+	defer core.Recover("events rule " + r.Name)
 	payload, _ := json.Marshal(ev)
 	var lastErr error
 	for _, t := range r.Targets {
@@ -188,8 +196,10 @@ func (s *Service) fire(ctx context.Context, r Rule, ev map[string]any) {
 		}
 	}
 	_, _ = store.Update(s.env.Store, cRules, r.Name, func(x *Rule) error {
-		n := core.Now()
-		x.LastTriggered = &n
+		if x.ScheduleExpression == "" { // scheduled rules record the trigger time before firing
+			n := core.Now()
+			x.LastTriggered = &n
+		}
 		x.Invocations++
 		if lastErr != nil {
 			x.FailedInvocations++
@@ -395,9 +405,11 @@ func (s *Service) Run(ctx context.Context) {
 			if !sch.Due(now, last) {
 				continue
 			}
-			go s.fire(ctx, r, s.event("aws.events", "Scheduled Event", []string{r.ARN}, nil))
+			// Record the trigger before firing so a slow target cannot make the rule fire again.
 			next := sch.Next(now)
-			_, _ = store.Update(s.env.Store, cRules, r.Name, func(x *Rule) error { x.NextRun = &next; return nil })
+			fired := now.UTC().Truncate(time.Second)
+			_, _ = store.Update(s.env.Store, cRules, r.Name, func(x *Rule) error { x.NextRun, x.LastTriggered = &next, &fired; return nil })
+			go s.fire(ctx, r, s.event("aws.events", "Scheduled Event", []string{r.ARN}, nil))
 		}
 	}
 }

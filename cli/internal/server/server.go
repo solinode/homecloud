@@ -33,6 +33,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/svc/kms"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/lambda"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/rds"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/route53"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/s3"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/secrets"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/sfn"
@@ -142,9 +143,11 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		return fmt.Errorf("default vpc: %w", err)
 	}
 	ec2Svc := ec2.New(env, vpcSvc)
+	ec2Svc.Recover()
 	s3Svc := s3.New(env, secSvc)
 	vpcSvc.AfterCreate = s3Svc.ConnectNetwork
 	rdsSvc := rds.New(env, vpcSvc, secSvc)
+	rdsSvc.Recover()
 	lambdaSvc := lambda.New(env, cw, vpcSvc)
 	lambdaSvc.Auth = iamSvc
 	sqsSvc := sqs.New(env)
@@ -170,11 +173,28 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		}
 		return ecsSvc.PrivateIP(id)
 	}
+	elbSvc.Recover() // resolvers and certificates are wired by now
 	eventsSvc := events.New(env)
 	sfnSvc := sfn.New(env)
 	cfnSvc := cfn.New(env)
+	cfnSvc.Refresh = iamSvc.Refresh
+	cfnSvc.Recover()
 	cognitoSvc := cognito.New(env, secSvc)
 	asgSvc := autoscaling.New(env, ec2Svc, elbSvc, cw)
+	dnsSvc := route53.New(env, vpcSvc)
+	ec2Svc.DNSFor, ecsSvc.DNSFor, lambdaSvc.DNSFor = dnsSvc.DNSFor, dnsSvc.DNSFor, dnsSvc.DNSFor
+	dnsSvc.Resolve = func(id string) (string, bool) {
+		if ip, _, ok := ec2Svc.PrivateIP(id); ok {
+			return ip, true
+		}
+		if ip, _, ok := ecsSvc.PrivateIP(id); ok {
+			return ip, true
+		}
+		if ip, ok := rdsSvc.PrivateIP(id); ok {
+			return ip, true
+		}
+		return elbSvc.PrivateIP(id)
+	}
 	lambdaSvc.VerifyJWT = cognitoSvc.VerifyToken
 	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc, sfn: sfnSvc}
 	sfnSvc.Tasks = tg
@@ -186,7 +206,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 	mux := http.NewServeMux()
 	rt := &httpx.Router{Mux: mux, Auth: iamSvc, Account: account, Audit: trailSvc.Record}
-	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, asgSvc, acmSvc, trailSvc} {
+	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, asgSvc, acmSvc, dnsSvc, trailSvc} {
 		s.Routes(rt)
 	}
 	started := time.Now()
@@ -210,6 +230,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	go elbSvc.Run(ctx)
 	go ecsSvc.Run(ctx)
 	go asgSvc.Run(ctx)
+	go dnsSvc.Run(ctx)
 	go func() {
 		if err := ecrSvc.Start(ctx); err != nil {
 			logf("ecr: %v", err)
@@ -218,11 +239,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		}
 	}()
 	go func() {
-		var networks []string
-		for _, v := range vpcList(st) {
-			networks = append(networks, v.Network)
-		}
-		if err := s3Svc.Start(ctx, networks); err != nil {
+		if err := s3Svc.Start(ctx, vpcList(st)); err != nil {
 			logf("s3: %v", err)
 		} else {
 			logf("s3: MinIO ready at %s", s3Svc.Endpoint())
@@ -243,7 +260,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		}
 	}()
 
-	srv := &http.Server{Addr: cfg.APIAddr, Handler: withCORS(mux), ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: cfg.APIAddr, Handler: withCORS(sandboxUserContent(mux)), ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
 	go func() {
 		if cfg.TLSCert != "" {
@@ -270,11 +287,32 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 func vpcList(st *store.Store) []vpc.VPC { return store.List[vpc.VPC](st, "vpc_vpcs") }
 
+// sandboxUserContent isolates responses whose bytes come from users (static
+// websites, function URLs, HTTP APIs and inline object views). They share an
+// origin with the console, so without a sandbox a page could read the console's
+// session token. The CSP sandbox gives them an opaque origin.
+func sandboxUserContent(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		p := r.URL.Path
+		if strings.HasPrefix(p, "/website/") || strings.HasPrefix(p, "/lambda-url/") || strings.HasPrefix(p, "/apigw/") ||
+			(strings.HasPrefix(p, "/api/v1/s3/") && strings.HasSuffix(p, "/object")) {
+			w.Header().Set("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads")
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+		}
+		if strings.HasPrefix(p, "/api/") {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+		}
+		h.ServeHTTP(w, r)
+	})
+}
+
 // withCORS allows the console dev server and other origins to call the API.
 // Credentials travel in the Authorization header, never cookies, so a wildcard is safe.
 func withCORS(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if o := r.Header.Get("Origin"); o != "" {
+		p := r.URL.Path
+		userContent := strings.HasPrefix(p, "/apigw/") || strings.HasPrefix(p, "/lambda-url/") || strings.HasPrefix(p, "/website/")
+		if o := r.Header.Get("Origin"); o != "" && !userContent { // HTTP APIs apply their own CORS setting
 			w.Header().Set("Access-Control-Allow-Origin", "*")
 			w.Header().Set("Access-Control-Allow-Headers", "Authorization, Content-Type, X-HC-Meta-*")
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")

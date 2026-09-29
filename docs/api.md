@@ -138,6 +138,18 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/vpc/security-groups/{id}/ingress` | `ec2:AuthorizeSecurityGroupIngress` |
 | DELETE | `/api/v1/vpc/security-groups/{id}/ingress/{rule}` | `ec2:RevokeSecurityGroupIngress` |
 
+## Route 53 (DNS)
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/api/v1/route53/zones` | `route53:ListHostedZones` |
+| POST | `/api/v1/route53/zones` | `route53:CreateHostedZone` |
+| GET | `/api/v1/route53/zones/{id}` | `route53:GetHostedZone` |
+| DELETE | `/api/v1/route53/zones/{id}` | `route53:DeleteHostedZone` |
+| POST | `/api/v1/route53/zones/{id}/changes` | `route53:ChangeResourceRecordSets` |
+| GET | `/api/v1/route53/zones/{id}/zone-file` | `route53:GetHostedZone` |
+| POST | `/api/v1/route53/test-dns` | `route53:TestDNSAnswer` |
+
 ## Elastic Load Balancing
 
 | Method | Path | IAM action |
@@ -176,7 +188,7 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | Method | Path | IAM action |
 |---|---|---|
 | GET | `/api/v1/s3/status` | `s3:ListAllMyBuckets` |
-| GET | `/api/v1/s3/credentials` | `s3:GetServiceCredentials` |
+| GET | `/api/v1/s3/credentials` | `s3:AdministerServiceCredentials` |
 | GET | `/api/v1/s3/buckets` | `s3:ListAllMyBuckets` |
 | POST | `/api/v1/s3/buckets` | `s3:CreateBucket` |
 | GET | `/api/v1/s3/buckets/{bucket}` | `s3:GetBucketLocation` |
@@ -418,6 +430,7 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | Method | Path | IAM action |
 |---|---|---|
 | GET | `/api/v1/cloudwatch/alarms` | `cloudwatch:DescribeAlarms` |
+| GET | `/api/v1/cloudwatch/alarms/{name}` | `cloudwatch:DescribeAlarms` |
 | PUT | `/api/v1/cloudwatch/alarms/{name}` | `cloudwatch:PutMetricAlarm` |
 | DELETE | `/api/v1/cloudwatch/alarms/{name}` | `cloudwatch:DeleteAlarms` |
 | GET | `/api/v1/logs/groups` | `logs:DescribeLogGroups` |

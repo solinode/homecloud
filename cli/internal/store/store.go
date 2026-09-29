@@ -3,6 +3,7 @@
 package store
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -117,37 +118,47 @@ func Delete(s *Store, coll, id string) error {
 	return s.flush()
 }
 
-// Update applies fn to the stored document and persists the result. Updates
-// are serialised, and fn runs without holding the data lock, so it may read
-// the store (directly or through callbacks) without deadlocking. fn must not
-// call Update itself.
+// Update applies fn to the stored document and persists the result. fn runs
+// without holding the data lock, so it may read the store; if the document
+// changed while fn ran (e.g. a concurrent Put), fn is re-run on the fresh copy,
+// so fn must be free of side effects. fn must not call Update itself.
 func Update[T any](s *Store, coll, id string, fn func(*T) error) (T, error) {
 	var v T
 	s.umu.Lock()
 	defer s.umu.Unlock()
-	s.mu.RLock()
-	b, ok := s.data[coll][id]
-	s.mu.RUnlock()
-	if !ok {
-		return v, ErrNotFound
-	}
-	if err := json.Unmarshal(b, &v); err != nil {
+	for attempt := 0; ; attempt++ {
+		s.mu.RLock()
+		b, ok := s.data[coll][id]
+		s.mu.RUnlock()
+		if !ok {
+			return v, ErrNotFound
+		}
+		v = *new(T)
+		if err := json.Unmarshal(b, &v); err != nil {
+			return v, err
+		}
+		if err := fn(&v); err != nil {
+			return v, err
+		}
+		nb, err := json.Marshal(v)
+		if err != nil {
+			return v, err
+		}
+		s.mu.Lock()
+		cur, ok := s.data[coll][id]
+		if !ok {
+			s.mu.Unlock()
+			return v, ErrNotFound // deleted while fn ran
+		}
+		if !bytes.Equal(cur, b) && attempt < 10 {
+			s.mu.Unlock()
+			continue // changed underneath us: retry on the new version
+		}
+		s.data[coll][id] = nb
+		err = s.flush()
+		s.mu.Unlock()
 		return v, err
 	}
-	if err := fn(&v); err != nil {
-		return v, err
-	}
-	nb, err := json.Marshal(v)
-	if err != nil {
-		return v, err
-	}
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if _, ok := s.data[coll][id]; !ok {
-		return v, ErrNotFound // deleted while fn ran
-	}
-	s.data[coll][id] = nb
-	return v, s.flush()
 }
 
 // Retain keeps only the documents in coll for which keep returns true.

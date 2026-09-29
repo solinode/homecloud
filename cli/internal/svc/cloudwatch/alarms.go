@@ -91,12 +91,21 @@ func (s *Service) evaluateAlarms() {
 
 func (s *Service) alarmRoutes(r *httpx.Router) {
 	r.Handle("GET /api/v1/cloudwatch/alarms", "cloudwatch:DescribeAlarms", s.listAlarms)
-	r.Handle("PUT /api/v1/cloudwatch/alarms/{name}", "cloudwatch:PutMetricAlarm", s.putAlarm)
-	r.Handle("DELETE /api/v1/cloudwatch/alarms/{name}", "cloudwatch:DeleteAlarms", s.deleteAlarm)
+	r.Handle("GET /api/v1/cloudwatch/alarms/{name}", "cloudwatch:DescribeAlarms", s.getAlarm, httpx.Res("arn:hc:cloudwatch:local-1:{account}:alarm:{name}"))
+	r.Handle("PUT /api/v1/cloudwatch/alarms/{name}", "cloudwatch:PutMetricAlarm", s.putAlarm, httpx.Res("arn:hc:cloudwatch:local-1:{account}:alarm:{name}"))
+	r.Handle("DELETE /api/v1/cloudwatch/alarms/{name}", "cloudwatch:DeleteAlarms", s.deleteAlarm, httpx.Res("arn:hc:cloudwatch:local-1:{account}:alarm:{name}"))
 }
 
 func (s *Service) listAlarms(c *httpx.Ctx) (any, error) {
 	return store.List[Alarm](s.env.Store, cAlarms), nil
+}
+
+func (s *Service) getAlarm(c *httpx.Ctx) (any, error) {
+	a, err := store.Get[Alarm](s.env.Store, cAlarms, c.Param("name"))
+	if err != nil {
+		return nil, core.NotFound("alarm", c.Param("name"))
+	}
+	return a, nil
 }
 
 func (s *Service) putAlarm(c *httpx.Ctx) (any, error) {
@@ -109,7 +118,16 @@ func (s *Service) putAlarm(c *httpx.Ctx) (any, error) {
 		return nil, core.BadRequest("alarm names are 1-255 characters without control characters or slashes")
 	}
 	for _, t := range append(append([]string{}, a.AlarmActions...), a.OKActions...) {
-		if !strings.HasPrefix(t, "http://") && !strings.HasPrefix(t, "https://") && !strings.HasPrefix(t, "arn:hc:sns:") {
+		switch {
+		case strings.HasPrefix(t, "arn:hc:sns:"):
+			if err := c.Authorize("sns:Publish", t); err != nil {
+				return nil, err
+			}
+		case strings.HasPrefix(t, "http://") || strings.HasPrefix(t, "https://"):
+			if err := core.CheckWebhookURL(t); err != nil {
+				return nil, err
+			}
+		default:
 			return nil, core.BadRequest("action %q must be an SNS topic ARN or an http(s) URL", t)
 		}
 	}

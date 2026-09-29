@@ -375,6 +375,10 @@ func (s *Service) ReceiveWait(ctx context.Context, name string, max int, vis *in
 	for {
 		s.mu.Lock()
 		st := s.queues[name]
+		if st == nil {
+			s.mu.Unlock()
+			return nil, core.Errf(http.StatusNotFound, "QueueDoesNotExist", "queue %q does not exist", name)
+		}
 		out := s.receiveNow(q, st, max, time.Duration(v)*time.Second)
 		ch := st.notify
 		s.mu.Unlock()
@@ -400,11 +404,13 @@ func (s *Service) Receive(name string, max int, vis time.Duration) ([]lambda.Que
 	if err != nil {
 		return nil, err
 	}
-	if max > 10 && !q.FIFO {
-		max = 10
-	}
+	max = min(max, 10)
 	s.mu.Lock()
 	st := s.queues[name]
+	if st == nil {
+		s.mu.Unlock()
+		return nil, core.Errf(http.StatusNotFound, "QueueDoesNotExist", "queue %q does not exist", name)
+	}
 	rs := s.receiveNow(q, st, max, vis)
 	s.mu.Unlock()
 	out := make([]lambda.QueueMessage, len(rs))
@@ -525,7 +531,7 @@ type attrsInput struct {
 	Tags                      core.Tags `json:"tags"`
 }
 
-func (s *Service) applyAttrs(q *Queue, in attrsInput) error {
+func (s *Service) applyAttrs(c *httpx.Ctx, q *Queue, in attrsInput) error {
 	check := func(v *int, lo, hi int, name string, dst *int) error {
 		if v == nil {
 			return nil
@@ -564,6 +570,9 @@ func (s *Service) applyAttrs(q *Queue, in attrsInput) error {
 			if in.Redrive.MaxReceiveCount < 1 || in.Redrive.MaxReceiveCount > 1000 {
 				return core.BadRequest("max_receive_count must be 1-1000")
 			}
+			if err := c.Authorize("sqs:SendMessage", dlq.ARN); err != nil {
+				return err
+			}
 			q.Redrive = in.Redrive
 		}
 	}
@@ -594,7 +603,7 @@ func (s *Service) create(c *httpx.Ctx) (any, error) {
 	}
 	q := Queue{Name: in.Name, ARN: s.env.ARN("sqs", in.Name), URL: s.queueURL(in.Name), FIFO: in.FIFO,
 		VisibilityTimeout: 30, MessageRetention: 345600, MaxMessageSize: maxBodyBytes, CreatedAt: core.Now(), LastModified: core.Now()}
-	if err := s.applyAttrs(&q, in.attrsInput); err != nil {
+	if err := s.applyAttrs(c, &q, in.attrsInput); err != nil {
 		return nil, err
 	}
 	s.mu.Lock()
@@ -620,7 +629,7 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if err := s.applyAttrs(&q, in); err != nil {
+	if err := s.applyAttrs(c, &q, in); err != nil {
 		return nil, err
 	}
 	q.LastModified = core.Now()
@@ -746,7 +755,7 @@ func (s *Service) changeVisibility(c *httpx.Ctx) (any, error) {
 		return nil, core.Errf(http.StatusNotFound, "QueueDoesNotExist", "queue %q does not exist", c.Param("name"))
 	}
 	for _, m := range st.msgs {
-		if m.Receipt == in.ReceiptHandle {
+		if in.ReceiptHandle != "" && m.Receipt == in.ReceiptHandle {
 			m.VisibleAt = time.Now().Add(time.Duration(in.VisibilityTimeout) * time.Second)
 			s.dirty = true
 			if in.VisibilityTimeout == 0 {
@@ -770,7 +779,11 @@ func (s *Service) peek(c *httpx.Ctx) (any, error) {
 	defer s.mu.Unlock()
 	out := []map[string]any{}
 	now := time.Now()
-	for _, m := range s.queues[name].msgs {
+	st := s.queues[name]
+	if st == nil {
+		return out, nil
+	}
+	for _, m := range st.msgs {
 		if len(out) >= limit {
 			break
 		}
@@ -797,13 +810,29 @@ func (s *Service) redrive(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	if in.Destination != "" {
-		if _, err := s.getQueue(in.Destination); err != nil {
+		dq, err := s.getQueue(in.Destination)
+		if err != nil {
 			return nil, err
+		}
+		if err := c.Authorize("sqs:SendMessage", dq.ARN); err != nil {
+			return nil, err
+		}
+	} else {
+		// Messages return to their source queues; the caller must be able to send there.
+		for _, q := range store.List[Queue](s.env.Store, cQueues) {
+			if q.Redrive != nil && q.Redrive.DeadLetterQueue == name {
+				if err := c.Authorize("sqs:SendMessage", q.ARN); err != nil {
+					return nil, err
+				}
+			}
 		}
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	src := s.queues[name]
+	if src == nil {
+		return nil, core.Errf(http.StatusNotFound, "QueueDoesNotExist", "queue %q does not exist", name)
+	}
 	moved := 0
 	kept := src.msgs[:0]
 	for _, m := range src.msgs {

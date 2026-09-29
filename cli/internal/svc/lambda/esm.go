@@ -75,6 +75,9 @@ func (s *Service) createMapping(c *httpx.Ctx) (any, error) {
 	if !s.Exists(in.FunctionName) {
 		return nil, core.NotFound("function", in.FunctionName)
 	}
+	if err := c.Authorize("lambda:InvokeFunction", s.env.ARN("lambda", "function:"+in.FunctionName)); err != nil {
+		return nil, err
+	}
 	if s.Queues == nil {
 		return nil, core.Errf(http.StatusServiceUnavailable, "ServiceUnavailable", "queues are not available")
 	}
@@ -82,11 +85,17 @@ func (s *Service) createMapping(c *httpx.Ctx) (any, error) {
 	if !ok {
 		return nil, core.NotFound("queue", in.QueueName)
 	}
+	// The poller reads and deletes the queue's messages on the caller's behalf.
+	for _, action := range []string{"sqs:ReceiveMessage", "sqs:DeleteMessage"} {
+		if err := c.Authorize(action, arn); err != nil {
+			return nil, err
+		}
+	}
 	if in.BatchSize <= 0 {
 		in.BatchSize = 10
 	}
-	if in.BatchSize > 100 {
-		return nil, core.BadRequest("batch_size may not exceed 100")
+	if in.BatchSize > 10 {
+		return nil, core.BadRequest("batch_size may not exceed 10")
 	}
 	m := Mapping{ID: uuid(), FunctionName: in.FunctionName, QueueName: in.QueueName, EventSourceARN: arn, BatchSize: in.BatchSize,
 		Enabled: in.Enabled == nil || *in.Enabled, LastProcessingResult: "No records processed", CreatedAt: core.Now()}
@@ -105,7 +114,7 @@ func (s *Service) updateMapping(c *httpx.Ctx) (any, error) {
 		if in.Enabled != nil {
 			m.Enabled = *in.Enabled
 		}
-		if in.BatchSize > 0 && in.BatchSize <= 100 {
+		if in.BatchSize > 0 && in.BatchSize <= 10 {
 			m.BatchSize = in.BatchSize
 		}
 		return nil
@@ -156,6 +165,7 @@ func (s *Service) PollQueues(ctx context.Context) {
 			inflight[m.ID] = true
 			go func(m Mapping, msgs []QueueMessage) {
 				defer func() { done <- m.ID }()
+				defer core.Recover("lambda queue delivery " + m.FunctionName)
 				s.deliver(ctx, m, msgs)
 			}(m, msgs)
 		}
@@ -192,8 +202,20 @@ func (s *Service) deliver(ctx context.Context, m Mapping, msgs []QueueMessage) {
 				ItemIdentifier string `json:"itemIdentifier"`
 			} `json:"batchItemFailures"`
 		}
+		known := map[string]bool{}
+		for _, q := range msgs {
+			known[q.ID] = true
+		}
 		if json.Unmarshal(res.Payload, &partial) == nil {
 			for _, f := range partial.BatchItemFailures {
+				if !known[f.ItemIdentifier] {
+					// An unknown or empty identifier fails the whole batch, as in AWS.
+					result = "PROBLEM: batchItemFailures names an unknown message"
+					for _, q := range msgs {
+						failed[q.ID] = true
+					}
+					break
+				}
 				failed[f.ItemIdentifier] = true
 			}
 		}

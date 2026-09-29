@@ -59,6 +59,7 @@ type Router struct {
 type routeOpts struct {
 	resource string
 	public   bool
+	deferred bool
 }
 
 type Opt func(*routeOpts)
@@ -69,6 +70,11 @@ func Res(tmpl string) Opt { return func(o *routeOpts) { o.resource = tmpl } }
 
 // Public marks a route that needs no authentication.
 func Public() Opt { return func(o *routeOpts) { o.public = true } }
+
+// Deferred authenticates the caller but leaves authorization to the handler,
+// which must call Ctx.Authorize with the real resource ARN (for routes whose
+// resource is only known after a lookup, e.g. by alias or query parameter).
+func Deferred() Opt { return func(o *routeOpts) { o.deferred = true } }
 
 var placeholder = regexp.MustCompile(`\{([a-zA-Z_]+)\}`)
 
@@ -98,7 +104,7 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 			}
 			c.P = p
 			// Identity calls (sts:*) are always allowed, as in AWS.
-			if !strings.HasPrefix(action, "sts:") && !p.Can(action, resource) {
+			if !o.deferred && !strings.HasPrefix(action, "sts:") && !p.Can(action, resource) {
 				WriteError(sw, core.Errf(http.StatusForbidden, "AccessDenied", "%s is not authorized to perform %s on %s", p.ARN, action, resource))
 				rt.audit(p, action, resource, r, sw.status, time.Since(start))
 				return

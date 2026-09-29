@@ -50,3 +50,14 @@ func TestManagedKeyIsStable(t *testing.T) {
 		t.Fatalf("managed key changed: %s %s", a, b)
 	}
 }
+
+func TestContextEncodingIsUnambiguous(t *testing.T) {
+	env := svctest.Env(t)
+	sec, _ := secrets.New(env)
+	k := New(env, sec)
+	key, _ := k.create("t", false, nil)
+	blob, _, _ := k.Encrypt(key.ID, []byte("x"), map[string]string{"a": "b", "c": "d"})
+	if _, _, err := k.Decrypt(blob, map[string]string{"a": "b\nc=d"}); err == nil {
+		t.Fatal("a different context decrypted the blob")
+	}
+}

@@ -98,6 +98,11 @@ func specificity(r Route) int {
 
 // httpEvent builds an API Gateway v2 (HTTP API) payload for a request.
 func (s *Service) httpEvent(r *http.Request, rawPath, routeKey, apiID string, pathParams map[string]string) (map[string]any, error) {
+	// Never hand HomeCloud credentials sent as ?access_token to function code.
+	if q := r.URL.Query(); q.Has("access_token") {
+		q.Del("access_token")
+		r.URL.RawQuery = q.Encode()
+	}
 	body, err := io.ReadAll(io.LimitReader(r.Body, 6<<20))
 	if err != nil {
 		return nil, err
@@ -176,6 +181,10 @@ func respond(w http.ResponseWriter, res *InvokeResult, cors bool) {
 	if w.Header().Get("Content-Type") == "" {
 		w.Header().Set("Content-Type", "application/json")
 	}
+	if out.StatusCode < 100 || out.StatusCode > 599 {
+		httpx.WriteJSON(w, http.StatusBadGateway, map[string]string{"message": "Internal Server Error"})
+		return
+	}
 	w.WriteHeader(out.StatusCode)
 	if out.Body != nil {
 		if out.IsBase64Encoded {
@@ -193,6 +202,9 @@ func (s *Service) serveURL(c *httpx.Ctx) (any, error) {
 	f, err := store.Get[Function](s.env.Store, cFunctions, name)
 	if err != nil || !f.URL.Enabled {
 		return nil, core.Errf(http.StatusNotFound, "NotFound", "no function URL is configured for %q", name)
+	}
+	if c.R.URL.Query().Has("access_token") {
+		return nil, core.BadRequest("function URLs do not accept access_token; send an Authorization header")
 	}
 	if f.URL.AuthType == "HC_IAM" {
 		if s.Auth == nil {
@@ -250,7 +262,9 @@ func (s *Service) getAPI(c *httpx.Ctx) (any, error) {
 
 var methods = map[string]bool{"ANY": true, "GET": true, "POST": true, "PUT": true, "PATCH": true, "DELETE": true, "HEAD": true, "OPTIONS": true}
 
-func (s *Service) checkRoute(r *Route) error {
+// checkRoute validates a route; the caller must be allowed to invoke its function,
+// since the route makes it publicly callable.
+func (s *Service) checkRoute(c *httpx.Ctx, r *Route) error {
 	r.Method = strings.ToUpper(r.Method)
 	if r.Method == "" {
 		r.Method = "ANY"
@@ -263,6 +277,9 @@ func (s *Service) checkRoute(r *Route) error {
 	}
 	if !s.Exists(r.FunctionName) {
 		return core.NotFound("function", r.FunctionName)
+	}
+	if err := c.Authorize("lambda:InvokeFunction", s.env.ARN("lambda", "function:"+r.FunctionName)); err != nil {
+		return err
 	}
 	if r.Authorization == "" {
 		r.Authorization = "NONE"
@@ -291,7 +308,7 @@ func (s *Service) createAPI(c *httpx.Ctx) (any, error) {
 	id := strings.ToLower(core.RandHex(10))
 	a := API{ID: id, Name: in.Name, Description: in.Description, CORS: in.CORS, Routes: []Route{}, Endpoint: s.apiEndpoint(id), CreatedAt: core.Now(), Authorizer: in.Authorizer}
 	for _, r := range in.Routes {
-		if err := s.checkRoute(&r); err != nil {
+		if err := s.checkRoute(c, &r); err != nil {
 			return nil, err
 		}
 		a.Routes = append(a.Routes, r)
@@ -346,7 +363,7 @@ func (s *Service) addRoute(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&r); err != nil {
 		return nil, err
 	}
-	if err := s.checkRoute(&r); err != nil {
+	if err := s.checkRoute(c, &r); err != nil {
 		return nil, err
 	}
 	a, err := store.Update(s.env.Store, cAPIs, c.Param("id"), func(a *API) error {

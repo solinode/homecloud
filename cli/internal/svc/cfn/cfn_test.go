@@ -81,6 +81,16 @@ func TestResolve(t *testing.T) {
 	}
 }
 
+func TestAliasBombs(t *testing.T) {
+	if _, err := Parse("Resources: &r {X: *r}\n"); err == nil {
+		t.Fatal("recursive alias accepted")
+	}
+	bomb := "a: &a [x,x,x,x,x,x,x,x,x,x]\nb: &b [*a,*a,*a,*a,*a,*a,*a,*a,*a,*a]\nc: &c [*b,*b,*b,*b,*b,*b,*b,*b,*b,*b]\nd: &d [*c,*c,*c,*c,*c,*c,*c,*c,*c,*c]\ne: &e [*d,*d,*d,*d,*d,*d,*d,*d,*d,*d]\nResources: {Q: {Type: HC::SQS::Queue, Properties: {x: *e}}}\n"
+	if _, err := Parse(bomb); err == nil || !strings.Contains(err.Error(), "expands") {
+		t.Fatalf("alias bomb not rejected: %v", err)
+	}
+}
+
 func TestCycleAndUnknownType(t *testing.T) {
 	cyc := `{"Resources":{"A":{"Type":"HC::SQS::Queue","Properties":{"name":{"Ref":"B"}}},"B":{"Type":"HC::SQS::Queue","Properties":{"name":{"Ref":"A"}}}}}`
 	tp, err := Parse(cyc)
@@ -92,5 +102,19 @@ func TestCycleAndUnknownType(t *testing.T) {
 	}
 	if _, err := Parse(`{"Resources":{"A":{"Type":"AWS::Nope"}}}`); err == nil {
 		t.Fatal("unknown type accepted")
+	}
+}
+
+func TestScalarTypes(t *testing.T) {
+	tp, err := Parse("Parameters: {P: {Type: String, NoEcho: true}}\nResources:\n  Q: {Type: HC::SQS::Queue, Properties: {name: q, visibility_timeout: 45, fifo: false}}\n")
+	if err != nil {
+		t.Fatal(err)
+	}
+	props := tp.Resources["Q"].Properties
+	if props["visibility_timeout"] != 45 && props["visibility_timeout"] != 45.0 {
+		t.Fatalf("number decoded as %T %v", props["visibility_timeout"], props["visibility_timeout"])
+	}
+	if props["fifo"] != false || !tp.Parameters["P"].NoEcho {
+		t.Fatalf("booleans decoded wrong: %v %v", props["fifo"], tp.Parameters["P"].NoEcho)
 	}
 }
