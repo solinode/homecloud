@@ -43,7 +43,7 @@ export function DeleteSecretDialog({ secret, onOpenChange, onDeleted }: { secret
 
   const s = secret ?? last
   const n = Number(days)
-  const daysValid = Number.isInteger(n) && n >= 1 && n <= 30
+  const daysValid = Number.isInteger(n) && n >= 7 && n <= 30
   const deletionDate = new Date(Date.now() + (daysValid ? n : 7) * 86400_000)
 
   return (
@@ -60,7 +60,7 @@ export function DeleteSecretDialog({ secret, onOpenChange, onDeleted }: { secret
       actionLabel={force ? "Delete immediately" : "Schedule deletion"}
       onConfirm={async () => {
         if (!s) return
-        if (!force && !daysValid) throw new Error("The waiting period must be between 1 and 30 days")
+        if (!force && !daysValid) throw new Error("The waiting period must be between 7 and 30 days")
         await api.del(`/api/v1/secrets/${seg(s.name)}`, force ? { force: "true" } : { recovery_days: n })
         toast.success(force ? `Secret ${s.name} deleted` : `Secret ${s.name} scheduled for deletion`)
         revalidate("/api/v1/secrets")
@@ -72,10 +72,10 @@ export function DeleteSecretDialog({ secret, onOpenChange, onDeleted }: { secret
         <Field
           label="Waiting period (days)"
           htmlFor="recovery-days"
-          error={!daysValid ? "Enter a number of days between 1 and 30" : undefined}
+          error={!daysValid ? "Enter a whole number of days between 7 and 30" : undefined}
           help={`The secret will be deleted on ${formatDate(deletionDate, false)}.`}
         >
-          <Input id="recovery-days" type="number" min={1} max={30} value={days} onChange={(e) => setDays(e.target.value)} className="w-32" />
+          <Input id="recovery-days" type="number" min={7} max={30} value={days} onChange={(e) => setDays(e.target.value)} className="w-32" />
         </Field>
       )}
       <div className="flex items-start gap-3 rounded-md border p-3">

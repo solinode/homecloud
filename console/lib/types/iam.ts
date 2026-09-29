@@ -3,13 +3,20 @@ import type { Tags } from "./common"
 export interface PolicyStatement {
   Sid?: string
   Effect: "Allow" | "Deny"
-  Action: string | string[]
-  Resource: string | string[]
+  /** A statement has Action or NotAction, and Resource or NotResource. */
+  Action?: string | string[]
+  NotAction?: string | string[]
+  Resource?: string | string[]
+  NotResource?: string | string[]
+  /** {operator: {key: value | values}} */
+  Condition?: Record<string, Record<string, string | string[] | boolean | number>>
 }
 
 export interface PolicyDocument {
   Version: string
-  Statement: PolicyStatement[]
+  Id?: string
+  /** AWS accepts a single statement object as well as an array. */
+  Statement: PolicyStatement[] | PolicyStatement
 }
 
 export interface AccessKey {
@@ -37,40 +44,61 @@ export interface IamUser {
   console_access: boolean
   password_set_at: string | null
   last_login: string | null
+  path?: string
   groups: string[]
   attached_policies: string[]
   inline_policies: Record<string, PolicyDocument> | null
   tags?: Tags | null
+  /** ARN of the permissions boundary policy; "" = none. */
+  permissions_boundary?: string
   /** only on GET /iam/users/{name} */
   access_keys?: AccessKey[]
 }
 
 export interface IamGroup {
   name: string
+  id?: string
+  path?: string
   arn: string
   created_at: string
   attached_policies: string[]
+  inline_policies?: Record<string, PolicyDocument> | null
   members: string[]
 }
 
 export interface PolicySummary {
   name: string
   arn: string
+  path?: string
   description: string
+  /** AWS managed (arn:aws:iam::aws:policy/...): built in and read-only. */
   managed: boolean
   created_at: string
   updated_at: string
   attachment_count: number
+  default_version?: string
+}
+
+export interface PolicyVersion {
+  version_id: string
+  is_default: boolean
+  created_at: string
+  document: PolicyDocument
 }
 
 export interface Policy {
   name: string
+  id?: string
   arn: string
+  path?: string
   description: string
   managed: boolean
   document: PolicyDocument
   created_at: string
   updated_at: string
+  tags?: Tags | null
+  default_version?: string
+  versions?: { id: string; document: PolicyDocument; created_at: string }[]
 }
 
 export interface PolicyDetail {
@@ -91,7 +119,7 @@ export interface TrustStatement {
 
 export interface TrustPolicyDocument {
   Version: string
-  Statement: TrustStatement[]
+  Statement: TrustStatement[] | TrustStatement
 }
 
 export interface IamRole {
@@ -108,6 +136,23 @@ export interface IamRole {
   last_used?: string | null
   tags?: Tags | null
   trusted_services: string[]
+  /** ARN of the permissions boundary policy; "" = none. */
+  permissions_boundary?: string
+  /** Names of the instance profiles that carry this role. */
+  instance_profiles?: string[]
+  /** Service principal of a service-linked role; "" otherwise. */
+  service_linked?: string
+}
+
+/** An instance profile carries (at most) one role to EC2 instances. */
+export interface InstanceProfile {
+  name: string
+  id: string
+  arn: string
+  path: string
+  roles: string[]
+  created_at: string
+  tags?: Tags | null
 }
 
 /** Temporary credentials from POST /sts/assume-role. */
@@ -126,8 +171,11 @@ export interface IamSummary {
   groups: number
   policies: number
   access_keys: number
-  mfa_devices: number
+  mfa_devices?: number
   roles?: number
+  instance_profiles?: number
+  customer_policies?: number
+  managed_policies?: number
 }
 
 export interface SimulationResult {

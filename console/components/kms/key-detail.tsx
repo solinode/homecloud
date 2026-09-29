@@ -30,13 +30,35 @@ import { revalidate, useAction, useApi, useQueryParam, useSetQueryParam } from "
 import type { KmsKey } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
+import { CodeBlock } from "@/components/s3/common"
+
 import { CryptoTool } from "./crypto-tool"
-import { AliasInput, KEYS_PATH, KEY_POLL, KMS_PATH, KeyStateBadge, ManagedBadge, aliasError, isServiceManaged, keyLabel, normalizeAlias, useKeyActions } from "./shared"
+import {
+  AliasInput,
+  KEYS_PATH,
+  KEY_POLL,
+  KIND_LABEL,
+  KMS_PATH,
+  KeyStateBadge,
+  ManagedBadge,
+  USAGE_LABEL,
+  aliasError,
+  apiOrigin,
+  isServiceManaged,
+  isSymmetric,
+  keyKind,
+  keyLabel,
+  normalizeAlias,
+  useKeyActions,
+} from "./shared"
 
 const TABS = ["details", "aliases", "crypto"] as const
 type Tab = (typeof TABS)[number]
 
 const READ_ONLY_REASON = "HomeCloud managed keys are created and rotated by the service that owns them and cannot be changed."
+const NO_ROTATION_REASON = "Only symmetric encryption keys support rotation."
+const MIN_PERIOD = 90
+const MAX_PERIOD = 2560
 
 function BackButton() {
   return (
@@ -87,11 +109,17 @@ export function KeyDetail() {
   const managed = isServiceManaged(key)
   const locked = managed || actions.busy
   const pending = key.state === "PendingDeletion"
+  const symmetric = isSymmetric(key)
 
   const items: ActionItem[] = [
     { label: "Enable", onSelect: () => actions.enable(key), disabled: locked || key.state !== "Disabled", hint: managed ? READ_ONLY_REASON : undefined },
     { label: "Disable", onSelect: () => actions.disable(key), disabled: locked || key.state !== "Enabled", hint: managed ? READ_ONLY_REASON : undefined },
-    { label: "Rotate key material now", onSelect: () => actions.rotate(key), disabled: locked || pending, hint: managed ? READ_ONLY_REASON : undefined },
+    {
+      label: "Rotate key material now",
+      onSelect: () => actions.rotate(key),
+      disabled: locked || pending || !symmetric || key.state !== "Enabled",
+      hint: managed ? READ_ONLY_REASON : !symmetric ? NO_ROTATION_REASON : undefined,
+    },
     { separator: true },
     pending
       ? { label: "Cancel key deletion", onSelect: () => actions.cancelDeletion(key), disabled: locked }
@@ -150,7 +178,7 @@ export function KeyDetail() {
           <TabsTrigger value="aliases">
             Aliases <span className="text-muted-foreground text-xs">({key.aliases?.length ?? 0})</span>
           </TabsTrigger>
-          <TabsTrigger value="crypto">Encrypt / decrypt</TabsTrigger>
+          <TabsTrigger value="crypto">{symmetric ? "Encrypt / decrypt" : "Cryptographic operations"}</TabsTrigger>
         </TabsList>
         <TabsContent value="details">
           <DetailsTab k={key} managed={managed} actions={actions} onSaved={() => mutate()} />
@@ -159,7 +187,7 @@ export function KeyDetail() {
           <AliasesTab k={key} managed={managed} onChanged={() => mutate()} />
         </TabsContent>
         <TabsContent value="crypto">
-          <CryptoTool keyId={key.id} lockKey />
+          {symmetric ? <CryptoTool keyId={key.id} lockKey /> : <AsymmetricOps k={key} />}
         </TabsContent>
       </Tabs>
 
@@ -222,8 +250,6 @@ function DescriptionField({ k, editable, onSaved }: { k: KmsKey; editable: boole
 }
 
 function DetailsTab({ k, managed, actions, onSaved }: { k: KmsKey; managed: boolean; actions: ReturnType<typeof useKeyActions>; onSaved: () => void }) {
-  const pending = k.state === "PendingDeletion"
-  const nextRotation = k.rotation_enabled ? new Date(new Date(k.last_rotated || k.created_at).getTime() + 365 * 86_400_000) : null
   return (
     <div className="flex flex-col gap-4">
       <Section title="General configuration">
@@ -249,8 +275,16 @@ function DetailsTab({ k, managed, actions, onSaved }: { k: KmsKey; managed: bool
             },
             { label: "Description", value: <DescriptionField k={k} editable={!managed} onSaved={onSaved} /> },
             { label: "Created", value: <span>{formatDate(k.created_at)} (<TimeAgo value={k.created_at} />)</span> },
+            { label: "Key type", value: KIND_LABEL[keyKind(k.key_spec)] },
             { label: "Key spec", value: <span className="font-mono text-[13px]">{k.key_spec}</span> },
-            { label: "Key usage", value: <span className="font-mono text-[13px]">{k.key_usage}</span> },
+            {
+              label: "Key usage",
+              value: (
+                <span>
+                  {USAGE_LABEL[k.key_usage] ?? k.key_usage} <span className="text-muted-foreground font-mono text-xs">({k.key_usage})</span>
+                </span>
+              ),
+            },
             { label: "Key material versions", value: <span className="tabular-nums">{k.key_versions}</span> },
             ...(k.deletion_date ? [{ label: "Deletion date", value: <span className="text-destructive">{formatDate(k.deletion_date)}</span> }] : []),
             { label: "ARN", value: <CopyableText value={k.arn} />, wide: true },
@@ -258,47 +292,141 @@ function DetailsTab({ k, managed, actions, onSaved }: { k: KmsKey; managed: bool
         />
       </Section>
 
-      <Section
-        title="Key rotation"
-        description="Rotation adds a new key material version used for new encryptions. Older versions are kept so existing ciphertexts still decrypt."
-        actions={
-          <Button variant="outline" size="sm" onClick={() => actions.rotate(k)} disabled={managed || pending || actions.busy} title={managed ? READ_ONLY_REASON : undefined}>
-            {actions.busy ? <Loader2 className="animate-spin" /> : <RotateCcw />} Rotate now
-          </Button>
-        }
-      >
-        <div className="flex flex-col gap-4">
-          <div className="flex items-start justify-between gap-4 rounded-md border p-3">
-            <div>
-              <Label htmlFor="kms-auto-rotation" className="font-medium">
-                Automatic yearly rotation
-              </Label>
-              <p className="text-muted-foreground mt-0.5 text-xs">
-                {managed ? "Managed by HomeCloud." : k.rotation_enabled ? "New key material is created every 365 days." : "Off. Turn it on to rotate every 365 days."}
-              </p>
-            </div>
-            <Switch
-              id="kms-auto-rotation"
-              checked={k.rotation_enabled}
-              disabled={managed || pending || actions.busy}
-              onCheckedChange={(v) => actions.setRotation(k, v)}
-            />
-          </div>
-          <KeyValueGrid
-            columns={3}
-            items={[
-              { label: "Last rotated", value: k.last_rotated ? <span>{formatDate(k.last_rotated)} (<TimeAgo value={k.last_rotated} />)</span> : "Never" },
-              { label: "Next automatic rotation", value: nextRotation && !pending ? formatDate(nextRotation, false) : "" },
-              { label: "Key material versions", value: String(k.key_versions) },
-            ]}
-          />
-        </div>
-      </Section>
+      <RotationSection k={k} managed={managed} actions={actions} />
 
       <Section title="Tags">
         <TagList tags={k.tags} />
       </Section>
     </div>
+  )
+}
+
+function RotationSection({ k, managed, actions }: { k: KmsKey; managed: boolean; actions: ReturnType<typeof useKeyActions> }) {
+  const pending = k.state === "PendingDeletion"
+  const period = k.rotation_period_days ?? 365
+  const [days, setDays] = useState(String(period))
+  useEffect(() => setDays(String(period)), [period])
+
+  if (!isSymmetric(k)) {
+    return (
+      <Section title="Key rotation">
+        <p className="text-muted-foreground text-sm">
+          {KIND_LABEL[keyKind(k.key_spec)]} keys ({k.key_spec}) don&apos;t support automatic or on-demand rotation. To replace the key material, create a new key and
+          move the alias to it.
+        </p>
+      </Section>
+    )
+  }
+
+  const n = Number(days)
+  const daysValid = Number.isInteger(n) && n >= MIN_PERIOD && n <= MAX_PERIOD
+  const dirty = daysValid && n !== period
+  const disabled = managed || pending || actions.busy || k.state === "Disabled"
+  const hint = managed ? READ_ONLY_REASON : pending ? "The key is pending deletion." : k.state === "Disabled" ? "Enable the key to change rotation." : undefined
+
+  return (
+    <Section
+      title="Key rotation"
+      description="Rotation adds a new key material version used for new encryptions. Older versions are kept so existing ciphertexts still decrypt."
+      actions={
+        <Button variant="outline" size="sm" onClick={() => actions.rotate(k)} disabled={disabled} title={hint}>
+          {actions.busy ? <Loader2 className="animate-spin" /> : <RotateCcw />} Rotate now
+        </Button>
+      }
+    >
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-3 rounded-md border p-3">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <Label htmlFor="kms-auto-rotation" className="font-medium">
+                Automatic rotation
+              </Label>
+              <p className="text-muted-foreground mt-0.5 text-xs">
+                {managed
+                  ? "Managed by HomeCloud."
+                  : k.rotation_enabled
+                    ? `New key material is created every ${period} days.`
+                    : `Off. Turn it on to rotate every ${daysValid ? n : period} days.`}
+              </p>
+            </div>
+            <Switch
+              id="kms-auto-rotation"
+              checked={k.rotation_enabled}
+              disabled={disabled}
+              onCheckedChange={(v) => actions.setRotation(k, v, v && daysValid && n !== period ? n : undefined)}
+            />
+          </div>
+          {!managed && (
+            <form
+              className="flex flex-wrap items-end gap-2"
+              onSubmit={(e) => {
+                e.preventDefault()
+                if (dirty) actions.setRotation(k, true, n)
+              }}
+            >
+              <Field
+                label="Rotation period (days)"
+                htmlFor="kms-rotation-period"
+                error={!daysValid ? `Enter a whole number of days between ${MIN_PERIOD} and ${MAX_PERIOD}.` : undefined}
+                help={`${MIN_PERIOD}-${MAX_PERIOD} days. The next rotation is scheduled from the time you save.`}
+                className="w-full sm:w-auto"
+              >
+                <Input
+                  id="kms-rotation-period"
+                  type="number"
+                  min={MIN_PERIOD}
+                  max={MAX_PERIOD}
+                  value={days}
+                  onChange={(e) => setDays(e.target.value)}
+                  className="w-32"
+                  disabled={disabled}
+                  aria-invalid={!daysValid}
+                />
+              </Field>
+              {k.rotation_enabled && (
+                <Button type="submit" size="sm" variant="outline" disabled={disabled || !dirty} className="mb-5 sm:mb-[1.4rem]">
+                  Save period
+                </Button>
+              )}
+            </form>
+          )}
+        </div>
+        <KeyValueGrid
+          columns={3}
+          items={[
+            { label: "Last rotated", value: k.last_rotated ? <span>{formatDate(k.last_rotated)} (<TimeAgo value={k.last_rotated} />)</span> : "Never" },
+            { label: "Next automatic rotation", value: k.rotation_enabled && k.next_rotation && !pending ? formatDate(k.next_rotation, false) : "" },
+            { label: "Key material versions", value: String(k.key_versions) },
+          ]}
+        />
+      </div>
+    </Section>
+  )
+}
+
+function AsymmetricOps({ k }: { k: KmsKey }) {
+  const kind = keyKind(k.key_spec)
+  const ops =
+    kind === "hmac"
+      ? "GenerateMac and VerifyMac"
+      : k.key_usage === "SIGN_VERIFY"
+        ? "Sign, Verify and GetPublicKey"
+        : "Encrypt and Decrypt with RSAES_OAEP_SHA_1 / RSAES_OAEP_SHA_256, and GetPublicKey"
+  const cli =
+    kind === "hmac"
+      ? `aws --endpoint-url ${apiOrigin()} kms generate-mac --key-id ${k.id} \\\n  --mac-algorithm HMAC_SHA_${k.key_spec.replace("HMAC_", "")} --message fileb://message.txt`
+      : k.key_usage === "SIGN_VERIFY"
+        ? `aws --endpoint-url ${apiOrigin()} kms sign --key-id ${k.id} \\\n  --message fileb://message.txt --message-type RAW \\\n  --signing-algorithm ${k.key_spec.startsWith("ECC_") ? `ECDSA_SHA_${k.key_spec.slice(-3) === "521" ? "512" : k.key_spec.slice(-3)}` : "RSASSA_PSS_SHA_256"}`
+        : `aws --endpoint-url ${apiOrigin()} kms encrypt --key-id ${k.id} \\\n  --plaintext fileb://message.txt --encryption-algorithm RSAES_OAEP_SHA_256`
+  return (
+    <Section title="Cryptographic operations" description={`This ${KIND_LABEL[kind].toLowerCase()} key supports ${ops}.`}>
+      <div className="flex flex-col gap-3 text-sm">
+        <p className="text-muted-foreground">
+          The console&apos;s encrypt / decrypt tool works with symmetric keys only. Use this key through the AWS-compatible KMS API, for example with the AWS CLI:
+        </p>
+        <CodeBlock code={cli} />
+      </div>
+    </Section>
   )
 }
 

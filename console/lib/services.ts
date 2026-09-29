@@ -135,6 +135,10 @@ export const SERVICES: ServiceDef[] = [
           { label: "Event source mappings", href: "/lambda/triggers/" },
         ],
       },
+      {
+        title: "Additional resources",
+        items: [{ label: "Layers", href: "/lambda/layers/" }],
+      },
       { title: "Related", items: [{ label: "API Gateway", href: "/apigateway/" }] },
     ],
   },
@@ -260,6 +264,7 @@ export const SERVICES: ServiceDef[] = [
           { label: "User groups", href: "/iam/groups/", match: ["/iam/group/"] },
           { label: "Roles", href: "/iam/roles/", match: ["/iam/role/", "/iam/roles/"] },
           { label: "Policies", href: "/iam/policies/", match: ["/iam/policy/"] },
+          { label: "Instance profiles", href: "/iam/instance-profiles/", match: ["/iam/instance-profile/"] },
         ],
       },
       { title: "Tools", items: [{ label: "Policy simulator", href: "/iam/simulator/" }] },

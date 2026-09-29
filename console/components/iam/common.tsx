@@ -22,6 +22,7 @@ export const NAME_RE = /^[\w+=,.@-]{1,64}$/
 export const userHref = (n: string) => `/iam/user/?name=${encodeURIComponent(n)}`
 export const groupHref = (n: string) => `/iam/group/?name=${encodeURIComponent(n)}`
 export const policyHref = (n: string) => `/iam/policy/?name=${encodeURIComponent(n)}`
+export const instanceProfileHref = (n: string) => `/iam/instance-profile/?name=${encodeURIComponent(n)}`
 
 export const LINK = "text-primary font-medium hover:underline"
 
@@ -85,27 +86,64 @@ export const policyJson = (d: unknown) => JSON.stringify(d, null, 2)
 const strList = (v: unknown) =>
   (typeof v === "string" && v.length > 0) || (Array.isArray(v) && v.length > 0 && v.every((x) => typeof x === "string" && x.length > 0))
 
+/** statementsOf returns a document's statements; AWS allows Statement to be a single object. */
+export function statementsOf<S>(doc: { Statement?: S[] | S } | null | undefined): S[] {
+  const st = doc?.Statement
+  if (st === undefined || st === null) return []
+  return Array.isArray(st) ? st : [st]
+}
+
+/** statementCount is the number of statements of a (possibly malformed) document. */
+export const statementCount = (doc: { Statement?: unknown } | null | undefined) => statementsOf(doc as { Statement?: unknown }).length
+
 /** validatePolicy mirrors PolicyDocument.Validate in the API. */
 export function validatePolicy(parsed: unknown): string | null {
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return "The policy must be a JSON object"
-  const st = (parsed as { Statement?: unknown }).Statement
-  if (!Array.isArray(st) || st.length === 0) return "Statement must be a non-empty array"
+  const doc = parsed as { Version?: unknown; Statement?: unknown }
+  if (doc.Version !== undefined && doc.Version !== "2012-10-17" && doc.Version !== "2008-10-17") return 'Version must be "2012-10-17" or "2008-10-17"'
+  const raw = doc.Statement
+  if (raw === undefined || raw === null) return "Statement is required"
+  const st = Array.isArray(raw) ? raw : [raw]
+  if (st.length === 0) return "Statement must not be empty"
   for (let i = 0; i < st.length; i++) {
     const s = st[i] as Record<string, unknown> | null
-    if (!s || typeof s !== "object") return `Statement[${i}] must be an object`
+    if (!s || typeof s !== "object" || Array.isArray(s)) return `Statement[${i}] must be an object`
     if (s.Effect !== "Allow" && s.Effect !== "Deny") return `Statement[${i}].Effect must be "Allow" or "Deny"`
-    if (!strList(s.Action)) return `Statement[${i}].Action must be a string or a non-empty array of strings`
-    if (!strList(s.Resource)) return `Statement[${i}].Resource must be a string or a non-empty array of strings`
+    if (s.Action !== undefined && s.NotAction !== undefined) return `Statement[${i}] cannot have both Action and NotAction`
+    if (s.Action === undefined && s.NotAction === undefined) return `Statement[${i}] needs an Action or NotAction`
+    const ak = s.Action !== undefined ? "Action" : "NotAction"
+    if (!strList(s[ak])) return `Statement[${i}].${ak} must be a string or a non-empty array of strings`
+    const badAction = asList(s[ak] as string | string[]).find((a) => a !== "*" && !a.includes(":"))
+    if (badAction) return `Statement[${i}].${ak} "${badAction}" must be <service>:<action>`
+    if (s.Resource !== undefined && s.NotResource !== undefined) return `Statement[${i}] cannot have both Resource and NotResource`
+    if (s.Resource === undefined && s.NotResource === undefined) return `Statement[${i}] needs a Resource or NotResource`
+    const rk = s.Resource !== undefined ? "Resource" : "NotResource"
+    if (!strList(s[rk])) return `Statement[${i}].${rk} must be a string or a non-empty array of strings`
+    if (s.Principal !== undefined) return `Statement[${i}]: Principal is only allowed in role trust policies`
+    if (s.Condition !== undefined && (!s.Condition || typeof s.Condition !== "object" || Array.isArray(s.Condition)))
+      return `Statement[${i}].Condition must be an object of {operator: {key: value}}`
   }
   return null
 }
 
-export const asList = (v: string | string[] | undefined) => (v === undefined ? [] : Array.isArray(v) ? v : [v])
+export const asList = (v: string | string[] | undefined | null) => (v === undefined || v === null ? [] : Array.isArray(v) ? v : [v])
+
+/** conditionLines flattens a Condition block into "operator key: values" rows. */
+export function conditionLines(cond: PolicyStatement["Condition"] | null | undefined): { op: string; key: string; values: string[] }[] {
+  const out: { op: string; key: string; values: string[] }[] = []
+  if (!cond || typeof cond !== "object") return out
+  for (const [op, kv] of Object.entries(cond)) {
+    if (!kv || typeof kv !== "object") continue
+    for (const [key, v] of Object.entries(kv)) out.push({ op, key, values: (Array.isArray(v) ? v : [v]).map((x) => String(x)) })
+  }
+  return out
+}
 
 /** PolicyStatementsTable is a readable summary of a policy's statements. */
 export function PolicyStatementsTable({ doc }: { doc: PolicyDocument | undefined | null }) {
-  const statements: PolicyStatement[] = doc?.Statement ?? []
+  const statements = statementsOf<PolicyStatement>(doc).filter((s) => s && typeof s === "object")
   if (!statements.length) return <p className="text-muted-foreground text-sm">This policy has no statements.</p>
+  const hasCond = statements.some((s) => conditionLines(s.Condition).length > 0)
   return (
     <div className="overflow-x-auto rounded-md border">
       <table className="w-full text-sm">
@@ -114,43 +152,72 @@ export function PolicyStatementsTable({ doc }: { doc: PolicyDocument | undefined
             <th className="px-3 py-2 font-semibold">Effect</th>
             <th className="px-3 py-2 font-semibold">Actions</th>
             <th className="px-3 py-2 font-semibold">Resources</th>
+            {hasCond && <th className="px-3 py-2 font-semibold">Conditions</th>}
           </tr>
         </thead>
         <tbody>
-          {statements.map((s, i) => (
-            <tr key={i} className="border-b align-top last:border-0">
-              <td className="px-3 py-2">
-                <StatusBadge status={s.Effect === "Allow" ? "allowed" : "explicitDeny"} label={s.Effect} />
-                {s.Sid && <div className="text-muted-foreground mt-1 text-xs">{s.Sid}</div>}
-              </td>
-              <td className="px-3 py-2">
-                <div className="flex flex-wrap gap-1">
-                  {asList(s.Action).map((a) => (
-                    <code key={a} className="bg-muted rounded px-1.5 py-0.5 text-xs">
-                      {a === "*" ? "* (all actions)" : a}
-                    </code>
-                  ))}
-                </div>
-              </td>
-              <td className="px-3 py-2">
-                <div className="flex flex-col gap-0.5">
-                  {asList(s.Resource).map((r) => (
-                    <span key={r} className="font-mono text-xs break-all">
-                      {r === "*" ? "* (all resources)" : r}
-                    </span>
-                  ))}
-                </div>
-              </td>
-            </tr>
-          ))}
+          {statements.map((s, i) => {
+            const notAction = s.Action === undefined && s.NotAction !== undefined
+            const notResource = s.Resource === undefined && s.NotResource !== undefined
+            const conds = conditionLines(s.Condition)
+            return (
+              <tr key={i} className="border-b align-top last:border-0">
+                <td className="px-3 py-2">
+                  <StatusBadge status={s.Effect === "Allow" ? "allowed" : "explicitDeny"} label={s.Effect} />
+                  {s.Sid && <div className="text-muted-foreground mt-1 text-xs">{s.Sid}</div>}
+                </td>
+                <td className="px-3 py-2">
+                  {notAction && <div className="mb-1 text-xs font-medium text-amber-700 dark:text-amber-300">All actions except (NotAction)</div>}
+                  <div className="flex flex-wrap gap-1">
+                    {asList(notAction ? s.NotAction : s.Action).map((a) => (
+                      <code key={a} className="bg-muted rounded px-1.5 py-0.5 text-xs">
+                        {a === "*" ? "* (all actions)" : a}
+                      </code>
+                    ))}
+                  </div>
+                </td>
+                <td className="px-3 py-2">
+                  {notResource && <div className="mb-1 text-xs font-medium text-amber-700 dark:text-amber-300">All resources except (NotResource)</div>}
+                  <div className="flex flex-col gap-0.5">
+                    {asList(notResource ? s.NotResource : s.Resource).map((r) => (
+                      <span key={r} className="font-mono text-xs break-all">
+                        {r === "*" ? "* (all resources)" : r}
+                      </span>
+                    ))}
+                  </div>
+                </td>
+                {hasCond && (
+                  <td className="px-3 py-2">
+                    {conds.length ? (
+                      <div className="flex flex-col gap-1">
+                        {conds.map((c) => (
+                          <span key={`${c.op}:${c.key}`} className="font-mono text-xs break-all">
+                            <span className="text-muted-foreground">{c.op}</span> {c.key}: {c.values.join(", ")}
+                          </span>
+                        ))}
+                      </div>
+                    ) : (
+                      <span className="text-muted-foreground text-xs">None</span>
+                    )}
+                  </td>
+                )}
+              </tr>
+            )
+          })}
         </tbody>
       </table>
     </div>
   )
 }
 
+/** policyTypeLabel is the AWS console's name for a policy's type. */
+export const policyTypeLabel = (managed: boolean | undefined) => (managed ? "AWS managed" : "Customer managed")
+
+/** policyNameFromArn returns the policy name of a policy ARN (or the input when it is a name). */
+export const policyNameFromArn = (arn: string) => arn.slice(arn.lastIndexOf("/") + 1)
+
 export function PolicyTypeBadge({ managed }: { managed: boolean }) {
-  return managed ? <StatusBadge status="managed" tone="info" label="HomeCloud managed" /> : <StatusBadge status="customer" tone="neutral" label="Customer managed" />
+  return managed ? <StatusBadge status="managed" tone="info" label="AWS managed" /> : <StatusBadge status="customer" tone="neutral" label="Customer managed" />
 }
 
 /** Common actions, grouped by service, for pickers and the policy editor. */
@@ -204,7 +271,7 @@ export function PolicyPicker({
           {(
             [
               ["all", "All types"],
-              ["managed", "HomeCloud managed"],
+              ["managed", "AWS managed"],
               ["local", "Customer managed"],
             ] as const
           ).map(([k, l]) => (

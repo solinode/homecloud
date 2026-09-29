@@ -4,7 +4,9 @@ import { useState } from "react"
 import Link from "next/link"
 import { AlertCircle, ArrowLeft, Download, ExternalLink, FlaskConical, Loader2, Trash2 } from "lucide-react"
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { roleHref } from "@/components/iam/role-common"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
@@ -22,13 +24,15 @@ import { useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { FunctionDetail as FunctionDetailData, LambdaFunction } from "@/lib/types"
 
 import { CodeTab, downloadZipUrl } from "./code-tab"
-import { DeleteFunctionDialog, EnvironmentStateBadge, RuntimeBadge, fnPath, formatTimeout, useRuntimeLabels } from "./common"
+import { DeleteFunctionDialog, EnvironmentStateBadge, FunctionStateBadge, RuntimeBadge, fnPath, formatTimeout, layerHref, splitLayerArn, useRuntimeLabels } from "./common"
 import { ConfigurationTab, FunctionUrlTab } from "./config-tab"
+import { ImageCodeTab } from "./image-picker"
+import { AliasesTab, VersionsTab } from "./versions"
 import { LogsTab } from "./logs-tab"
 import { TestTab } from "./test-tab"
 import { TriggersTab } from "./triggers"
 
-const TABS = ["code", "test", "configuration", "url", "triggers", "monitoring", "logs"] as const
+const TABS = ["code", "test", "configuration", "versions", "aliases", "url", "triggers", "monitoring", "logs"] as const
 type Tab = (typeof TABS)[number]
 
 export function FunctionDetail() {
@@ -69,6 +73,7 @@ export function FunctionDetail() {
   if (isLoading || !data) return <DetailSkeleton />
 
   const fn = data.configuration
+  const isImage = fn.package_type === "Image"
 
   return (
     <div className="flex flex-col gap-4">
@@ -76,7 +81,8 @@ export function FunctionDetail() {
         title={fn.name}
         badge={
           <>
-            <RuntimeBadge runtime={fn.runtime} label={labels.get(fn.runtime)} />
+            {isImage ? <RuntimeBadge runtime="Container image" /> : <RuntimeBadge runtime={fn.runtime} label={labels.get(fn.runtime)} />}
+            {fn.state && fn.state !== "Active" && <FunctionStateBadge fn={fn} />}
             <EnvironmentStateBadge state={data.environment_state} />
           </>
         }
@@ -88,11 +94,13 @@ export function FunctionDetail() {
               {isValidating ? <Loader2 className="animate-spin" /> : null}
               Refresh
             </Button>
-            <Button variant="outline" size="sm" asChild>
-              <a href={downloadZipUrl(fn.name)} download={`${fn.name}.zip`}>
-                <Download /> Download .zip
-              </a>
-            </Button>
+            {!isImage && (
+              <Button variant="outline" size="sm" asChild>
+                <a href={downloadZipUrl(fn.name)} download={`${fn.name}.zip`}>
+                  <Download /> Download .zip
+                </a>
+              </Button>
+            )}
             <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(true)}>
               <Trash2 /> Delete
             </Button>
@@ -103,13 +111,33 @@ export function FunctionDetail() {
         }
       />
 
-      <Overview fn={fn} />
+      {(fn.state === "Failed" || fn.last_update_status === "Failed") && (
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertTitle>{fn.state === "Failed" ? "The function failed to become active" : "The last update failed"}</AlertTitle>
+          <AlertDescription>
+            {fn.state === "Failed" ? fn.state_reason : fn.last_update_status_reason}
+            {fn.state === "Failed" && fn.state_reason_code && <span className="font-mono"> ({fn.state_reason_code})</span>}
+          </AlertDescription>
+        </Alert>
+      )}
+      {(fn.state === "Pending" || fn.last_update_status === "InProgress") && (
+        <Alert>
+          <Loader2 className="animate-spin" />
+          <AlertTitle>{fn.state === "Pending" ? "Creating the function" : "Updating the function"}</AlertTitle>
+          <AlertDescription>{fn.state_reason || fn.last_update_status_reason || "Pulling the image. Invocations wait until it is ready."}</AlertDescription>
+        </Alert>
+      )}
+
+      <Overview fn={fn} detail={data} />
 
       <Tabs value={tab} onValueChange={(v) => setParam("tab", v === "code" ? null : v)}>
         <TabsList>
           <TabsTrigger value="code">Code</TabsTrigger>
           <TabsTrigger value="test">Test</TabsTrigger>
           <TabsTrigger value="configuration">Configuration</TabsTrigger>
+          <TabsTrigger value="versions">Versions</TabsTrigger>
+          <TabsTrigger value="aliases">Aliases</TabsTrigger>
           <TabsTrigger value="url">Function URL</TabsTrigger>
           <TabsTrigger value="triggers">Triggers</TabsTrigger>
           <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
@@ -117,13 +145,19 @@ export function FunctionDetail() {
         </TabsList>
         {/* The code tab stays mounted so unsaved edits survive switching tabs. */}
         <TabsContent value="code" forceMount className="data-[state=inactive]:hidden">
-          <CodeTab fn={fn} active={tab === "code"} />
+          {isImage ? <ImageCodeTab fn={fn} /> : <CodeTab fn={fn} active={tab === "code"} />}
         </TabsContent>
         <TabsContent value="test">
           <TestTab fn={fn} />
         </TabsContent>
         <TabsContent value="configuration">
-          <ConfigurationTab fn={fn} />
+          <ConfigurationTab fn={fn} detail={data} />
+        </TabsContent>
+        <TabsContent value="versions">
+          <VersionsTab fn={fn} />
+        </TabsContent>
+        <TabsContent value="aliases">
+          <AliasesTab fn={fn} />
         </TabsContent>
         <TabsContent value="url">
           <FunctionUrlTab fn={fn} />
@@ -163,19 +197,62 @@ function BackButton() {
   )
 }
 
-function Overview({ fn }: { fn: LambdaFunction }) {
+function Overview({ fn, detail }: { fn: LambdaFunction; detail: FunctionDetailData }) {
   const url = fn.function_url?.enabled ? fn.function_url.url : ""
+  const roleName = fn.role?.split("/").pop()
+  const layers = fn.layers ?? []
   return (
     <Section title="Function overview">
       <KeyValueGrid
         columns={3}
         items={[
-          { label: "Handler", value: <span className="font-mono text-[13px] break-all">{fn.handler}</span> },
+          fn.package_type === "Image"
+            ? { label: "Image URI", value: <span className="font-mono text-[13px] break-all">{fn.image_uri}</span> }
+            : { label: "Handler", value: <span className="font-mono text-[13px] break-all">{fn.handler}</span> },
+          { label: "State", value: <FunctionStateBadge fn={fn} /> },
+          { label: "Architecture", value: <span className="font-mono text-[13px]">{(fn.architectures ?? []).join(", ") || "x86_64"}</span> },
+          {
+            label: "Execution role",
+            value: roleName ? (
+              <Link href={roleHref(roleName)} className="text-primary hover:underline">
+                {roleName}
+              </Link>
+            ) : (
+              <span className="text-muted-foreground">None</span>
+            ),
+          },
+          {
+            label: "Layers",
+            value: layers.length ? (
+              <span className="flex flex-wrap gap-x-2">
+                {layers.map((l) => {
+                  const p = splitLayerArn(l)
+                  return (
+                    <Link key={l} href={layerHref(p.name)} className="text-primary hover:underline">
+                      {p.name}:{p.version}
+                    </Link>
+                  )
+                })}
+              </span>
+            ) : (
+              <span className="text-muted-foreground">None</span>
+            ),
+          },
+          {
+            label: "Concurrency",
+            value: (
+              <span>
+                {detail.concurrent_executions ?? 0} running / limit {detail.concurrency_limit ?? "-"}
+                {fn.reserved_concurrency != null && <span className="text-muted-foreground text-xs"> (reserved)</span>}
+              </span>
+            ),
+          },
           { label: "Memory", value: formatMemoryMB(fn.memory_mb) },
           { label: "Timeout", value: formatTimeout(fn.timeout_seconds) },
           { label: "Last modified", value: <span>{formatDate(fn.last_modified)} (<TimeAgo value={fn.last_modified} />)</span> },
           { label: "Code size", value: formatBytes(fn.code_size) },
           { label: "Code SHA-256", value: <CopyableText value={fn.code_sha256} display={`${fn.code_sha256.slice(0, 16)}…`} /> },
+          { label: "Latest version", value: fn.last_version ? String(fn.last_version) : <span className="text-muted-foreground">Not published</span> },
           {
             label: "Log group",
             value: (

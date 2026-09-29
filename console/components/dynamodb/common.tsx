@@ -1,7 +1,7 @@
 "use client"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import type { DynamoItem, DynamoTable, KeyDef, KeyType, TableIndex } from "@/lib/types"
+import type { DynamoItem, DynamoTable, IndexProjection, KeyDef, KeyType, ProjectionType, StreamViewType, TableIndex } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 export const TABLES_PATH = "/api/v1/dynamodb/tables"
@@ -122,6 +122,91 @@ export function keySkeleton(t: Pick<DynamoTable, "partition_key" | "sort_key">):
 export function indexes(t: Pick<DynamoTable, "global_secondary_indexes">): TableIndex[] {
   return t.global_secondary_indexes ?? []
 }
+
+export function localIndexes(t: Pick<DynamoTable, "local_secondary_indexes">): TableIndex[] {
+  return t.local_secondary_indexes ?? []
+}
+
+/** allIndexes lists global then local secondary indexes, each tagged with its kind. */
+export function allIndexes(t: Pick<DynamoTable, "global_secondary_indexes" | "local_secondary_indexes">): (TableIndex & { local: boolean })[] {
+  return [...indexes(t).map((i) => ({ ...i, local: false })), ...localIndexes(t).map((i) => ({ ...i, local: true }))]
+}
+
+export const PROJECTION_LABEL: Record<ProjectionType, string> = { ALL: "All attributes", KEYS_ONLY: "Keys only", INCLUDE: "Include" }
+
+/** projectionLabel renders an index projection: "All attributes", "Include: a, b". */
+export function projectionLabel(p?: IndexProjection | null): string {
+  if (!p || p.type === "ALL") return PROJECTION_LABEL.ALL
+  if (p.type === "INCLUDE") return `Include: ${(p.non_key_attributes ?? []).join(", ") || "-"}`
+  return PROJECTION_LABEL[p.type] ?? p.type
+}
+
+export const STREAM_VIEW_TYPES: { value: StreamViewType; label: string; help: string }[] = [
+  { value: "NEW_AND_OLD_IMAGES", label: "New and old images", help: "The item before and after each change." },
+  { value: "NEW_IMAGE", label: "New image", help: "The item as it appears after the change." },
+  { value: "OLD_IMAGE", label: "Old image", help: "The item as it appeared before the change." },
+  { value: "KEYS_ONLY", label: "Keys only", help: "Only the key attributes of the changed item." },
+]
+
+export function streamViewLabel(v?: string | null): string {
+  return STREAM_VIEW_TYPES.find((s) => s.value === v)?.label ?? v ?? "-"
+}
+
+/** StreamViewTypeSelect picks a stream view type. */
+export function StreamViewTypeSelect({
+  value,
+  onChange,
+  id,
+  className,
+  disabled,
+}: {
+  value: StreamViewType
+  onChange: (v: StreamViewType) => void
+  id?: string
+  className?: string
+  disabled?: boolean
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as StreamViewType)} disabled={disabled}>
+      <SelectTrigger id={id} size="sm" className={cn("w-full max-w-sm", className)} aria-label="Stream view type">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        {STREAM_VIEW_TYPES.map((s) => (
+          <SelectItem key={s.value} value={s.value}>
+            {s.label}
+          </SelectItem>
+        ))}
+      </SelectContent>
+    </Select>
+  )
+}
+
+/** ProjectionTypeSelect picks the attributes an index copies. */
+export function ProjectionTypeSelect({
+  value,
+  onChange,
+  className,
+}: {
+  value: ProjectionType
+  onChange: (v: ProjectionType) => void
+  className?: string
+}) {
+  return (
+    <Select value={value} onValueChange={(v) => onChange(v as ProjectionType)}>
+      <SelectTrigger size="sm" className={cn("w-full", className)} aria-label="Projected attributes">
+        <SelectValue />
+      </SelectTrigger>
+      <SelectContent>
+        <SelectItem value="ALL">All attributes</SelectItem>
+        <SelectItem value="KEYS_ONLY">Keys only</SelectItem>
+        <SelectItem value="INCLUDE">Keys + selected attributes</SelectItem>
+      </SelectContent>
+    </Select>
+  )
+}
+
+export const DELETION_PROTECTED_MESSAGE = "Deletion protection is on for this table. Turn deletion protection off before deleting the table."
 
 /** compactJson renders a value as single-line JSON, truncated. */
 export function compactJson(v: unknown, max = 60): string {

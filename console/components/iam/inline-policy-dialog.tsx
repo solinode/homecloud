@@ -16,7 +16,7 @@ import { IAM, POLICY_TEMPLATE, PolicyStatementsTable, nameError, policyJson, val
 
 /**
  * InlinePolicyDialog creates, views or edits an inline policy of a user or
- * role (`kind`). `initial` null = create.
+ * role or group (`kind`). `initial` null = create.
  */
 export function InlinePolicyDialog({
   open,
@@ -30,9 +30,9 @@ export function InlinePolicyDialog({
 }: {
   open: boolean
   onOpenChange: (o: boolean) => void
-  /** Name of the user or role the policy is embedded in. */
+  /** Name of the user, role or group the policy is embedded in. */
   owner: string
-  kind?: "user" | "role"
+  kind?: "user" | "role" | "group"
   initial: { name: string; doc: PolicyDocument } | null
   existing: string[]
   readOnly?: boolean

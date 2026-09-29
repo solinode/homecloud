@@ -169,7 +169,7 @@ export function CryptoTool({ keyId, lockKey }: { keyId?: string; lockKey?: boole
                 {keys.error ? (
                   <ErrorState error={keys.error} onRetry={() => keys.mutate()} />
                 ) : (
-                  <KeyPicker id="crypto-key" keys={keys.data} value={key} onChange={setKey} onlyEnabled disabled={lockKey} />
+                  <KeyPicker id="crypto-key" keys={keys.data} value={key} onChange={setKey} onlyEnabled symmetricOnly disabled={lockKey} />
                 )}
               </Field>
               <Field

@@ -16,7 +16,7 @@ import { formatBytes, formatMemoryMB } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
 import type { LambdaFunction } from "@/lib/types"
 
-import { DeleteFunctionDialog, FUNCTIONS_PATH, RuntimeBadge, formatTimeout, functionHref, useRuntimeLabels } from "./common"
+import { DeleteFunctionDialog, FUNCTIONS_PATH, FunctionStateBadge, RuntimeBadge, formatTimeout, functionHref, useRuntimeLabels } from "./common"
 
 export function FunctionUrlIndicator({ fn }: { fn: LambdaFunction }) {
   if (!fn.function_url?.enabled) return <span className="text-muted-foreground">-</span>
@@ -71,8 +71,16 @@ export function FunctionsList() {
     {
       id: "runtime",
       header: "Runtime",
-      value: (f) => labels.get(f.runtime) ?? f.runtime,
-      cell: (f) => <RuntimeBadge runtime={f.runtime} label={labels.get(f.runtime)} />,
+      value: (f) => (f.package_type === "Image" ? "Image" : (labels.get(f.runtime) ?? f.runtime)),
+      cell: (f) => (f.package_type === "Image" ? <RuntimeBadge runtime="Container image" /> : <RuntimeBadge runtime={f.runtime} label={labels.get(f.runtime)} />),
+    },
+    { id: "state", header: "State", value: (f) => f.state, cell: (f) => <FunctionStateBadge fn={f} />, hideBelow: "sm" },
+    {
+      id: "arch",
+      header: "Architecture",
+      value: (f) => (f.architectures ?? []).join(","),
+      cell: (f) => <span className="font-mono text-xs">{(f.architectures ?? []).join(", ") || "x86_64"}</span>,
+      hideBelow: "lg",
     },
     { id: "memory", header: "Memory", value: (f) => f.memory_mb, cell: (f) => formatMemoryMB(f.memory_mb), hideBelow: "sm" },
     { id: "timeout", header: "Timeout", value: (f) => f.timeout_seconds, cell: (f) => formatTimeout(f.timeout_seconds), hideBelow: "md" },

@@ -26,6 +26,7 @@ import type { IamGroup, IamUser, PolicySummary } from "@/lib/types"
 
 import { AttachPoliciesDialog, PickDialog, runEach } from "./dialogs"
 import { IAM, LINK, PolicyTypeBadge, policyHref, userHref } from "./common"
+import { InlinePoliciesSection } from "./inline-policies-section"
 
 export function GroupDetail() {
   const name = useQueryParam("name")
@@ -77,6 +78,7 @@ export function GroupDetail() {
     )
 
   const base = `${IAM}/groups/${seg(group.name)}`
+  const inlineCount = Object.keys(group.inline_policies ?? {}).length
 
   const memberCols: Column<IamUser>[] = [
     {
@@ -116,7 +118,7 @@ export function GroupDetail() {
         </Link>
       ),
     },
-    { id: "type", header: "Type", value: (p) => (p.managed ? "HomeCloud managed" : "Customer managed"), cell: (p) => <PolicyTypeBadge managed={p.managed} /> },
+    { id: "type", header: "Type", value: (p) => (p.managed ? "AWS managed" : "Customer managed"), cell: (p) => <PolicyTypeBadge managed={p.managed} /> },
     { id: "desc", header: "Description", value: (p) => p.description, cell: (p) => <span className="text-muted-foreground">{p.description || "-"}</span>, hideBelow: "md" },
   ]
 
@@ -137,7 +139,8 @@ export function GroupDetail() {
           items={[
             { label: "User group name", value: group.name },
             { label: "Created", value: formatDate(group.created_at) },
-            { label: "ARN", value: <CopyableText value={group.arn} className="text-[13px]" /> },
+            { label: "Path", value: <span className="font-mono text-[13px]">{group.path ?? "/"}</span> },
+            { label: "ARN", value: <CopyableText value={group.arn} className="text-[13px]" />, wide: true },
           ]}
         />
       </Section>
@@ -145,7 +148,7 @@ export function GroupDetail() {
       <Tabs value={tab} onValueChange={(v) => setParam("tab", v === "users" ? null : v)}>
         <TabsList>
           <TabsTrigger value="users">Users ({group.members.length})</TabsTrigger>
-          <TabsTrigger value="permissions">Permissions ({group.attached_policies.length})</TabsTrigger>
+          <TabsTrigger value="permissions">Permissions ({group.attached_policies.length + inlineCount})</TabsTrigger>
         </TabsList>
         <TabsContent value="users">
           <DataTable
@@ -182,7 +185,7 @@ export function GroupDetail() {
             }
           />
         </TabsContent>
-        <TabsContent value="permissions">
+        <TabsContent value="permissions" className="flex flex-col gap-6">
           <DataTable
             title="Permissions policies"
             description="Policies attached to the group apply to all of its users."
@@ -207,8 +210,8 @@ export function GroupDetail() {
             empty={
               <EmptyState
                 icon={ShieldCheck}
-                title="No permissions defined"
-                description="Attach policies to give the group's users permissions."
+                title="No managed policies attached"
+                description="Attach managed policies, or add an inline policy below, to give the group's users permissions."
                 action={
                   <Button size="sm" onClick={() => setAttach(true)}>
                     <Plus /> Attach policies
@@ -217,6 +220,7 @@ export function GroupDetail() {
               />
             }
           />
+          <InlinePoliciesSection kind="group" owner={group.name} policies={group.inline_policies} onChanged={refresh} description="Policies embedded in this group only. Every user in the group gets their permissions." />
         </TabsContent>
       </Tabs>
 

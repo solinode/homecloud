@@ -17,6 +17,9 @@ import { api, errorMessage } from "@/lib/api"
 import { revalidate } from "@/lib/hooks"
 import type { Secret } from "@/lib/types"
 
+import { useKmsKeys } from "@/components/kms/shared"
+
+import { DEFAULT_SENTINEL, KeyHelp, SecretKeyPicker } from "./encryption"
 import { secretHref } from "./secret-list"
 import { draftError, draftValue, SecretValueEditor, type SecretDraft } from "./value-editor"
 
@@ -35,6 +38,8 @@ export function CreateSecret() {
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [tags, setTags] = useState<TagRow[]>([])
+  const [keySel, setKeySel] = useState(DEFAULT_SENTINEL)
+  const keys = useKmsKeys()
   const [submitted, setSubmitted] = useState(false)
   const [pending, setPending] = useState(false)
 
@@ -47,7 +52,13 @@ export function CreateSecret() {
     if (nErr || vErr) return
     setPending(true)
     try {
-      const s = await api.post<Secret>("/api/v1/secrets", { name, description, value: draftValue(draft), tags: rowsToTags(tags) })
+      const s = await api.post<Secret>("/api/v1/secrets", {
+        name,
+        description,
+        value: draftValue(draft),
+        kms_key_id: keySel === DEFAULT_SENTINEL ? undefined : keySel,
+        tags: rowsToTags(tags),
+      })
       toast.success(`Secret ${s.name} stored`)
       revalidate("/api/v1/secrets")
       router.push(secretHref(s.name))
@@ -61,7 +72,7 @@ export function CreateSecret() {
     <form onSubmit={submit} className="flex flex-col gap-4 pb-20">
       <PageHeader
         title="Store a new secret"
-        description="Secret values are encrypted with AES-256-GCM and versioned: updating a value keeps the previous one as AWSPREVIOUS."
+        description="Secret values are encrypted and versioned: updating a value keeps the previous one as AWSPREVIOUS. Rotation can be turned on after the secret is stored."
         breadcrumbs={[{ label: "Secrets Manager", href: "/secrets/" }, { label: "Secrets", href: "/secrets/" }, { label: "Store a new secret" }]}
         className="mb-1"
       />
@@ -82,6 +93,14 @@ export function CreateSecret() {
           </Field>
           <Field label="Description" htmlFor="secret-description" optional>
             <Textarea id="secret-description" value={description} onChange={(e) => setDescription(e.target.value)} rows={2} placeholder="Credentials for the production database" />
+          </Field>
+        </div>
+      </Section>
+
+      <Section title="Encryption" description="Choose the key that protects the secret value. You can change it later; existing versions are re-encrypted.">
+        <div className="max-w-2xl">
+          <Field label="Encryption key" htmlFor="secret-key" help={<KeyHelp value={keySel} />}>
+            <SecretKeyPicker id="secret-key" keys={keys.data} value={keySel} onChange={setKeySel} />
           </Field>
         </div>
       </Section>
