@@ -192,7 +192,7 @@ export function AlarmDialog({
     setTouched(true)
     if (!valid) return
     setPending(true)
-    const body = {
+    const body: Record<string, unknown> = {
       // keep settings this form does not edit (set through the CloudWatch API)
       ...(alarm
         ? {
@@ -216,6 +216,13 @@ export function AlarmDialog({
       comparison_operator: operator,
       alarm_actions: alarmActions.map((a) => a.trim()),
       ok_actions: okActions.map((a) => a.trim()),
+    }
+    // The API takes either Statistic or ExtendedStatistic, and either a single
+    // metric or metric-math queries: don't send the form's single-metric fields
+    // for alarms defined the other way.
+    if (alarm?.extended_statistic) delete body.statistic
+    if (alarm?.metrics?.length) {
+      for (const k of ["namespace", "metric", "dimensions", "statistic", "extended_statistic"]) delete body[k]
     }
     try {
       await api.put<Alarm>(`/api/v1/cloudwatch/alarms/${seg(name.trim())}`, body)

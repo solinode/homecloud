@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type ReactNode } from "react"
+import { useRef, useState, type ReactNode } from "react"
 import { Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -38,10 +38,13 @@ export function FormDialog({
   children: ReactNode
 }) {
   const [pending, setPending] = useState(false)
+  // A ref, not state: two quick Enter presses arrive before a re-render.
+  const inFlight = useRef(false)
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()
     e.stopPropagation() // dialogs portal out of, but React-bubble into, an enclosing form
-    if (disabled) return
+    if (disabled || inFlight.current) return
+    inFlight.current = true
     setPending(true)
     try {
       const keepOpen = (await onSubmit()) === KEEP_OPEN
@@ -49,6 +52,7 @@ export function FormDialog({
     } catch (err) {
       toast.error(errorMessage(err))
     } finally {
+      inFlight.current = false
       setPending(false)
     }
   }

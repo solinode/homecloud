@@ -336,8 +336,10 @@ func (s *Service) put(c *httpx.Ctx) (any, error) {
 	}
 	name := c.Param("name")
 	bus := qbus(c)
-	if in.EventBus != "" {
-		bus = in.EventBus
+	// The query parameter names the bus, as for every other rule route; a body
+	// value is accepted only when it agrees.
+	if in.EventBus != "" && in.EventBus != bus {
+		return nil, core.BadRequest("event_bus in the body (%s) does not match the event_bus query parameter (%s)", in.EventBus, bus)
 	}
 	if len(in.Targets) > 5 {
 		return nil, core.BadRequest("a rule has at most 5 targets")

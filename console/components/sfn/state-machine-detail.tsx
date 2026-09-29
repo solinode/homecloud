@@ -102,7 +102,7 @@ export function StateMachineDetailPage() {
       <PageHeader
         title={sm.name}
         badge={<StatusBadge status={sm.status.toLowerCase()} />}
-        description={sm.definition.Comment ? String(sm.definition.Comment) : "Standard state machine"}
+        description={sm.definition.Comment ? String(sm.definition.Comment) : `${sm.type === "EXPRESS" ? "Express" : "Standard"} state machine`}
         breadcrumbs={crumbs}
         actions={
           <>

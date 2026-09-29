@@ -2,6 +2,7 @@ package cloudwatch
 
 import (
 	"errors"
+	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"slices"
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi"
@@ -100,6 +101,9 @@ func (s *Service) nDeleteSubFilter(c *httpx.Ctx) (any, error) {
 }
 
 func (s *Service) nAlarmHistory(c *httpx.Ctx) (any, error) {
+	if !store.Has(s.env.Store, cAlarms, c.Param("name")) {
+		return nil, core.NotFound("alarm", c.Param("name"))
+	}
 	out := slices.Clone(s.history(c.Param("name")))
 	slices.SortStableFunc(out, func(a, b AlarmHistoryItem) int { return b.Timestamp.Compare(a.Timestamp) })
 	if out == nil {

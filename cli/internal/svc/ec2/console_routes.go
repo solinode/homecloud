@@ -134,12 +134,18 @@ func (s *Service) attachIGW(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	if err := c.Authorize("ec2:AttachInternetGateway", ec2ARN(c, "vpc/"+in.VpcID)); err != nil {
+		return nil, err
+	}
 	return nil, s.AttachInternetGateway(c.Param("id"), in.VpcID)
 }
 
 func (s *Service) detachIGW(c *httpx.Ctx) (any, error) {
 	var in tagsBody
 	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	if err := c.Authorize("ec2:DetachInternetGateway", ec2ARN(c, "vpc/"+in.VpcID)); err != nil {
 		return nil, err
 	}
 	return nil, s.DetachInternetGateway(c.Param("id"), in.VpcID)
@@ -159,6 +165,9 @@ func (s *Service) listRTBs(c *httpx.Ctx) (any, error) {
 func (s *Service) createRTB(c *httpx.Ctx) (any, error) {
 	var in tagsBody
 	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	if err := c.Authorize("ec2:CreateRouteTable", ec2ARN(c, "vpc/"+in.VpcID)); err != nil {
 		return nil, err
 	}
 	return s.CreateRouteTable(in.VpcID, in.Tags)
@@ -188,10 +197,19 @@ func (s *Service) associateRTB(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	if err := c.Authorize("ec2:AssociateRouteTable", ec2ARN(c, "subnet/"+in.SubnetID)); err != nil {
+		return nil, err
+	}
 	id, err := s.AssociateRouteTable(c.Param("id"), in.SubnetID)
 	return map[string]string{"association_id": id}, err
 }
 
 func (s *Service) disassociateRTB(c *httpx.Ctx) (any, error) {
 	return nil, s.DisassociateRouteTable(c.Param("assoc"))
+}
+
+// ec2ARN is the ARN of an EC2 resource in the caller's account, for checks on
+// resources named in the request body (the route's own resource is checked by the router).
+func ec2ARN(c *httpx.Ctx, resource string) string {
+	return "arn:aws:ec2:" + core.Region + ":" + c.Account + ":" + resource
 }

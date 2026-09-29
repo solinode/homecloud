@@ -30,7 +30,8 @@ export function downloadText(filename: string, text: string) {
   a.href = url
   a.download = filename
   a.click()
-  URL.revokeObjectURL(url)
+  // Revoke after the click has started the download (some browsers cancel it otherwise).
+  setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
 const columns: Column<KeyPair>[] = [

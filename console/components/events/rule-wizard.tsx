@@ -247,6 +247,7 @@ export function RuleWizard() {
     if (type === "schedule") {
       const se = scheduleError(schedule)
       if (se) e.schedule = se
+      else if (bus !== "default") e.schedule = "Schedules run on the default event bus only"
     } else {
       const pe = jsonError(pattern) ?? objectOnly(JSON.parse(pattern))
       if (pe) e.pattern = pe
@@ -277,7 +278,7 @@ export function RuleWizard() {
       if (t.maxAge.trim() && (!Number.isInteger(a) || a < 60 || a > 86400)) e[`t${i}age`] = "60 to 86400 seconds"
     })
     return e
-  }, [editing, name, allRules.data, description, type, schedule, pattern, targets])
+  }, [editing, name, allRules.data, description, type, schedule, pattern, targets, bus])
   const err = (k: string) => (submitted ? errors[k] : undefined)
   const valid = Object.keys(errors).length === 0
 
