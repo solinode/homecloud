@@ -33,28 +33,28 @@ const (
 )
 
 type VPC struct {
-	ID             string    `json:"id"`
-	Name           string    `json:"name"`
-	CIDR           string    `json:"cidr"`
-	Network        string    `json:"network"` // docker network name
-	Default        bool      `json:"default"`
-	InternetAccess bool      `json:"internet_access"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	CIDR           string `json:"cidr"`
+	Network        string `json:"network"` // docker network name
+	Default        bool   `json:"default"`
+	InternetAccess bool   `json:"internet_access"`
 	// DNSHostnames and DNSSupportDisabled are the EC2 VPC attributes
 	// enableDnsHostnames / enableDnsSupport (recorded; DNS always works).
-	DNSHostnames       bool   `json:"dns_hostnames,omitempty"`
-	DNSSupportDisabled bool   `json:"dns_support_disabled,omitempty"`
-	State              string `json:"state"`
-	CreatedAt      time.Time `json:"created_at"`
-	Tags           core.Tags `json:"tags,omitempty"`
+	DNSHostnames       bool      `json:"dns_hostnames,omitempty"`
+	DNSSupportDisabled bool      `json:"dns_support_disabled,omitempty"`
+	State              string    `json:"state"`
+	CreatedAt          time.Time `json:"created_at"`
+	Tags               core.Tags `json:"tags,omitempty"`
 }
 
 type Subnet struct {
-	ID               string    `json:"id"`
-	VpcID            string    `json:"vpc_id"`
-	Name             string    `json:"name"`
-	CIDR             string    `json:"cidr"`
-	AvailabilityZone string    `json:"availability_zone"`
-	Default          bool      `json:"default"`
+	ID               string `json:"id"`
+	VpcID            string `json:"vpc_id"`
+	Name             string `json:"name"`
+	CIDR             string `json:"cidr"`
+	AvailabilityZone string `json:"availability_zone"`
+	Default          bool   `json:"default"`
 	// MapPublicIP is the EC2 MapPublicIpOnLaunch attribute (recorded).
 	MapPublicIP bool      `json:"map_public_ip,omitempty"`
 	CreatedAt   time.Time `json:"created_at"`
@@ -80,11 +80,11 @@ type Rule struct {
 }
 
 type SecurityGroup struct {
-	ID          string    `json:"id"`
-	VpcID       string    `json:"vpc_id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Ingress     []Rule    `json:"ingress"`
+	ID          string `json:"id"`
+	VpcID       string `json:"vpc_id"`
+	Name        string `json:"name"`
+	Description string `json:"description"`
+	Ingress     []Rule `json:"ingress"`
 	// Egress rules are recorded, not enforced. Until EgressSet, a group has
 	// AWS's default rule allowing all outbound traffic.
 	Egress    []Rule    `json:"egress,omitempty"`
@@ -770,7 +770,9 @@ func (s *Service) removeRule(c *httpx.Ctx) (any, error) {
 	return g, err
 }
 
-func (s *Service) deleteSG(c *httpx.Ctx) (any, error) { return nil, s.DeleteSecurityGroup(c.Param("id")) }
+func (s *Service) deleteSG(c *httpx.Ctx) (any, error) {
+	return nil, s.DeleteSecurityGroup(c.Param("id"))
+}
 
 // DeleteSecurityGroup removes a group that no resource or other group's rule uses.
 func (s *Service) DeleteSecurityGroup(id string) error {

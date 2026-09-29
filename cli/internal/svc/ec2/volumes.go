@@ -50,12 +50,12 @@ type Snapshot struct {
 
 // VolumeModification is the record DescribeVolumesModifications returns.
 type VolumeModification struct {
-	VolumeID                               string    `json:"volume_id"`
-	StartTime                              time.Time `json:"start_time"`
-	OriginalSize, TargetSize               int
-	OriginalType, TargetType               string
-	OriginalIops, TargetIops               int
-	OriginalThroughput, TargetThroughput   int
+	VolumeID                             string    `json:"volume_id"`
+	StartTime                            time.Time `json:"start_time"`
+	OriginalSize, TargetSize             int
+	OriginalType, TargetType             string
+	OriginalIops, TargetIops             int
+	OriginalThroughput, TargetThroughput int
 }
 
 func snapVolume(id string) string { return "hc-" + id }

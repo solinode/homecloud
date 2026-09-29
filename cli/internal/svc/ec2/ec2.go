@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/netip"
 	"slices"
 	"strings"
 	"sync"
@@ -298,14 +299,14 @@ func (s *Service) listTypes(c *httpx.Ctx) (any, error) { return instanceTypes, n
 
 // RunInput describes instances to launch (the RunInstances request body).
 type RunInput struct {
-	Name             string    `json:"name"`
-	ImageID          string    `json:"image_id"`
-	InstanceType     string    `json:"instance_type"`
-	SubnetID         string    `json:"subnet_id"`
-	SecurityGroupIDs []string  `json:"security_group_ids"`
-	UserData         string    `json:"user_data"`
-	Count            int       `json:"count"`
-	Tags             core.Tags `json:"tags"`
+	Name             string       `json:"name"`
+	ImageID          string       `json:"image_id"`
+	InstanceType     string       `json:"instance_type"`
+	SubnetID         string       `json:"subnet_id"`
+	SecurityGroupIDs []string     `json:"security_group_ids"`
+	UserData         string       `json:"user_data"`
+	Count            int          `json:"count"`
+	Tags             core.Tags    `json:"tags"`
 	Volumes          []VolumeSpec `json:"volumes"`
 	FileSystems      []FSMount    `json:"file_systems"`
 	// KeyName puts a key pair's public key in root's authorized_keys.
@@ -318,6 +319,9 @@ type RunInput struct {
 	Attrs InstanceAttrs `json:"-"`
 	// VolumeTags are applied to volumes created at launch.
 	VolumeTags core.Tags `json:"-"`
+	// ExactName gives every instance of a multi-instance launch the same name
+	// (EC2 API) instead of numbering them.
+	ExactName bool `json:"-"`
 }
 
 // VolumeSpec is a volume to attach at launch: an existing one or a new one.
@@ -339,8 +343,8 @@ type VolumeSpec struct {
 // InstanceAttrs are the EC2 API's instance attributes.
 type InstanceAttrs struct {
 	DisableAPITermination, DisableAPIStop, SourceDestCheckOff, Monitoring, EBSOptimized bool
-	ShutdownBehavior, CPUCredits, ClientToken, ReservationID                          string
-	LaunchTemplateID, LaunchTemplateVersion                                           string
+	ShutdownBehavior, CPUCredits, ClientToken, ReservationID                            string
+	LaunchTemplateID, LaunchTemplateVersion                                             string
 }
 
 // devicePath is where an EBS device is mounted: /dev/sdf -> /mnt/sdf.
@@ -501,7 +505,7 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 			return launched, err
 		}
 		name := in.Name
-		if name != "" && in.Count > 1 {
+		if name != "" && in.Count > 1 && !in.ExactName {
 			name = fmt.Sprintf("%s-%d", in.Name, n+1)
 		}
 		inst := Instance{
@@ -895,13 +899,11 @@ func (s *Service) releaseVolumes(i Instance) {
 }
 
 // instanceGone releases what a terminated instance held besides its
-// addresses and volumes: its disk snapshot image, Elastic IP associations
-// and cached role credentials.
+// addresses and volumes: its disk snapshot image and cached role credentials.
 func (s *Service) instanceGone(i Instance) {
 	if i.RootImage != "" {
 		_ = s.env.Docker.C.RemoveImage(i.RootImage)
 	}
-	s.disassociateInstance(i.ID)
 	if s.imds != nil {
 		s.imds.forget(i.ID)
 	}
@@ -926,34 +928,72 @@ func (s *Service) modify(c *httpx.Ctx) (any, error) {
 	if i.State == "terminated" || i.ContainerID == "" {
 		return nil, core.Errf(http.StatusConflict, "IncorrectInstanceState", "instance is %s", i.State)
 	}
-	var it InstanceType
 	if in.InstanceType != "" && in.InstanceType != i.InstanceType {
-		var ok bool
-		if it, ok = findType(in.InstanceType); !ok {
-			return nil, core.BadRequest("unknown instance type %q", in.InstanceType)
-		}
-		if i.State != "stopped" {
-			return nil, core.Errf(http.StatusConflict, "IncorrectInstanceState", "the instance must be stopped to change its type")
-		}
-		mem := it.MemoryMB * 1024 * 1024
-		if err := s.env.Docker.C.UpdateContainer(i.ContainerID, docker.UpdateContainerOptions{
-			Memory: int(mem), MemorySwap: int(mem * 2), CPUPeriod: 100000, CPUQuota: int(min(it.VCPUs, s.hostCPU) * 100000),
-		}); err != nil {
-			return nil, fmt.Errorf("resize container: %w", err)
+		if i, err = s.ChangeType(i.ID, in.InstanceType); err != nil {
+			return nil, err
 		}
 	}
 	return store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error {
 		if in.Name != nil {
 			x.Name = *in.Name
 		}
-		if it.Name != "" {
-			x.InstanceType, x.VCPUs, x.MemoryMB = it.Name, it.VCPUs, it.MemoryMB
-		}
 		if in.Tags != nil {
 			x.Tags = in.Tags
 		}
 		return nil
 	})
+}
+
+// ChangeType resizes a stopped instance to another instance type.
+func (s *Service) ChangeType(id, typ string) (Instance, error) {
+	i, err := s.get(id)
+	if err != nil {
+		return i, err
+	}
+	if typ == i.InstanceType {
+		return i, nil
+	}
+	it, ok := findType(typ)
+	if !ok {
+		return i, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "unknown instance type %q", typ)
+	}
+	if i.State != "stopped" || i.ContainerID == "" {
+		return i, core.Errf(http.StatusConflict, "IncorrectInstanceState", "the instance %s must be stopped to change its type", i.ID)
+	}
+	mem := it.MemoryMB * 1024 * 1024
+	if err := s.env.Docker.C.UpdateContainer(i.ContainerID, docker.UpdateContainerOptions{
+		Memory: int(mem), MemorySwap: int(mem * 2), CPUPeriod: 100000, CPUQuota: int(min(it.VCPUs, s.hostCPU) * 100000),
+	}); err != nil {
+		return i, fmt.Errorf("resize container: %w", err)
+	}
+	return store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error {
+		x.InstanceType, x.VCPUs, x.MemoryMB = it.Name, it.VCPUs, it.MemoryMB
+		return nil
+	})
+}
+
+// publicIP is the address an instance's published ports are reachable on:
+// the HomeCloud host, when it is configured as an IP address.
+func (s *Service) publicIP(i Instance) string {
+	if len(i.PublicPorts) == 0 {
+		return ""
+	}
+	if a, err := netip.ParseAddr(i.PublicHost); err == nil && a.Is4() {
+		return a.String()
+	}
+	return ""
+}
+
+// tagsOf returns a resource's tags with its name as the Name tag.
+func (s *Service) tagsOf(id, name string, tags core.Tags) core.Tags {
+	out := core.Tags{}
+	for k, v := range tags {
+		out[k] = v
+	}
+	if name != "" {
+		out["Name"] = name
+	}
+	return out
 }
 
 func (s *Service) consoleOutput(c *httpx.Ctx) (any, error) {
@@ -1086,7 +1126,9 @@ func (s *Service) CreateImage(instanceID, name, description string, tags core.Ta
 	return im, store.Put(s.env.Store, cImages, im.ID, im)
 }
 
-func (s *Service) deregisterImage(c *httpx.Ctx) (any, error) { return nil, s.DeregisterImage(c.Param("id")) }
+func (s *Service) deregisterImage(c *httpx.Ctx) (any, error) {
+	return nil, s.DeregisterImage(c.Param("id"))
+}
 
 // DeregisterImage removes an AMI of this account (and its Docker image when
 // HomeCloud captured it).
