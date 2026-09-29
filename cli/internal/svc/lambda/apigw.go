@@ -20,13 +20,14 @@ const cAPIs = "apigw_apis"
 
 // API is an HTTP API (API Gateway v2) whose routes invoke functions.
 type API struct {
-	ID          string    `json:"id"`
-	Name        string    `json:"name"`
-	Description string    `json:"description"`
-	Routes      []Route   `json:"routes"`
-	CORS        bool      `json:"cors"`
-	Endpoint    string    `json:"endpoint"`
-	CreatedAt   time.Time `json:"created_at"`
+	ID          string      `json:"id"`
+	Name        string      `json:"name"`
+	Description string      `json:"description"`
+	Routes      []Route     `json:"routes"`
+	CORS        bool        `json:"cors"`
+	Authorizer  *Authorizer `json:"authorizer,omitempty"`
+	Endpoint    string      `json:"endpoint"`
+	CreatedAt   time.Time   `json:"created_at"`
 }
 
 type Route struct {
@@ -34,7 +35,18 @@ type Route struct {
 	Method       string `json:"method"` // GET, POST, ... or ANY
 	Path         string `json:"path"`   // e.g. /items/{id} or /files/{proxy+}
 	FunctionName string `json:"function_name"`
+	// Authorization is NONE or JWT (requires a token from the API's authorizer user pool).
+	Authorization string `json:"authorization,omitempty"`
 }
+
+// Authorizer validates Cognito user pool tokens on routes marked JWT.
+type Authorizer struct {
+	UserPoolID string `json:"user_pool_id"`
+	Audience   string `json:"audience,omitempty"` // app client ID; empty accepts any client of the pool
+}
+
+// JWTVerifier checks a user pool token (set by the server from the Cognito service).
+type JWTVerifier func(pool, token, audience string) (map[string]any, error)
 
 func (r Route) Key() string { return r.Method + " " + r.Path }
 
@@ -252,16 +264,23 @@ func (s *Service) checkRoute(r *Route) error {
 	if !s.Exists(r.FunctionName) {
 		return core.NotFound("function", r.FunctionName)
 	}
+	if r.Authorization == "" {
+		r.Authorization = "NONE"
+	}
+	if r.Authorization != "NONE" && r.Authorization != "JWT" {
+		return core.BadRequest("authorization must be NONE or JWT")
+	}
 	r.ID = strings.ToLower(core.RandHex(7))
 	return nil
 }
 
 func (s *Service) createAPI(c *httpx.Ctx) (any, error) {
 	var in struct {
-		Name        string  `json:"name"`
-		Description string  `json:"description"`
-		CORS        bool    `json:"cors"`
-		Routes      []Route `json:"routes"`
+		Name        string      `json:"name"`
+		Description string      `json:"description"`
+		CORS        bool        `json:"cors"`
+		Routes      []Route     `json:"routes"`
+		Authorizer  *Authorizer `json:"authorizer"`
 	}
 	if err := c.Bind(&in); err != nil {
 		return nil, err
@@ -270,7 +289,7 @@ func (s *Service) createAPI(c *httpx.Ctx) (any, error) {
 		return nil, core.BadRequest("name is required")
 	}
 	id := strings.ToLower(core.RandHex(10))
-	a := API{ID: id, Name: in.Name, Description: in.Description, CORS: in.CORS, Routes: []Route{}, Endpoint: s.apiEndpoint(id), CreatedAt: core.Now()}
+	a := API{ID: id, Name: in.Name, Description: in.Description, CORS: in.CORS, Routes: []Route{}, Endpoint: s.apiEndpoint(id), CreatedAt: core.Now(), Authorizer: in.Authorizer}
 	for _, r := range in.Routes {
 		if err := s.checkRoute(&r); err != nil {
 			return nil, err
@@ -282,9 +301,10 @@ func (s *Service) createAPI(c *httpx.Ctx) (any, error) {
 
 func (s *Service) patchAPI(c *httpx.Ctx) (any, error) {
 	var in struct {
-		Name        *string `json:"name"`
-		Description *string `json:"description"`
-		CORS        *bool   `json:"cors"`
+		Name        *string     `json:"name"`
+		Description *string     `json:"description"`
+		CORS        *bool       `json:"cors"`
+		Authorizer  *Authorizer `json:"authorizer"`
 	}
 	if err := c.Bind(&in); err != nil {
 		return nil, err
@@ -298,6 +318,13 @@ func (s *Service) patchAPI(c *httpx.Ctx) (any, error) {
 		}
 		if in.CORS != nil {
 			a.CORS = *in.CORS
+		}
+		if in.Authorizer != nil {
+			if in.Authorizer.UserPoolID == "" {
+				a.Authorizer = nil
+			} else {
+				a.Authorizer = in.Authorizer
+			}
 		}
 		return nil
 	})
@@ -380,6 +407,18 @@ func (s *Service) serveAPI(c *httpx.Ctx) (any, error) {
 		ev, err := s.httpEvent(c.R, p, r.Key(), a.ID, params)
 		if err != nil {
 			return nil, err
+		}
+		if r.Authorization == "JWT" {
+			tok := strings.TrimSpace(strings.TrimPrefix(c.R.Header.Get("Authorization"), "Bearer "))
+			if a.Authorizer == nil || s.VerifyJWT == nil || tok == "" {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+			}
+			claims, err := s.VerifyJWT(a.Authorizer.UserPoolID, tok, a.Authorizer.Audience)
+			if err != nil {
+				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
+			}
+			rc := ev["requestContext"].(map[string]any)
+			rc["authorizer"] = map[string]any{"jwt": map[string]any{"claims": claims}}
 		}
 		payload, _ := json.Marshal(ev)
 		res, err := s.Invoke(c.R.Context(), r.FunctionName, payload)

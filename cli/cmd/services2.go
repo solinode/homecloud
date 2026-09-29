@@ -2,6 +2,7 @@ package cmd
 
 import (
 	"encoding/base64"
+	"encoding/json"
 	"fmt"
 	"net/url"
 	"os"
@@ -442,4 +443,45 @@ func init() {
 		fmt.Println(strings.Join(out, "\n"))
 		return nil
 	})
+}
+
+func init() {
+	c := group("cognito", "User pools for application sign-up and sign-in")
+	sub(c, "pools", "List user pools", cobra.NoArgs, func([]string) error {
+		return call("GET", "/api/v1/cognito/user-pools", nil, cols("ID=id", "NAME=name", "USERS=users", "CLIENTS=clients", "ISSUER=issuer"))
+	})
+	sub(c, "create-pool NAME", "Create a user pool", cobra.ExactArgs(1), func(a []string) error {
+		return call("POST", "/api/v1/cognito/user-pools", map[string]any{"name": a[0]}, nil)
+	})
+	var secret bool
+	cc := sub(c, "create-client POOL NAME", "Create an app client", cobra.ExactArgs(2), func(a []string) error {
+		return call("POST", "/api/v1/cognito/user-pools/"+a[0]+"/clients", map[string]any{"name": a[1], "generate_secret": secret}, nil)
+	})
+	cc.Flags().BoolVar(&secret, "secret", false, "generate a client secret (for server-side apps)")
+	sub(c, "users POOL", "List users in a pool", cobra.ExactArgs(1), func(a []string) error {
+		return call("GET", "/api/v1/cognito/user-pools/"+a[0]+"/users", nil, cols("USERNAME=username", "STATUS=status", "ENABLED=enabled", "EMAIL=attributes.email", "GROUPS=groups", "LAST SIGN-IN=last_sign_in"))
+	})
+	var pw string
+	var attrs []string
+	cu := sub(c, "create-user POOL USERNAME", "Create a user (prints a temporary password when --password is omitted)", cobra.ExactArgs(2), func(a []string) error {
+		return call("POST", "/api/v1/cognito/user-pools/"+a[0]+"/users", map[string]any{"username": a[1], "password": pw, "attributes": tagsFlag(attrs)}, nil)
+	})
+	cu.Flags().StringVar(&pw, "password", "", "permanent password")
+	cu.Flags().StringSliceVar(&attrs, "attr", nil, "attributes key=value, e.g. email=a@b.c")
+	var clientID string
+	login := sub(c, "login POOL USERNAME PASSWORD", "Sign in and print tokens (handy for testing APIs)", cobra.ExactArgs(3), func(a []string) error {
+		var out map[string]any
+		resp, err := api().Request("POST", "/cognito/"+a[0]+"/auth", map[string]any{"client_id": clientID, "username": a[1], "password": a[2]}, nil)
+		if err != nil {
+			return err
+		}
+		defer resp.Body.Close()
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return err
+		}
+		printObject(out)
+		return nil
+	})
+	login.Flags().StringVar(&clientID, "client", "", "app client ID (required)")
+	_ = login.MarkFlagRequired("client")
 }

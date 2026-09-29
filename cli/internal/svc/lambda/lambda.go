@@ -86,6 +86,8 @@ type Service struct {
 	Auth httpx.Authenticator
 	// Queues is the SQS service, for event source mappings.
 	Queues QueueSource
+	// VerifyJWT validates user pool tokens for API Gateway routes that require them.
+	VerifyJWT JWTVerifier
 }
 
 func New(env *svc.Env, cw *cloudwatch.Service, v *vpc.Service) *Service {

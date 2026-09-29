@@ -49,6 +49,7 @@ var types = map[string]typeSpec{
 	"HC::IAM::Policy":         {Create: "POST /api/v1/iam/policies", IDField: "name", Get: "/api/v1/iam/policies/{id}", Delete: "DELETE /api/v1/iam/policies/{id}"},
 	"HC::IAM::Group":          {Create: "POST /api/v1/iam/groups", IDField: "name", Get: "/api/v1/iam/groups/{id}", Delete: "DELETE /api/v1/iam/groups/{id}"},
 	"HC::IAM::User":           {Create: "POST /api/v1/iam/users", IDField: "name", Get: "/api/v1/iam/users/{id}", Delete: "DELETE /api/v1/iam/users/{id}"},
+	"HC::Cognito::UserPool":   {Create: "POST /api/v1/cognito/user-pools", IDField: "id", Get: "/api/v1/cognito/user-pools/{id}", Delete: "DELETE /api/v1/cognito/user-pools/{id}"},
 	"HC::CloudWatch::Alarm":   {Create: "PUT /api/v1/cloudwatch/alarms/{name}", IDField: "name", Delete: "DELETE /api/v1/cloudwatch/alarms/{id}"},
 	"HC::Logs::LogGroup":      {Create: "POST /api/v1/logs/groups", IDField: "name", Delete: "DELETE /api/v1/logs/groups/{id}"},
 }
