@@ -42,21 +42,34 @@ type Role struct {
 	MaxSessionSeconds int                       `json:"max_session_duration"`
 	CreatedAt         time.Time                 `json:"created_at"`
 	LastUsed          *time.Time                `json:"last_used,omitempty"`
+	LastUsedRegion    string                    `json:"last_used_region,omitempty"`
 	Tags              core.Tags                 `json:"tags,omitempty"`
+	// PermissionsBoundary is the ARN of a managed policy that limits the role's permissions.
+	PermissionsBoundary string `json:"permissions_boundary,omitempty"`
+	// ServiceLinked roles belong to an AWS service (CreateServiceLinkedRole).
+	ServiceLinked string `json:"service_linked,omitempty"`
+}
+
+func (r Role) path() string {
+	if r.Path == "" {
+		return "/"
+	}
+	return r.Path
 }
 
 // tempCred is a set of temporary credentials issued by STS.
 type tempCred struct {
-	AccessKeyID string    `json:"access_key_id"`
-	SecretCT    string    `json:"secret_ct"`
-	TokenHash   string    `json:"token_hash"`
-	RoleName    string    `json:"role_name,omitempty"`
-	RoleID      string    `json:"role_id,omitempty"`
-	SessionName string    `json:"session_name,omitempty"`
-	UserName    string    `json:"user_name,omitempty"` // GetSessionToken: the user's own permissions
-	UserID      string    `json:"user_id,omitempty"`
-	IssuedTo    string    `json:"issued_to"` // caller ARN or service principal
-	Expires     time.Time `json:"expires"`
+	AccessKeyID string     `json:"access_key_id"`
+	SecretCT    string     `json:"secret_ct"`
+	TokenHash   string     `json:"token_hash"`
+	RoleName    string     `json:"role_name,omitempty"`
+	RoleID      string     `json:"role_id,omitempty"`
+	SessionName string     `json:"session_name,omitempty"`
+	UserName    string     `json:"user_name,omitempty"` // GetSessionToken: the user's own permissions
+	UserID      string     `json:"user_id,omitempty"`
+	IssuedTo    string     `json:"issued_to"` // caller ARN or service principal
+	Issued      *time.Time `json:"issued,omitempty"`
+	Expires     time.Time  `json:"expires"`
 }
 
 // Credentials are temporary credentials handed to a caller.
@@ -89,32 +102,51 @@ func roleName(ref string) string {
 func (s *Service) GetRole(ref string) (Role, error) {
 	r, err := store.Get[Role](s.env.Store, cRoles, roleName(ref))
 	if err != nil {
-		return r, core.Errf(http.StatusNotFound, "NoSuchEntity", "role %s does not exist", roleName(ref))
+		return r, noSuchEntity("The role with name %s cannot be found.", roleName(ref))
 	}
 	return r, nil
 }
 
 func (s *Service) roleDocs(r Role) []PolicyDocument {
-	var docs []PolicyDocument
-	for _, n := range r.AttachedPolicies {
-		if p, err := store.Get[Policy](s.env.Store, cPolicies, n); err == nil {
-			docs = append(docs, p.Document)
-		}
-	}
+	docs := s.managedDocs(r.AttachedPolicies)
 	for _, d := range r.InlinePolicies {
 		docs = append(docs, d)
 	}
 	return docs
 }
 
+// roleContext is the identity part of a role session's request context.
+func (s *Service) roleContext(r Role, t tempCred) CondContext {
+	c := CondContext{
+		"aws:userid": {r.ID + ":" + t.SessionName}, "aws:principalarn": {r.ARN},
+		"aws:principalaccount": {s.env.AccountID}, "aws:principaltype": {"AssumedRole"},
+		"aws:tokenissuetime": {t.Expires.Add(-time.Hour).UTC().Format(time.RFC3339)},
+	}
+	if t.Issued != nil {
+		c["aws:tokenissuetime"] = []string{t.Issued.UTC().Format(time.RFC3339)}
+	}
+	if strings.HasSuffix(t.IssuedTo, ".amazonaws.com") {
+		c["aws:principalservicename"] = []string{t.IssuedTo}
+	}
+	for k, v := range r.Tags {
+		c["aws:principaltag/"+strings.ToLower(k)] = []string{v}
+	}
+	return c
+}
+
 func (s *Service) rolePrincipal(r Role, t tempCred) *httpx.Principal {
 	docs := s.roleDocs(r)
-	return &httpx.Principal{
+	boundary := s.boundaryDoc(r.PermissionsBoundary)
+	p := &httpx.Principal{
 		AccountID: s.env.AccountID, UserName: "assumed-role/" + r.Name + "/" + t.SessionName,
 		ARN:       s.env.ARN("sts", "assumed-role/"+r.Name+"/"+t.SessionName),
 		AccessKey: t.AccessKeyID, RoleName: r.Name, SessionName: t.SessionName,
-		Can: func(action, resource string) bool { return evaluate(docs, action, resource) == allow },
+		Context: s.roleContext(r, t),
 	}
+	p.Can = func(action, resource string) bool {
+		return decide(docs, boundary, action, resource, CondContext(p.Context)) == allow
+	}
+	return p
 }
 
 // issue mints temporary credentials.
@@ -127,7 +159,8 @@ func (s *Service) issue(t tempCred, ttl time.Duration) (Credentials, error) {
 	t.AccessKeyID = tempKeyPrefix + core.NewSecret(16)
 	t.AccessKeyID = tempKeyPrefix + strings.ToUpper(t.AccessKeyID[len(tempKeyPrefix):])
 	t.SecretCT, t.TokenHash = s.Seal.Encrypt([]byte(secret)), hashSecret(token)
-	t.Expires = core.Now().Add(ttl)
+	now := core.Now()
+	t.Issued, t.Expires = &now, now.Add(ttl)
 	if err := store.Put(s.env.Store, cTempCreds, t.AccessKeyID, t); err != nil {
 		return Credentials{}, err
 	}
@@ -152,7 +185,7 @@ var sessionNameRe = nameRe // [\w+=,.@-]{1,64}
 
 // AssumeRole issues credentials for role to the calling principal p, if the
 // role's trust policy and (for account-wide trust) p's own policies allow it.
-func (s *Service) AssumeRole(p *httpx.Principal, ref, sessionName string, seconds int) (Credentials, error) {
+func (s *Service) AssumeRole(p *httpx.Principal, ref, sessionName string, seconds int, externalID string) (Credentials, error) {
 	r, err := s.GetRole(ref)
 	if err != nil {
 		return Credentials{}, err
@@ -168,7 +201,8 @@ func (s *Service) AssumeRole(p *httpx.Principal, ref, sessionName string, second
 		ttl = time.Hour // role chaining is limited to one hour, as in AWS
 	}
 	denied := core.Errf(http.StatusForbidden, "AccessDenied", "User: %s is not authorized to perform: sts:AssumeRole on resource: %s", p.ARN, r.ARN)
-	switch r.TrustPolicy.trusts("sts:AssumeRole", p.ARN, "", s.env.AccountID) {
+	ctx := CondContext(p.Context).with("sts:ExternalId", externalID, "sts:RoleSessionName", sessionName)
+	switch r.TrustPolicy.trusts("sts:AssumeRole", p.ARN, "", s.env.AccountID, ctx) {
 	case explicitDeny, implicitDeny:
 		return Credentials{}, denied
 	}
@@ -180,7 +214,7 @@ func (s *Service) AssumeRole(p *httpx.Principal, ref, sessionName string, second
 	if err != nil {
 		return c, err
 	}
-	s.touchRole(r.Name)
+	s.touchRole(r.Name, regionOf(p))
 	c.AssumedRoleARN = s.env.ARN("sts", "assumed-role/"+r.Name+"/"+sessionName)
 	c.AssumedRoleID = r.ID + ":" + sessionName
 	return c, nil
@@ -204,14 +238,14 @@ func (s *Service) AssumeRoleForService(ref, service, sessionName string, ttl tim
 	if err != nil {
 		return Credentials{}, err
 	}
-	if r.TrustPolicy.trusts("sts:AssumeRole", "", service, s.env.AccountID) != allow {
+	if r.TrustPolicy.trusts("sts:AssumeRole", "", service, s.env.AccountID, nil) != allow {
 		return Credentials{}, core.Errf(http.StatusForbidden, "AccessDenied", "role %s does not trust %s (add it to the role's trust policy)", r.Name, service)
 	}
 	c, err := s.issue(tempCred{RoleName: r.Name, RoleID: r.ID, SessionName: sessionName, IssuedTo: service}, ttl)
 	if err != nil {
 		return c, err
 	}
-	s.touchRole(r.Name)
+	s.touchRole(r.Name, core.Region)
 	c.AssumedRoleARN = s.env.ARN("sts", "assumed-role/"+r.Name+"/"+sessionName)
 	return c, nil
 }
@@ -232,11 +266,18 @@ func (s *Service) SessionToken(p *httpx.Principal, seconds int) (Credentials, er
 	return s.issue(tempCred{UserName: u.Name, UserID: u.ID, IssuedTo: p.ARN}, ttl)
 }
 
-func (s *Service) touchRole(name string) {
+func regionOf(p *httpx.Principal) string {
+	if v := p.Context["aws:requestedregion"]; len(v) > 0 && v[0] != "" {
+		return v[0]
+	}
+	return core.Region
+}
+
+func (s *Service) touchRole(name, region string) {
 	_, _ = store.Update(s.env.Store, cRoles, name, func(r *Role) error {
 		if r.LastUsed == nil || time.Since(*r.LastUsed) > time.Minute {
 			n := core.Now()
-			r.LastUsed = &n
+			r.LastUsed, r.LastUsedRegion = &n, region
 		}
 		return nil
 	})
@@ -327,341 +368,4 @@ func (s *Service) RevokeRoleSessions(role string) {
 		var t tempCred
 		return json.Unmarshal(raw, &t) == nil && t.RoleName != role
 	})
-}
-
-// ---- native API: roles ----
-
-func (s *Service) roleRoutes(r *httpx.Router) {
-	res := httpx.Res("arn:aws:iam::{account}:role/{name}")
-	r.Handle("GET /api/v1/iam/roles", "iam:ListRoles", s.listRoles)
-	r.Handle("POST /api/v1/iam/roles", "iam:CreateRole", s.createRoleRoute)
-	r.Handle("GET /api/v1/iam/roles/{name}", "iam:GetRole", s.getRoleRoute, res)
-	r.Handle("DELETE /api/v1/iam/roles/{name}", "iam:DeleteRole", s.deleteRoleRoute, res)
-	r.Handle("PATCH /api/v1/iam/roles/{name}", "iam:UpdateRole", s.updateRoleRoute, res)
-	r.Handle("PUT /api/v1/iam/roles/{name}/trust-policy", "iam:UpdateAssumeRolePolicy", s.putTrustRoute, res)
-	r.Handle("POST /api/v1/iam/roles/{name}/policies", "iam:AttachRolePolicy", s.attachRolePolicyRoute, res)
-	r.Handle("DELETE /api/v1/iam/roles/{name}/policies/{policy}", "iam:DetachRolePolicy", s.detachRolePolicyRoute, res)
-	r.Handle("PUT /api/v1/iam/roles/{name}/inline-policies/{policy}", "iam:PutRolePolicy", s.putRoleInlineRoute, res)
-	r.Handle("DELETE /api/v1/iam/roles/{name}/inline-policies/{policy}", "iam:DeleteRolePolicy", s.deleteRoleInlineRoute, res)
-	r.Handle("POST /api/v1/iam/roles/{name}/revoke-sessions", "iam:PutRolePolicy", s.revokeRoute, res)
-	r.Handle("POST /api/v1/sts/assume-role", "sts:AssumeRole", s.assumeRoleRoute)
-}
-
-func (s *Service) roleView(r Role) map[string]any {
-	return map[string]any{"name": r.Name, "id": r.ID, "arn": r.ARN, "path": r.Path, "description": r.Description,
-		"assume_role_policy": r.TrustPolicy, "attached_policies": nz(r.AttachedPolicies), "inline_policies": r.InlinePolicies,
-		"max_session_duration": r.MaxSessionSeconds, "created_at": r.CreatedAt, "last_used": r.LastUsed, "tags": r.Tags,
-		"trusted_services": trustedServices(r.TrustPolicy)}
-}
-
-func trustedServices(d PolicyDocument) []string {
-	out := []string{}
-	for _, st := range d.Statement {
-		if st.Effect == "Allow" && st.Principal != nil {
-			out = append(out, st.Principal.Service...)
-		}
-	}
-	return out
-}
-
-func (s *Service) listRoles(c *httpx.Ctx) (any, error) {
-	out := []map[string]any{}
-	for _, r := range store.List[Role](s.env.Store, cRoles) {
-		out = append(out, s.roleView(r))
-	}
-	return out, nil
-}
-
-// RoleInput creates a role.
-type RoleInput struct {
-	Name              string          `json:"name"`
-	Path              string          `json:"path"`
-	Description       string          `json:"description"`
-	TrustPolicy       json.RawMessage `json:"assume_role_policy"`
-	MaxSessionSeconds int             `json:"max_session_duration"`
-	Policies          []string        `json:"policies"` // managed policies to attach
-	Tags              core.Tags       `json:"tags"`
-}
-
-// ParseTrust parses a trust policy from JSON (a document, or a JSON string holding one).
-func ParseTrust(raw json.RawMessage) (PolicyDocument, error) {
-	var d PolicyDocument
-	var str string
-	if json.Unmarshal(raw, &str) == nil {
-		raw = json.RawMessage(str)
-	}
-	if err := json.Unmarshal(raw, &d); err != nil {
-		return d, core.Errf(http.StatusBadRequest, "MalformedPolicyDocument", "trust policy is not valid JSON: %v", err)
-	}
-	if d.Version == "" {
-		d.Version = "2012-10-17"
-	}
-	if err := d.ValidateTrust(); err != nil {
-		return d, core.Errf(http.StatusBadRequest, "MalformedPolicyDocument", "%s", strings.TrimPrefix(err.Error(), "ValidationError: "))
-	}
-	return d, nil
-}
-
-// CreateRole creates a role; the caller must be allowed to attach each policy.
-func (s *Service) CreateRole(in RoleInput, canAttach func(policyARN string) error) (Role, error) {
-	if err := validName("role", in.Name); err != nil {
-		return Role{}, err
-	}
-	if in.Path == "" {
-		in.Path = "/"
-	}
-	if !strings.HasPrefix(in.Path, "/") || !strings.HasSuffix(in.Path, "/") {
-		return Role{}, core.BadRequest("path must begin and end with /")
-	}
-	trust, err := ParseTrust(in.TrustPolicy)
-	if err != nil {
-		return Role{}, err
-	}
-	if in.MaxSessionSeconds == 0 {
-		in.MaxSessionSeconds = 3600
-	}
-	if in.MaxSessionSeconds < 3600 || in.MaxSessionSeconds > 43200 {
-		return Role{}, core.BadRequest("max_session_duration must be 3600-43200 seconds")
-	}
-	for _, p := range in.Policies {
-		n := strings.TrimPrefix(core.CanonicalARN(p), s.policyARN(""))
-		if !store.Has(s.env.Store, cPolicies, n) {
-			return Role{}, core.NotFound("policy", n)
-		}
-		if err := canAttach(s.policyARN(n)); err != nil {
-			return Role{}, err
-		}
-	}
-	r := Role{Name: in.Name, ID: "HCRO" + strings.ToUpper(core.RandHex(16)), ARN: s.roleARN(in.Name, in.Path), Path: in.Path,
-		Description: in.Description, TrustPolicy: trust, InlinePolicies: map[string]PolicyDocument{}, MaxSessionSeconds: in.MaxSessionSeconds,
-		CreatedAt: core.Now(), Tags: in.Tags, AttachedPolicies: []string{}}
-	for _, p := range in.Policies {
-		r.AttachedPolicies = addUnique(r.AttachedPolicies, strings.TrimPrefix(core.CanonicalARN(p), s.policyARN("")))
-	}
-	s.roleMu.Lock()
-	defer s.roleMu.Unlock()
-	if store.Has(s.env.Store, cRoles, r.Name) {
-		return Role{}, core.Errf(http.StatusConflict, "EntityAlreadyExists", "role %q already exists", r.Name)
-	}
-	return r, store.Put(s.env.Store, cRoles, r.Name, r)
-}
-
-func (s *Service) createRoleRoute(c *httpx.Ctx) (any, error) {
-	var in RoleInput
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	r, err := s.CreateRole(in, func(arn string) error { return c.Authorize("iam:AttachRolePolicy", s.roleARN(in.Name, "/")) })
-	if err != nil {
-		return nil, err
-	}
-	return s.roleView(r), nil
-}
-
-func (s *Service) getRoleRoute(c *httpx.Ctx) (any, error) {
-	r, err := s.GetRole(c.Param("name"))
-	if err != nil {
-		return nil, err
-	}
-	return s.roleView(r), nil
-}
-
-// DeleteRole deletes a role and revokes its sessions. Like AWS, a role with
-// policies attached must have them detached first.
-func (s *Service) DeleteRole(name string) error {
-	r, err := s.GetRole(name)
-	if err != nil {
-		return err
-	}
-	if len(r.AttachedPolicies) > 0 || len(r.InlinePolicies) > 0 {
-		return core.Errf(http.StatusConflict, "DeleteConflict", "role %s still has policies; detach and delete them first", r.Name)
-	}
-	if err := store.Delete(s.env.Store, cRoles, r.Name); err != nil {
-		return err
-	}
-	s.RevokeRoleSessions(r.Name)
-	return nil
-}
-
-func (s *Service) deleteRoleRoute(c *httpx.Ctx) (any, error) {
-	if c.Query("force") == "true" {
-		_, _ = s.UpdateRole(c.Param("name"), func(r *Role) error {
-			r.AttachedPolicies, r.InlinePolicies = []string{}, map[string]PolicyDocument{}
-			return nil
-		})
-	}
-	return nil, s.DeleteRole(c.Param("name"))
-}
-
-// UpdateRole applies fn to a role.
-func (s *Service) UpdateRole(name string, fn func(*Role) error) (Role, error) {
-	r, err := store.Update(s.env.Store, cRoles, roleName(name), fn)
-	if err == store.ErrNotFound {
-		return r, core.Errf(http.StatusNotFound, "NoSuchEntity", "role %s does not exist", roleName(name))
-	}
-	return r, err
-}
-
-func (s *Service) updateRoleRoute(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Description       *string `json:"description"`
-		MaxSessionSeconds *int    `json:"max_session_duration"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	r, err := s.UpdateRole(c.Param("name"), func(r *Role) error {
-		if in.Description != nil {
-			r.Description = *in.Description
-		}
-		if in.MaxSessionSeconds != nil {
-			if *in.MaxSessionSeconds < 3600 || *in.MaxSessionSeconds > 43200 {
-				return core.BadRequest("max_session_duration must be 3600-43200 seconds")
-			}
-			r.MaxSessionSeconds = *in.MaxSessionSeconds
-		}
-		return nil
-	})
-	if err != nil {
-		return nil, err
-	}
-	return s.roleView(r), nil
-}
-
-func (s *Service) putTrustRoute(c *httpx.Ctx) (any, error) {
-	var raw json.RawMessage
-	if err := c.Bind(&raw); err != nil {
-		return nil, err
-	}
-	if len(raw) == 0 {
-		raw = json.RawMessage("{}")
-	}
-	d, err := ParseTrust(raw)
-	if err != nil {
-		return nil, err
-	}
-	r, err := s.UpdateRole(c.Param("name"), func(r *Role) error { r.TrustPolicy = d; return nil })
-	if err != nil {
-		return nil, err
-	}
-	return s.roleView(r), nil
-}
-
-// AttachRolePolicy attaches a managed policy (name or ARN) to a role.
-func (s *Service) AttachRolePolicy(role, policy string) (Role, error) {
-	n := strings.TrimPrefix(core.CanonicalARN(policy), s.policyARN(""))
-	if !store.Has(s.env.Store, cPolicies, n) {
-		return Role{}, core.Errf(http.StatusNotFound, "NoSuchEntity", "policy %s does not exist", n)
-	}
-	return s.UpdateRole(role, func(r *Role) error { r.AttachedPolicies = addUnique(r.AttachedPolicies, n); return nil })
-}
-
-// DetachRolePolicy detaches a managed policy (name or ARN) from a role.
-func (s *Service) DetachRolePolicy(role, policy string) (Role, error) {
-	n := strings.TrimPrefix(core.CanonicalARN(policy), s.policyARN(""))
-	return s.UpdateRole(role, func(r *Role) error {
-		if !slices.Contains(r.AttachedPolicies, n) {
-			return core.Errf(http.StatusNotFound, "NoSuchEntity", "policy %s is not attached to role %s", n, r.Name)
-		}
-		r.AttachedPolicies = remove(r.AttachedPolicies, n)
-		return nil
-	})
-}
-
-func (s *Service) attachRolePolicyRoute(c *httpx.Ctx) (any, error) {
-	p, err := s.policyArg(c)
-	if err != nil {
-		return nil, err
-	}
-	r, err := s.AttachRolePolicy(c.Param("name"), p)
-	if err != nil {
-		return nil, err
-	}
-	return s.roleView(r), nil
-}
-
-func (s *Service) detachRolePolicyRoute(c *httpx.Ctx) (any, error) {
-	r, err := s.DetachRolePolicy(c.Param("name"), c.Param("policy"))
-	if err != nil {
-		return nil, err
-	}
-	return s.roleView(r), nil
-}
-
-// PutRolePolicy sets an inline policy on a role.
-func (s *Service) PutRolePolicy(role, name string, d PolicyDocument) (Role, error) {
-	if err := validName("policy", name); err != nil {
-		return Role{}, err
-	}
-	if err := d.Validate(); err != nil {
-		return Role{}, core.Errf(http.StatusBadRequest, "MalformedPolicyDocument", "%s", strings.TrimPrefix(err.Error(), "ValidationError: "))
-	}
-	if d.Version == "" {
-		d.Version = "2012-10-17"
-	}
-	return s.UpdateRole(role, func(r *Role) error {
-		if r.InlinePolicies == nil {
-			r.InlinePolicies = map[string]PolicyDocument{}
-		}
-		r.InlinePolicies[name] = d
-		return nil
-	})
-}
-
-// DeleteRolePolicy removes an inline policy from a role.
-func (s *Service) DeleteRolePolicy(role, name string) (Role, error) {
-	return s.UpdateRole(role, func(r *Role) error {
-		if _, ok := r.InlinePolicies[name]; !ok {
-			return core.Errf(http.StatusNotFound, "NoSuchEntity", "role %s has no inline policy %s", r.Name, name)
-		}
-		delete(r.InlinePolicies, name)
-		return nil
-	})
-}
-
-func (s *Service) putRoleInlineRoute(c *httpx.Ctx) (any, error) {
-	var d PolicyDocument
-	if err := c.Bind(&d); err != nil {
-		return nil, err
-	}
-	r, err := s.PutRolePolicy(c.Param("name"), c.Param("policy"), d)
-	if err != nil {
-		return nil, err
-	}
-	return s.roleView(r), nil
-}
-
-func (s *Service) deleteRoleInlineRoute(c *httpx.Ctx) (any, error) {
-	r, err := s.DeleteRolePolicy(c.Param("name"), c.Param("policy"))
-	if err != nil {
-		return nil, err
-	}
-	return s.roleView(r), nil
-}
-
-func (s *Service) revokeRoute(c *httpx.Ctx) (any, error) {
-	if _, err := s.GetRole(c.Param("name")); err != nil {
-		return nil, err
-	}
-	s.RevokeRoleSessions(c.Param("name"))
-	return nil, nil
-}
-
-func (s *Service) assumeRoleRoute(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Role            string `json:"role"`
-		SessionName     string `json:"session_name"`
-		DurationSeconds int    `json:"duration_seconds"`
-	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	if in.SessionName == "" {
-		in.SessionName = "homecloud-" + core.RandHex(8)
-	}
-	return s.AssumeRole(c.P, in.Role, in.SessionName, in.DurationSeconds)
-}
-
-func store_getUser(s *Service, name string) (User, error) {
-	return store.Get[User](s.env.Store, cUsers, name)
 }
