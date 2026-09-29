@@ -615,8 +615,8 @@ func dynamoCommands() {
 		}
 		return call("POST", "/api/v1/dynamodb/tables", b, nil)
 	})
-	c.Flags().StringVar(&pk, "pk", "id", "partition key as name[:S|N]")
-	c.Flags().StringVar(&sk, "sk", "", "sort key as name[:S|N]")
+	c.Flags().StringVar(&pk, "pk", "id", "partition key as name[:S|N|B]")
+	c.Flags().StringVar(&sk, "sk", "", "sort key as name[:S|N|B]")
 	sub(d, "put TABLE ITEM_JSON", "Put an item", cobra.ExactArgs(2), func(a []string) error {
 		it, err := jsonArg(a[1])
 		if err != nil {
