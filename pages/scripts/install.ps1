@@ -1,5 +1,5 @@
 # HomeCloud installer for Windows (PowerShell 5+).
-#   irm https://homecloud.drk1rd.systems/scripts/install.ps1 | iex
+#   irm https://raw.githubusercontent.com/homecloudhq/homecloud/main/scripts/install.ps1 | iex
 # Set $env:HOMECLOUD_VERSION (e.g. v0.1.0) to pin a release.
 $ErrorActionPreference = "Stop"
 $repo = "homecloudhq/homecloud"

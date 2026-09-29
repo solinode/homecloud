@@ -65,13 +65,13 @@ You need **Docker** (Docker Engine on Linux, or Docker Desktop / OrbStack on mac
 **Linux / macOS**
 
 ```bash
-curl -fsSL https://homecloud.drk1rd.systems/scripts/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/homecloudhq/homecloud/main/scripts/install.sh | sh
 ```
 
 **Windows (PowerShell)**
 
 ```powershell
-irm https://homecloud.drk1rd.systems/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/homecloudhq/homecloud/main/scripts/install.ps1 | iex
 ```
 
 Or build from source with Go 1.25+ and Node.js 22+: `make` (the binary lands in `bin/homecloud`).
@@ -216,7 +216,7 @@ HomeCloud is a community project, currently unfunded and maintained by volunteer
 
 We’re building HomeCloud for the community, and we’d love for you to join us:
 
-💬 **[Join the Discord Community](https://homecloud.suryansh.one/discord)**: connect, discuss, and collaborate.
+💬 **[Join the Discord Community](https://discord.gg/pemra9uaC9)**: connect, discuss, and collaborate.
 🛠️ **Contribute Code**: check out **Issues** and **Pull Requests** to get started.
 📣 **Share Feedback**: help shape what HomeCloud becomes.
 
