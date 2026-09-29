@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/events"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/lambda"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/sfn"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/sns"
@@ -101,7 +102,7 @@ func (t *targets) deliver(ctx context.Context, arn string, payload []byte) error
 			return err
 		}
 		if r.FunctionError != "" {
-			return fmt.Errorf("function error: %s", r.Payload)
+			return fmt.Errorf("%w: function error: %s", events.ErrNoRetry, r.Payload)
 		}
 		return nil
 	case "sqs":

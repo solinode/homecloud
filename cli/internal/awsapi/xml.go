@@ -94,6 +94,8 @@ func writeInner(b *strings.Builder, v any) {
 		if t != nil {
 			b.WriteString(t.UTC().Format("2006-01-02T15:04:05.000Z"))
 		}
+	case Time:
+		b.WriteString(t.UTC().Format("2006-01-02T15:04:05.000Z"))
 	case map[string]any:
 		keys := make([]string, 0, len(t))
 		for k := range t {
@@ -137,7 +139,7 @@ func writeInner(b *strings.Builder, v any) {
 			WriteXML(b, "member", x)
 		}
 	default:
-		_ = xml.EscapeText(b, []byte(fmt.Sprint(t)))
+		writeReflect(b, t)
 	}
 }
 

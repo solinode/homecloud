@@ -230,7 +230,14 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	lambdaSvc.CheckAuthorizer = cognitoSvc.CheckClient
 	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc, sfn: sfnSvc}
 	sfnSvc.Tasks = tg
+	sfnSvc.Call = func(ctx context.Context, p *httpx.Principal, service, op string, in any) (json.RawMessage, error) {
+		return awsapi.Call(ctx, p, account, service, op, in)
+	}
+	sfnSvc.Role = func(arn string) (*httpx.Principal, error) {
+		return iamSvc.ServiceRolePrincipal(arn, "states.amazonaws.com", "HomeCloudStepFunctions")
+	}
 	eventsSvc.Deliver, eventsSvc.Exists = tg.deliver, tg.exists
+	cw.Deliver = tg.deliver
 	trailSvc, err := trail.New(env)
 	if err != nil {
 		return err
@@ -242,6 +249,9 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		s.Routes(rt)
 	}
 	iamSvc.RegisterAWS()
+	cw.RegisterAWS()
+	eventsSvc.RegisterAWS()
+	sfnSvc.RegisterAWS()
 	awsHandler := &awsapi.Handler{Creds: iamSvc, Account: account, Audit: trailSvc.Record}
 	if len(httpx.Unscoped) > 0 {
 		return fmt.Errorf("internal error: routes without a resource ARN: %v", httpx.Unscoped)
