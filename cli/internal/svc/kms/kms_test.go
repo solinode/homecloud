@@ -24,7 +24,7 @@ func TestEncryptRotateDecrypt(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := k.rotate(key.ID); err != nil {
+	if err := k.rotate(key.ID, "ON_DEMAND"); err != nil {
 		t.Fatal(err)
 	}
 	pt, _, err := k.Decrypt(blob, ctx)
