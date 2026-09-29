@@ -38,3 +38,24 @@ jobs:
       - run: npm ci
       - run: npx tsc --noEmit
       - run: npm run build
+
+  e2e:
+    # Runs every service end to end against real Docker on the GitHub runner.
+    runs-on: ubuntu-latest
+    needs: go
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+      - name: Build
+        run: cd cli && go build -o ../bin/homecloud .
+      - name: Start HomeCloud
+        run: |
+          nohup ./bin/homecloud serve > serve.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS localhost:8080/api/v1/health && break; sleep 2; done
+      - name: Smoke test
+        run: HC=$PWD/bin/homecloud ./scripts/smoke.sh
+      - name: Server log
+        if: always()
+        run: cat serve.log
