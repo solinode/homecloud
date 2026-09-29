@@ -1,6 +1,10 @@
 # ☁️ HomeCloud — The Cloud, Owned by You
 
-**An open-source, self-hosted cloud platform** for compute, storage, networking, and databases — all in one click. No third parties. No vendor lock-in. No surprise billing.
+**An open-source, self-hosted cloud platform.** HomeCloud runs AWS-style services (compute, object storage, managed databases, serverless functions, queues, pub/sub, key-value tables, networking, identity, monitoring) on your own hardware, from one binary, managed through a web console, a CLI and a REST API.
+
+**Speaks AWS.** The AWS CLI, the AWS SDKs and Terraform work against HomeCloud unchanged: point `AWS_ENDPOINT_URL` at it and use a HomeCloud access key. IAM policies, roles and temporary credentials are enforced exactly as in the console.
+
+No third parties. No vendor lock-in. No surprise billing.
 
 > 🛡 Built with privacy, transparency, and sovereignty at its core.
 
@@ -8,78 +12,197 @@
 
 <p align="center" >
   <a href="https://tailscale.com/">
-    <img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" 
+    <img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png"
          alt="Tailscale" height="70"/>
   </a>
 </p>
 
 <p align="center">
   <a href="https://coderabbit.ai/">
-    <img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png" 
+    <img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png"
          alt="Coderabbit" height="40"/>
   </a>
 </p>
 
 ---
 
-## 🔥 Why HomeCloud?
+## 🧰 Services
 
-* **💡 Take Back Control** — Your data stays *yours*. No surveillance, no dependency on external providers.
-* **💰 Eliminate Cloud Costs** — Forget unpredictable bills. Use your own hardware with full control.
-* **🚀 One-Click Deployments** — Launch services instantly without a sysadmin degree.
-* **🌍 Community-First & Open-Source** — Released under AGPL-3.0, developed with and for the community.
+| Service | AWS equivalent | What you get |
+| --- | --- | --- |
+| **Compute** | EC2, EBS, AMIs | Instances with CPU/memory limits from `t3.nano` to `r5.large`, 10 base images (Ubuntu, Debian, Amazon Linux, Rocky, Fedora, Alpine, …), user data, key pairs, start/stop/reboot/resize, volumes and snapshots, capture an instance as a new image, run-command, a shell in the browser, and an instance metadata service (IMDSv1/v2) that hands role credentials to SDKs inside instances |
+| **Auto Scaling** | EC2 Auto Scaling | Groups that keep a desired number of instances across subnets, replace unhealthy ones, register them with load balancers and scale on CPU or memory targets |
+| **Shared files** | EFS | File systems that any number of instances mount at the same time |
+| **Containers** | ECS (Fargate), ECR | Versioned task definitions with secrets injected from Secrets Manager, services that keep N tasks running with rolling deployments and load-balancer registration, one-off tasks, and a private image registry you `docker push` to |
+| **Networking** | VPC, ELB | VPCs and subnets with real private IP addressing, private DNS (`ip-10-88-0-4.internal`, `mydb.rds.internal`), security groups that decide which ports are published; application load balancers with HTTP/HTTPS listeners, HTTP→HTTPS redirects, path/host routing rules, target groups and health checks |
+| **DNS** | Route 53 | Public and private hosted zones (A, AAAA, CNAME, TXT, MX, SRV, CAA, NS, PTR), alias records that follow instances, tasks, databases and load balancers; a resolver at each VPC's `.2` address and a LAN-facing DNS port |
+| **Certificates** | ACM | A private certificate authority that issues TLS certificates for your domains and IPs, import of Let's Encrypt or other certificates, renewal, and HTTPS on load balancers |
+| **Object storage** | S3 | Buckets, folders, uploads/downloads, versioning, public-read access, lifecycle expiry, presigned URLs, static website hosting, and a fully S3-compatible endpoint for AWS SDKs and `aws` CLI |
+| **Databases** | RDS, ElastiCache, DocumentDB | PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Valkey, Memcached with generated credentials in Secrets Manager, snapshots and restore, daily automated backups, resizing, password rotation and a query editor |
+| **Serverless** | Lambda, API Gateway | Functions on AWS's official runtime images (Python, Node.js, Java, Ruby, .NET, Go/Rust custom runtimes, container images) with warm environments, execution roles, versions and aliases, layers, async invocation with retries and destinations, reserved concurrency; function URLs; HTTP APIs with JWT authorizers; SQS and DynamoDB stream triggers |
+| **Queues** | SQS | Standard and FIFO queues, visibility timeouts, delays, long polling, dead-letter queues with redrive, batches |
+| **Pub/sub** | SNS | Standard and FIFO topics fanning out to queues, functions and confirmed HTTP(S) endpoints, signed messages, raw delivery, full filter-policy syntax |
+| **Key-value** | DynamoDB | Typed items with the full condition/update/projection expression language, GSIs and LSIs, batches, transactions, PartiQL, TTL and streams |
+| **Workflows** | Step Functions | State machines in Amazon States Language: Task (Lambda, SQS, SNS), Choice, Wait, Parallel, Map, Pass, Succeed, Fail, with Retry/Catch, JSONPath input/output processing, intrinsic functions and a full execution history |
+| **Events** | EventBridge, Scheduler | Event buses with the full pattern syntax, input transformers, retries and DLQs; schedules with `at()`/`rate()`/`cron()` and time zones |
+| **Identity** | IAM, STS | Users, groups, roles with trust policies, AWS-managed and custom policies (with versions, conditions and permissions boundaries), instance profiles, access keys, temporary credentials, console passwords, a policy simulator |
+| **App identity** | Cognito | User pools with sign-up, sign-in, refresh tokens, forced password changes, groups and global sign-out; RS256 JWTs with a JWKS endpoint; API Gateway routes can require them |
+| **Secrets & keys** | Secrets Manager, KMS, SSM Parameter Store | Versioned secrets with staging labels and Lambda rotation; symmetric, RSA, ECC and HMAC keys with policies, grants and rotation; hierarchical parameters with SecureString values, versions and labels |
+| **Monitoring** | CloudWatch | Per-resource metrics, custom metrics with metric math, alarms that notify SNS topics or webhooks, log groups with filter patterns, Logs Insights queries and subscription filters |
+| **Infrastructure as code** | CloudFormation | YAML/JSON stack templates for 30 resource types across every service, with parameters, outputs, `!Ref`/`!GetAtt`/`!Sub`/`!Join`, dependency ordering, readiness waits, rollback, updates and ordered deletion |
+| **Audit** | CloudTrail | A record of every change and every denied request, with who, what, when and from where |
+
+Everything runs as containers on Docker, labelled so HomeCloud never touches containers it didn't create. See **[docs/architecture.md](docs/architecture.md)** for how each service is built, **[docs/aws-compat.md](docs/aws-compat.md)** for the AWS APIs it speaks and **[docs/api.md](docs/api.md)** for the native API reference.
 
 ---
 
-## 🛠️ Core Features
+## 🚀 Quick start
 
-| Feature       | Description                                            |
-| ------------- | ------------------------------------------------------ |
-| 🖥️ Compute   | Run containers, VMs, or apps locally on your hardware. |
-| 💾 Storage    | Built-in object storage (S3-compatible).               |
-| 🧠 Databases  | Launch PostgreSQL, Redis, and others with one click.   |
-| 🌐 Networking | Native traffic routing, SSL, and load balancing.       |
+You need **Docker** (Docker Engine on Linux, or Docker Desktop / OrbStack on macOS and Windows).
 
-> 💡 Upcoming: Serverless functions, hardware integrations, monitoring tools, and more.
+### Install
 
----
-
-## 🚧 Installation (Experimental)
-
-### Windows
-
-```powershell
-Invoke-WebRequest -Uri "https://homecloud.drk1rd.systems/scripts/install.ps1" -OutFile "install.ps1"
-.\install.ps1
-```
-
-### Linux / macOS
+**Linux / macOS**
 
 ```bash
-curl -LO https://homecloud.drk1rd.systems/scripts/install.sh
-chmod +x install.sh
-./install.sh
+curl -fsSL https://homecloud.drk1rd.systems/scripts/install.sh | sh
 ```
 
-> ⚠️ *Experimental*: These installers are in early stages and may require manual configuration.
+**Windows (PowerShell)**
+
+```powershell
+irm https://homecloud.drk1rd.systems/scripts/install.ps1 | iex
+```
+
+Or build from source with Go 1.25+ and Node.js 22+: `make` (the binary lands in `bin/homecloud`).
+
+### Run
+
+```bash
+homecloud serve
+```
+
+On first start HomeCloud creates your account, prints the **root console password** once, and writes CLI credentials to `~/.homecloud/credentials`. Open **http://127.0.0.1:8080** and sign in as `root`.
+
+To reach it from other machines, bind to your LAN or Tailscale address (add `--tls-self-signed`, or `--tls-cert`/`--tls-key`, to serve HTTPS):
+
+```bash
+homecloud serve --addr 0.0.0.0:8080 --public-host homelab.tailnet.ts.net --tls-self-signed
+```
+
+### Use it from the CLI
+
+```bash
+# Compute: a web server whose port 80 is published
+homecloud vpc create-sg web && homecloud vpc allow sg-xxxx 80
+homecloud ec2 run --name web --image ami-nginx --sg sg-xxxx
+homecloud ec2 ssh i-xxxx
+
+# Storage
+homecloud s3 mb s3://photos
+homecloud s3 cp ./beach.jpg s3://photos/2025/
+homecloud s3 presign s3://photos/2025/beach.jpg
+
+# A PostgreSQL database; the password lives in Secrets Manager
+homecloud rds create orders-db --engine postgres --public
+homecloud rds query orders-db "select version()"
+homecloud rds password orders-db
+
+# Serverless: a function behind an HTTP API, fed by a queue
+homecloud lambda create resize --runtime python3.12 --code ./resize
+homecloud lambda url resize
+homecloud sqs create jobs --dlq jobs-dlq
+homecloud lambda trigger resize jobs
+
+# Schedules and events
+homecloud events schedule nightly 'cron(0 3 ? * * *)' --target arn:aws:lambda:us-east-1:<account>:function:resize
+
+# Containers behind a load balancer
+docker tag myapi localhost:5500/myapi:1 && docker push localhost:5500/myapi:1
+homecloud elb create-target-group api-tg --port 8000
+homecloud elb create web --listen 80=api-tg
+homecloud ecs register api --image localhost:5500/myapi:1 --port 8000 --secret DB_PASS=prod/db:password
+homecloud ecs create-service api api --count 3 --target-group api-tg
+
+# Infrastructure as code (see docs/examples/pipeline.yaml)
+homecloud cfn create pipeline docs/examples/pipeline.yaml -p Env=dev
+homecloud cfn delete pipeline
+
+# Anything else
+homecloud api GET /api/v1/cloudwatch/alarms
+```
+
+Run `homecloud --help` or `homecloud <service> --help` for every command.
+
+### Use it from AWS tools
+
+HomeCloud speaks the AWS protocols on its API port, so the AWS CLI, SDKs (boto3, JS, Go, Java) and Terraform work unchanged with HomeCloud credentials and IAM:
+
+```bash
+eval "$(homecloud aws-env)"       # AWS_ENDPOINT_URL, keys and region
+aws s3 ls
+aws lambda invoke --function-name hello out.json
+```
+
+See [docs/aws-compat.md](docs/aws-compat.md) for the supported services and operations.
+
+### Run it as a service, back it up, upgrade it
+
+```bash
+homecloud service install         # launchd (macOS) or systemd (Linux)
+homecloud backup -o backup.tar.gz # state, keys and every Docker volume
+homecloud restore backup.tar.gz   # with the server stopped
+homecloud upgrade                 # verified update from GitHub releases
+```
 
 ---
 
 ## 🗺️ Roadmap
 
-* ✅ **Phase 1:** Core cloud stack — Compute, Storage, Networking
-* 🔄 **Phase 2:** Serverless architecture & event-driven services
-* 🔄 **Phase 3:** Observability — Monitoring, logging, alerts
-* 🔄 **Phase 4:** Edge compute & hardware integrations
+* ✅ **Phase 1:** Core cloud stack: compute, storage, networking, web console, CLI and API
+* ✅ **Phase 2:** Serverless and event-driven services: Lambda, API Gateway, SQS, SNS, EventBridge, DynamoDB
+* ✅ **Phase 3 (first cut):** Observability and governance: CloudWatch metrics/logs/alarms, CloudTrail, IAM, Secrets Manager
+* ✅ **Containers:** ECS services and tasks, ECR registry, load balancers, shared file systems
+* ✅ **Workflows:** Step Functions
+* ✅ **Infrastructure as code:** CloudFormation-style stacks
+* ✅ **AWS compatibility:** the AWS CLI, SDKs and Terraform work against HomeCloud for IAM/STS, EC2/VPC, S3, Lambda, DynamoDB, SQS, SNS, Secrets Manager, SSM, KMS, CloudWatch, EventBridge and Step Functions
+* 🔄 **Next:** AWS APIs for ELB, Auto Scaling, ECS, ECR, RDS, CloudFormation, Route 53 and API Gateway; VM-backed instances (QEMU/KVM); multi-node clusters
+* 🔄 **Phase 4:** Edge compute and hardware integrations
 
 📍 **[Explore the full roadmap](https://github.com/orgs/homecloudhq/projects/1/views/1)**
+
+---
+
+## 🧑‍💻 Development
+
+```
+cli/        Go server + CLI (single binary)
+  cmd/                 CLI commands
+  internal/server      wires services into one HTTP API
+  internal/svc/<name>  one package per service (ec2, s3, rds, lambda, ...)
+  internal/httpx       native API routing, IAM checks, errors
+  internal/awsapi      AWS protocols: SigV4, awsJson, awsQuery, REST
+  internal/system      backup and restore
+  internal/runtime     Docker engine wrapper
+  internal/store       persistent state
+console/    Next.js web console (static export, embedded into the binary)
+docs/       architecture and API reference
+```
+
+```bash
+make test                          # Go tests (AWS CLI/boto3 tests run when installed)
+cd cli && go run . serve           # API on :8080
+cd console && NEXT_PUBLIC_API_URL=http://127.0.0.1:8080 npm run dev   # console on :3000
+make release                       # cross-compiled archives for 6 platforms in dist/
+```
+
+Releases are built by GitHub Actions when a `v*` tag is pushed.
 
 ---
 
 ## 💸 Sustainability & Support
 
 HomeCloud is a community project, currently unfunded and maintained by volunteers.
-
 
 ### 💛 Ways to Support
 
@@ -91,11 +214,11 @@ HomeCloud is a community project, currently unfunded and maintained by volunteer
 
 ## 🤝 Get Involved
 
-We’re building HomeCloud for the community — and we’d love for you to join us:  
+We’re building HomeCloud for the community, and we’d love for you to join us:
 
-💬 **[Join the Discord Community](https://homecloud.suryansh.one/discord)** — Connect, discuss, and collaborate.  
-🛠️ **Contribute Code** — Check out **Issues** and **Pull Requests** to get started.  
-📣 **Share Feedback** — Help shape what HomeCloud becomes.  
+💬 **[Join the Discord Community](https://homecloud.suryansh.one/discord)**: connect, discuss, and collaborate.
+🛠️ **Contribute Code**: check out **Issues** and **Pull Requests** to get started.
+📣 **Share Feedback**: help shape what HomeCloud becomes.
 
 🔹 **By contributing, you agree to our** [**Contributor License Agreement (CLA)**](./CLA.md).
 
@@ -103,12 +226,9 @@ We’re building HomeCloud for the community — and we’d love for you to join
 
 ## 🛡 License
 
-HomeCloud is released under **GNU AGPL-3.0** — keeping it open, transparent, and libre.
+HomeCloud is released under **GNU AGPL-3.0**: open, transparent, and libre.
 If you deploy or modify it publicly, share your changes too.
 
 ---
 
-## ⚡ HomeCloud — The Cloud, On Your Terms.
-
----
-
+## ⚡ HomeCloud: The Cloud, On Your Terms.

@@ -1,0 +1,35 @@
+// Example templates offered by the create wizard ("Load example").
+
+/** docs/examples/pipeline.yaml: queue + bucket + table + Lambda worker wired to the queue. */
+export const PIPELINE_TEMPLATE = `Description: Upload pipeline
+Parameters:
+  Env: {Type: String, Default: dev}
+Resources:
+  Jobs:
+    Type: HC::SQS::Queue
+    Properties: {name: !Sub "cfn-jobs-\${Env}"}
+  Uploads:
+    Type: HC::S3::Bucket
+    Properties: {name: !Sub "cfn-uploads-\${Env}"}
+  Results:
+    Type: HC::DynamoDB::Table
+    Properties: {name: !Sub "cfn-results-\${Env}", partition_key: {name: id, type: S}}
+  Worker:
+    Type: HC::Lambda::Function
+    Properties:
+      name: !Sub "cfn-worker-\${Env}"
+      runtime: python3.12
+      environment: {BUCKET: !Ref Uploads, TABLE: !Ref Results, QUEUE_ARN: !GetAtt Jobs.arn}
+      code:
+        files:
+          lambda_function.py: |
+            import os
+            def lambda_handler(event, context):
+                return {"bucket": os.environ["BUCKET"], "table": os.environ["TABLE"], "records": len(event.get("Records", []))}
+  Trigger:
+    Type: HC::Lambda::EventSourceMapping
+    Properties: {function_name: !Ref Worker, queue_name: !Ref Jobs}
+Outputs:
+  QueueArn: {Value: !GetAtt Jobs.arn}
+  Function: {Value: !Ref Worker}
+`

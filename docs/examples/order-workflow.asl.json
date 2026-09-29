@@ -1,0 +1,6 @@
+{"Comment":"Order pipeline","StartAt":"Greet","States":{
+ "Greet":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:ACCOUNT_ID:function:hello-py","ResultSelector":{"body.$":"States.StringToJson($.body)"},"ResultPath":"$.greeting","Retry":[{"ErrorEquals":["States.ALL"],"MaxAttempts":2,"IntervalSeconds":1}],"Next":"Big?"},
+ "Big?":{"Type":"Choice","Choices":[{"Variable":"$.total","NumericGreaterThan":100,"Next":"Fanout"}],"Default":"Done"},
+ "Fanout":{"Type":"Map","ItemsPath":"$.items","ItemProcessor":{"StartAt":"Enqueue","States":{"Enqueue":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueName":"evq","MessageBody.$":"$"},"End":true}}},"ResultPath":"$.queued","Next":"Wait"},
+ "Wait":{"Type":"Wait","Seconds":1,"Next":"Done"},
+ "Done":{"Type":"Pass","Parameters":{"message.$":"$.greeting.body.message","queued.$":"$.queued"},"End":true}}}

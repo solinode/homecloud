@@ -3,149 +3,119 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>HomeCloud - Personal Cloud Infrastructure on Your Hardware</title>
-    <!-- SEO Meta Tags -->
-    <meta name="description" content="HomeCloud provides entire cloud infrastructure like AWS, GCP, and Azure, but on your own hardware with one-click deployment and minimal hassle.">
-    <meta name="keywords" content="homecloud, personal cloud, self-hosted cloud, private infrastructure, cloud computing, home server">
+    <title>HomeCloud - Your own AWS, on your hardware</title>
+    <meta name="description" content="HomeCloud is an open-source, self-hosted cloud: EC2, S3, Lambda, DynamoDB, SQS, IAM and 25 more AWS-style services from one binary on Docker. The AWS CLI, SDKs and Terraform work against it unchanged.">
+    <meta name="keywords" content="homecloud, self-hosted cloud, aws alternative, private cloud, home server, homelab, s3, lambda, terraform">
     <meta name="author" content="HomeCloudHQ">
     <meta name="robots" content="index, follow">
-    
-    <!-- Open Graph / Facebook -->
     <meta property="og:type" content="website">
-    <meta property="og:url" content="https://homecloud.com/">
-    <meta property="og:title" content="HomeCloud - Your Personal Cloud Infrastructure">
-    <meta property="og:description" content="Run your entire cloud infrastructure on your own hardware with one-click deployment and minimal setup.">
-    <meta property="og:image" content="https://homecloud.com/images/homecloud-og-image.png">
-    
-    <!-- Twitter -->
-    <meta property="twitter:card" content="summary_large_image">
-    <meta property="twitter:url" content="https://homecloud.com/">
-    <meta property="twitter:title" content="HomeCloud - Your Personal Cloud Infrastructure">
-    <meta property="twitter:description" content="Run your entire cloud infrastructure on your own hardware with one-click deployment and minimal setup.">
-    <meta property="twitter:image" content="https://homecloud.com/images/homecloud-og-image.png">
-    
-    <!-- Canonical URL -->
-    <meta rel="canonical" href="https://homecloud.com/">
+    <meta property="og:url" content="https://homecloud.drk1rd.systems/">
+    <meta property="og:title" content="HomeCloud - Your own AWS, on your hardware">
+    <meta property="og:description" content="30 AWS-style services from one binary. The AWS CLI, SDKs and Terraform work unchanged.">
+    <meta name="twitter:card" content="summary">
+    <link rel="canonical" href="https://homecloud.drk1rd.systems/">
     <style>
+        :root { --fg: #00ff00; --dim: #00aa00; --bg: #000; }
+        * { box-sizing: border-box; }
         body {
-            margin: 0;
-            padding: 0;
-            font-family: "Courier New", Courier, monospace;
-            color: #00ff00;
-            background-color: black;
-            display: flex;
-            flex-direction: column;
-            align-items: center;
-            justify-content: flex-start;
-            padding: 20px;
+            margin: 0; padding: 24px 16px; background: var(--bg); color: var(--fg);
+            font-family: "Courier New", Courier, monospace; line-height: 1.5;
+            display: flex; flex-direction: column; align-items: center;
         }
-
-        header {
-            text-align: center;
-            margin-bottom: 40px;
+        a { color: var(--fg); }
+        a:hover { text-decoration: none; }
+        header, main, section, footer { width: 100%; max-width: 760px; }
+        header { text-align: center; margin-bottom: 32px; }
+        header h1 { font-size: 2rem; margin: 0 0 6px; }
+        header .tag { color: var(--dim); margin: 0 0 12px; }
+        header nav a { margin: 0 8px; text-decoration: none; }
+        h2 { font-size: 1.1rem; margin: 32px 0 8px; }
+        h2::before { content: "$ "; color: var(--dim); }
+        pre {
+            border: 1px solid var(--dim); padding: 12px; overflow-x: auto; margin: 8px 0;
+            white-space: pre; font-size: 0.9rem;
         }
-
-        header h1 {
-            font-size: 2rem;
-            margin-bottom: 10px;
-        }
-
-        header a {
-            color: #00ff00;
-            text-decoration: none;
-            font-size: 1rem;
-        }
-
-        main {
-            width: 100%;
-            max-width: 600px;
-            text-align: left;
-            padding-left: 40px;
-        }
-
-        main p {
-            margin: 10px 0;
-        }
-
-        main a {
-            color: #00ff00;
-            text-decoration: none;
-        }
-
-        main a:hover {
-            text-decoration: underline;
-        }
+        ul { padding-left: 20px; margin: 8px 0; }
+        li { margin: 4px 0; }
+        .dim { color: var(--dim); }
+        .partners { text-align: center; margin-top: 40px; }
+        .partners img { margin: 8px 12px; vertical-align: middle; }
+        footer { text-align: center; margin-top: 40px; color: var(--dim); font-size: 0.85rem; }
     </style>
+    <script async src="https://www.googletagmanager.com/gtag/js?id=G-SW07QRM18M"></script>
+    <script>
+      window.dataLayer = window.dataLayer || [];
+      function gtag(){dataLayer.push(arguments);}
+      gtag('js', new Date());
+      gtag('config', 'G-SW07QRM18M');
+    </script>
 </head>
-
-<!-- Google tag (gtag.js) -->
-<script async src="https://www.googletagmanager.com/gtag/js?id=G-SW07QRM18M"></script>
-<script>
-  window.dataLayer = window.dataLayer || [];
-  function gtag(){dataLayer.push(arguments);}
-  gtag('js', new Date());
-
-  gtag('config', 'G-SW07QRM18M');
-</script>
-
 <body>
     <header>
         <h1>HomeCloud</h1>
-        <a href="https://github.com/drk1rd/homecloud" target="_blank">github</a><br /><a href="https://www.linkedin.com/company/homecloudhq/" target="_blank">linkedin</a>
+        <p class="tag">your own AWS, on your hardware.</p>
+        <nav>
+            <a href="https://github.com/homecloudhq/homecloud" target="_blank" rel="noopener">github</a>
+            <a href="https://github.com/homecloudhq/homecloud/blob/main/docs/aws-compat.md" target="_blank" rel="noopener">docs</a>
+            <a href="discord.html">discord</a>
+            <a href="https://www.linkedin.com/company/homecloudhq/" target="_blank" rel="noopener">linkedin</a>
+        </nav>
     </header>
     <main>
-        <p><a href="files/Project Concept_ _HomeCloud_.pdf">- concept?</a></p>
-        <p><a href="files/but, why_.pdf">- but, why?</a></p>
-        <p style="margin-top: 20px; font-style: italic;">
-            entire cloud infrastructure — just like AWS, GCP, and Azure — but on <strong>your hardware</strong>.  
-            one click, minimal hassle.
+        <p>
+            HomeCloud is an open-source, self-hosted cloud. One binary runs thirty AWS-style services
+            on Docker, with a web console, a CLI and an API. Your data never leaves your machines,
+            and there's no bill.
+        </p>
+
+        <h2>install</h2>
+        <pre>curl -fsSL https://homecloud.drk1rd.systems/scripts/install.sh | sh
+homecloud serve          # console on http://127.0.0.1:8080</pre>
+        <p class="dim">Windows: <code>irm https://homecloud.drk1rd.systems/scripts/install.ps1 | iex</code> &middot; needs Docker (or OrbStack / Docker Desktop)</p>
+
+        <h2>speaks aws</h2>
+        <p>The AWS CLI, the SDKs and Terraform work unchanged, with IAM enforced:</p>
+        <pre>eval "$(homecloud aws-env)"
+aws s3 cp photo.jpg s3://family/
+aws lambda invoke --function-name resize out.json
+terraform apply</pre>
+
+        <h2>services</h2>
+        <ul>
+            <li><strong>compute</strong> <span class="dim">EC2, EBS, Auto Scaling, EFS, ECS, ECR</span></li>
+            <li><strong>storage &amp; data</strong> <span class="dim">S3, RDS (Postgres, MySQL, MariaDB, Redis, MongoDB), DynamoDB</span></li>
+            <li><strong>serverless</strong> <span class="dim">Lambda, API Gateway, Step Functions, EventBridge</span></li>
+            <li><strong>messaging</strong> <span class="dim">SQS, SNS</span></li>
+            <li><strong>networking</strong> <span class="dim">VPC, load balancers, Route 53, ACM</span></li>
+            <li><strong>security</strong> <span class="dim">IAM &amp; STS, Cognito, KMS, Secrets Manager, Parameter Store</span></li>
+            <li><strong>operations</strong> <span class="dim">CloudWatch metrics, logs &amp; alarms, CloudTrail, CloudFormation</span></li>
+        </ul>
+
+        <h2>why</h2>
+        <p>
+            <a href="files/Project Concept_ _HomeCloud_.pdf">- concept?</a><br>
+            <a href="files/but, why_.pdf">- but, why?</a>
         </p>
     </main>
-    <section style="margin-top: 40px; text-align: center;">
-        <p>support partners</p>
-        <p>
-            <a href="https://tailscale.com/" target="_blank">
-                <img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" 
-                     alt="Tailscale" height="50"/>
-            </a>
-        </p>
-        <p style="margin-bottom: 10px; font-size: 0.9em;">
-            <strong style="font-size: 0.8em;">Tailscale</strong>
-        </p>
-        <p>
-            <a href="https://coderabbit.ai/" target="_blank">
-                <img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png" 
-                     alt="Coderabbit" height="20"/>
-            </a>
-        </p>
-        <p>
-            <strong style="font-size: 0.8em;">Coderabbit</strong>
-        </p>
+    <section class="partners">
+        <p class="dim">support partners</p>
+        <a href="https://tailscale.com/" target="_blank" rel="noopener"><img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" alt="Tailscale" height="44"></a>
+        <a href="https://coderabbit.ai/" target="_blank" rel="noopener"><img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png" alt="CodeRabbit" height="20"></a>
     </section>
-    <section style="margin-top: 20px; text-align: center;">
-        <p>root refresh, soon.</p>
-    </section>
-    <footer style="margin-top: 40px; text-align: center;">
-        <p>© 2025 HomeCloudHQ. All rights reserved.</p>
+    <footer>
+        <p>AGPL-3.0 &middot; &copy; 2026 HomeCloudHQ</p>
     </footer>
     <script type="application/ld+json">
     {
       "@context": "https://schema.org",
       "@type": "SoftwareApplication",
       "name": "HomeCloud",
-      "description": "Personal cloud infrastructure software for running cloud services on your own hardware",
-      "applicationCategory": "CloudInfrastructureSoftware",
-      "operatingSystem": "Cross-platform",
-      "offers": {
-        "@type": "Offer",
-        "price": "0",
-        "priceCurrency": "USD"
-      },
-      "publisher": {
-        "@type": "Organization",
-        "name": "HomeCloudHQ",
-        "url": "https://homecloud.com"
-      }
+      "description": "Open-source, self-hosted cloud with AWS-compatible APIs",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Linux, macOS, Windows",
+      "license": "https://www.gnu.org/licenses/agpl-3.0.html",
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "publisher": { "@type": "Organization", "name": "HomeCloudHQ" }
     }
     </script>
 </body>
