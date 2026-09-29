@@ -260,6 +260,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	secSvc.RegisterAWS()
 	kmsSvc.RegisterAWS()
 	ssmSvc.RegisterAWS()
+	ddb.RegisterAWS()
 	awsHandler := &awsapi.Handler{Creds: iamSvc, Account: account, Audit: trailSvc.Record}
 	if len(httpx.Unscoped) > 0 {
 		return fmt.Errorf("internal error: routes without a resource ARN: %v", httpx.Unscoped)
