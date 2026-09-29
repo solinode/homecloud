@@ -60,7 +60,7 @@ func harness(t *testing.T) (*awstest.Harness, *Service, *fakeLambda) {
 	s.Routes(h.Router)
 	s.RegisterAWS()
 	// Tests deliver to endpoints on 127.0.0.1.
-	s.HTTP, s.CheckURL = &http.Client{Timeout: 5 * time.Second}, func(string) error { return nil }
+	s.SetHTTP(&http.Client{Timeout: 5 * time.Second}, func(string) error { return nil })
 	return h, s, fl
 }
 

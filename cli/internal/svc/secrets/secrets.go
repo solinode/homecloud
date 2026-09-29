@@ -118,6 +118,7 @@ type Service struct {
 	KMS KeyService
 	// Lambda runs rotation functions; nil disables rotation.
 	Lambda Invoker
+	cfgMu  sync.RWMutex // guards Lambda once the service is serving
 
 	rotMu    sync.Mutex
 	rotating map[string]bool
@@ -380,7 +381,7 @@ func (s *Service) PurgeExpired() {
 	s.purgeDeleted()
 	now := s.now()
 	for _, sec := range store.List[Secret](s.env.Store, cSecrets) {
-		if s.Lambda != nil && sec.DeletionDate == nil && sec.RotationEnabled && sec.NextRotation != nil && !now.Before(*sec.NextRotation) && !s.pendingRotation(sec) {
+		if s.lambda() != nil && sec.DeletionDate == nil && sec.RotationEnabled && sec.NextRotation != nil && !now.Before(*sec.NextRotation) && !s.pendingRotation(sec) {
 			_, _ = s.startRotation(sec.Name, "")
 		}
 	}
@@ -402,4 +403,17 @@ func uuid() string {
 	b[8] = (b[8] & 0x3f) | 0x80
 	h := fmt.Sprintf("%x", b)
 	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
+}
+
+// SetLambda replaces the rotation invoker while the service is running.
+func (s *Service) SetLambda(inv Invoker) {
+	s.cfgMu.Lock()
+	s.Lambda = inv
+	s.cfgMu.Unlock()
+}
+
+func (s *Service) lambda() Invoker {
+	s.cfgMu.RLock()
+	defer s.cfgMu.RUnlock()
+	return s.Lambda
 }

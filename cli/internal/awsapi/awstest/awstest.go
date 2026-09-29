@@ -22,6 +22,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -44,8 +45,22 @@ type Harness struct {
 	// Mux serves the native HomeCloud API (register routes with Router).
 	Mux    *http.ServeMux
 	Router *httpx.Router
-	// Audit records every audited call (action, resource).
-	Audit []string
+	// Audit records every audited call (action, resource); read it with AuditLog.
+	Audit   []string
+	auditMu sync.Mutex
+	// barrier orders a test's setup writes (fields set on services after New)
+	// before the requests that read them; the race detector can't see that
+	// ordering through the AWS CLI subprocess.
+	barrier sync.Mutex
+}
+
+func (h *Harness) sync() { h.barrier.Lock(); h.barrier.Unlock() }
+
+// AuditLog returns a copy of the audited calls so far.
+func (h *Harness) AuditLog() []string {
+	h.auditMu.Lock()
+	defer h.auditMu.Unlock()
+	return append([]string(nil), h.Audit...)
 }
 
 // New starts an endpoint with IAM (root user) and STS.
@@ -65,12 +80,15 @@ func New(t *testing.T) *Harness {
 	im.RegisterAWS()
 	h := &Harness{Env: env, IAM: im, Secrets: sec, AccessKeyID: boot.AccessKeyID, SecretKey: boot.SecretKey, Mux: http.NewServeMux()}
 	audit := func(p *httpx.Principal, action, resource string, r *http.Request, status int, took time.Duration) {
+		h.auditMu.Lock()
 		h.Audit = append(h.Audit, action+" "+resource)
+		h.auditMu.Unlock()
 	}
 	h.Router = &httpx.Router{Mux: h.Mux, Auth: im, Account: env.AccountID, Audit: audit}
 	im.Routes(h.Router)
 	aws := &awsapi.Handler{Creds: im, Account: env.AccountID, Audit: audit}
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.sync()
 		if awsapi.Match(r) && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 			aws.ServeHTTP(w, r)
 			return
@@ -130,6 +148,7 @@ func (h *Harness) AWSErr(t *testing.T, args ...string) (string, error) {
 // AWSAs runs the AWS CLI with the given credentials.
 func (h *Harness) AWSAs(t *testing.T, akid, secret, token string, args ...string) (string, error) {
 	t.Helper()
+	h.sync()
 	cmd := exec.Command(awsBin(t), append([]string{"--output", "json"}, args...)...)
 	cmd.Env = h.Environ(akid, secret, token)
 	var out bytes.Buffer
@@ -173,6 +192,7 @@ func (h *Harness) Python(t *testing.T, script string) string {
 	if err := os.WriteFile(f, []byte(src), 0o600); err != nil {
 		t.Fatal(err)
 	}
+	h.sync()
 	cmd := exec.Command(python(t), f)
 	cmd.Env = h.Environ(h.AccessKeyID, h.SecretKey, "")
 	var out, errb bytes.Buffer
@@ -215,6 +235,7 @@ func (h *Harness) nativeAsRoot(t *testing.T, method, path string, body any) []by
 	} else {
 		rd = bytes.NewReader(nil)
 	}
+	h.sync()
 	req, _ := http.NewRequest(method, h.URL+path, rd)
 	req.Header.Set("Authorization", "Bearer "+h.AccessKeyID+":"+h.SecretKey)
 	req.Header.Set("Content-Type", "application/json")

@@ -316,12 +316,12 @@ func TestIAMReadOnlyDeniedWrites(t *testing.T) {
 		t.Fatalf("reader transact: %v %s", err, out)
 	}
 	found := false
-	for _, a := range h.Audit {
+	for _, a := range h.AuditLog() {
 		if strings.HasPrefix(a, "dynamodb:PutItem arn:aws:dynamodb:") && strings.HasSuffix(a, ":table/acl") {
 			found = true
 		}
 	}
 	if !found {
-		t.Fatalf("audit: %v", h.Audit)
+		t.Fatalf("audit: %v", h.AuditLog())
 	}
 }
