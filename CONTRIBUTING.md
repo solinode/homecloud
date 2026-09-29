@@ -10,7 +10,7 @@ Thank you for your interest in contributing to HomeCloud! Whether you're fixing 
 2. **Clone Your Fork**  
     Clone your forked repository to your local machine.
     ```bash
-    git clone https://github.com/drk1rd/homecloud.git
+    git clone https://github.com/<your-username>/homecloud.git
     cd homecloud
     ```
 
@@ -24,7 +24,14 @@ Thank you for your interest in contributing to HomeCloud! Whether you're fixing 
     Implement your changes or fixes. Ensure the code adheres to the coding standards outlined below.
 
 5. **Test Your Changes**  
-    Before submitting, test your changes locally to ensure they work as intended.
+    You need Go 1.23+, Node.js 20+ and Docker.
+    ```bash
+    make test                              # Go unit tests
+    cd cli && go run . serve               # run the server (API + console on :8080)
+    ./scripts/smoke.sh                     # end-to-end check of every service against the running server
+    cd console && NEXT_PUBLIC_API_URL=http://127.0.0.1:8080 npm run dev   # console with hot reload
+    ```
+    If you add or change API routes, regenerate the reference with `python3 scripts/gen-api-docs.py`.
 
 6. **Commit Your Changes**  
     Write clear and concise commit messages.
@@ -53,6 +60,9 @@ By participating in this project, you agree to abide by our Code of Conduct.
 - Follow the conventions of the tech stack.
 - Write clean, modular, and well-documented code.
 - Ensure backward compatibility wherever possible.
+- A new service is a package in `cli/internal/svc/<name>` with a `Routes(*httpx.Router)` method, wired in `cli/internal/server/server.go`. Every route declares its IAM action and, when it acts on one resource, that resource's ARN (`httpx.Res(...)`, or `httpx.Deferred()` plus `c.Authorize` in the handler). The server refuses to start otherwise.
+- Anything that delivers to another resource (a rule target, a subscription, a trigger) must check the caller's permission on that resource when it is configured.
+- Docker objects must carry `runtime.Labels(...)` so HomeCloud never touches containers it did not create.
 
 ### Issues and Discussions
 
@@ -71,7 +81,7 @@ By participating in this project, you agree to abide by our Code of Conduct.
 
 If you’re stuck or need clarification, feel free to:
 
-- Open a [Discussion](https://github.com/drk1rd/homecloud/discussions).
+- Open a [Discussion](https://github.com/homecloudhq/homecloud/discussions).
 - Reach out on [Discord](https://homecloud.suryansh.one/discord).
 
 We’re excited to have you on board. Let’s build something great together!
