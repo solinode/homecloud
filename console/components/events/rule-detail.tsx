@@ -19,12 +19,14 @@ import { ApiError, seg } from "@/lib/api"
 import { formatDate, formatNumber } from "@/lib/format"
 import { useApi, useQueryParam } from "@/lib/hooks"
 import type { EventRule, RuleTarget } from "@/lib/types"
-import { RULES_PATH, describeSchedule, editRuleHref, hasNextRun, isSchedule, targetHref, targetKindLabel, targetName, useRuleActions } from "./common"
+import { RULES_PATH, busQuery, describeSchedule, editRuleHref, hasNextRun, isSchedule, targetHref, targetKindLabel, targetName, useRuleActions } from "./common"
 
 export function RuleDetail() {
   const router = useRouter()
   const name = useQueryParam("name")
+  const bus = useQueryParam("bus") || "default"
   const { data: rule, error, isLoading, isValidating, mutate } = useApi<EventRule>(name ? `${RULES_PATH}/${seg(name)}` : null, {
+    query: busQuery(bus),
     refreshInterval: 15_000,
   })
   const actions = useRuleActions({ onDeleted: () => router.push("/events/") })
@@ -87,7 +89,7 @@ export function RuleDetail() {
               Run now
             </Button>
             <Button variant="outline" size="sm" asChild>
-              <Link href={editRuleHref(rule.name)}>
+              <Link href={editRuleHref(rule.name, bus)}>
                 <Pencil /> Edit
               </Link>
             </Button>
@@ -216,7 +218,7 @@ export function RuleDetail() {
             description="The rule fires but delivers nothing. Edit the rule to add a Lambda function, SQS queue, SNS topic or state machine."
             action={
               <Button size="sm" variant="outline" asChild>
-                <Link href={editRuleHref(rule.name)}>
+                <Link href={editRuleHref(rule.name, bus)}>
                   <Pencil /> Edit rule
                 </Link>
               </Button>

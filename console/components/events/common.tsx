@@ -6,14 +6,17 @@ import { toast } from "sonner"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { api, errorMessage, seg } from "@/lib/api"
 import { pluralize } from "@/lib/format"
-import { revalidate } from "@/lib/hooks"
+import { revalidate, useQueryParam } from "@/lib/hooks"
 import type { EventRule } from "@/lib/types"
 
 export const EVENTS_PATH = "/api/v1/events"
 export const RULES_PATH = "/api/v1/events/rules"
 
-export const ruleHref = (name: string) => `/events/rule/?name=${encodeURIComponent(name)}`
-export const editRuleHref = (name: string) => `/events/create/?name=${encodeURIComponent(name)}`
+const busParam = (bus?: string) => (bus && bus !== "default" ? `&bus=${encodeURIComponent(bus)}` : "")
+export const ruleHref = (name: string, bus?: string) => `/events/rule/?name=${encodeURIComponent(name)}${busParam(bus)}`
+export const editRuleHref = (name: string, bus?: string) => `/events/create/?name=${encodeURIComponent(name)}${busParam(bus)}`
+/** busQuery is the API query selecting a non-default event bus. */
+export const busQuery = (bus?: string) => (bus && bus !== "default" ? { event_bus: bus } : undefined)
 
 export const RULE_NAME_RE = /^[\w.-]{1,64}$/
 
@@ -267,6 +270,7 @@ export interface RuleActions {
 
 /** useRuleActions provides enable/disable/run/delete for the rules list and detail pages. */
 export function useRuleActions(opts: { onDeleted?: () => void } = {}): RuleActions {
+  const bus = useQueryParam("bus")
   const [busy, setBusy] = useState(false)
   const [deleting, setDeleting] = useState<EventRule[] | null>(null)
 
@@ -280,12 +284,12 @@ export function useRuleActions(opts: { onDeleted?: () => void } = {}): RuleActio
     }
   }
 
-  const enable = wrap((names) => bulk(names, (n) => api.post(`${RULES_PATH}/${seg(n)}/enable`), (k) => one(names, k, "Enabled")))
-  const disable = wrap((names) => bulk(names, (n) => api.post(`${RULES_PATH}/${seg(n)}/disable`), (k) => one(names, k, "Disabled")))
+  const enable = wrap((names) => bulk(names, (n) => api.post(`${RULES_PATH}/${seg(n)}/enable`, undefined, busQuery(bus)), (k) => one(names, k, "Enabled")))
+  const disable = wrap((names) => bulk(names, (n) => api.post(`${RULES_PATH}/${seg(n)}/disable`, undefined, busQuery(bus)), (k) => one(names, k, "Disabled")))
   const run = wrap((names) =>
     bulk(
       names,
-      (n) => api.post(`${RULES_PATH}/${seg(n)}/run`),
+      (n) => api.post(`${RULES_PATH}/${seg(n)}/run`, undefined, busQuery(bus)),
       (k) => `${one(names, k, "Ran")}: targets invoked with a Scheduled Event`,
     ),
   )
@@ -301,7 +305,7 @@ export function useRuleActions(opts: { onDeleted?: () => void } = {}): RuleActio
       actionLabel="Delete"
       onConfirm={async () => {
         const list = deleting ?? []
-        const res = await Promise.allSettled(list.map((r) => api.del(`${RULES_PATH}/${seg(r.name)}`)))
+        const res = await Promise.allSettled(list.map((r) => api.del(`${RULES_PATH}/${seg(r.name)}`, busQuery(bus))))
         await revalidate(RULES_PATH)
         const failed = res.filter((r): r is PromiseRejectedResult => r.status === "rejected")
         const ok = list.length - failed.length

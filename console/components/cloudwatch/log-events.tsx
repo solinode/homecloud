@@ -12,7 +12,9 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
+import { MetricFilters, SubscriptionFilters } from "./log-filters"
 import { CopyButton } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
@@ -191,6 +193,7 @@ export function LogEventsViewer() {
   const [limit, setLimit] = useState(500)
   const [live, setLive] = useState(false)
   const [atBottom, setAtBottom] = useState(true)
+  const [tab, setTab] = useState("events")
   const [putOpen, setPutOpen] = useState(false)
   const [retentionOpen, setRetentionOpen] = useState(false)
   const scroller = useRef<HTMLDivElement>(null)
@@ -275,7 +278,19 @@ export function LogEventsViewer() {
         }
       />
 
-      <div className="bg-card flex flex-col rounded-lg border shadow-xs">
+      {!isContainer && (
+        <Tabs value={tab} onValueChange={setTab}>
+          <TabsList>
+            <TabsTrigger value="events">Log events</TabsTrigger>
+            <TabsTrigger value="metric">Metric filters</TabsTrigger>
+            <TabsTrigger value="subscription">Subscription filters</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      )}
+      {tab === "metric" && !isContainer && <MetricFilters group={name} />}
+      {tab === "subscription" && !isContainer && <SubscriptionFilters group={name} />}
+
+      <div className={cn("bg-card flex flex-col rounded-lg border shadow-xs", tab !== "events" && !isContainer && "hidden")}>
         <div className="flex flex-col gap-2 border-b p-3 lg:flex-row lg:flex-wrap lg:items-center">
           <div className="relative w-full lg:max-w-sm lg:flex-1">
             <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />

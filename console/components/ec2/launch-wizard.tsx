@@ -23,7 +23,8 @@ import { FILE_SYSTEMS_PATH, fileSystemHref, fsLabel } from "@/components/efs/com
 import { api, errorMessage } from "@/lib/api"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import { formatMemoryMB, formatNumber, pluralize } from "@/lib/format"
-import type { FileSystem, Image, Instance, RunInstancesInput, SecurityGroup, SecurityGroupRule, Subnet } from "@/lib/types"
+import { CreateKeyPairDialog, KEY_PAIRS_PATH } from "./key-pairs-list"
+import type { FileSystem, Image, Instance, KeyPair, RunInstancesInput, SecurityGroup, SecurityGroupRule, Subnet } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { INSTANCES_PATH, InstanceTypeSelect, formatVcpu, instanceHref, useInstanceTypes } from "./instance-actions"
 
@@ -75,6 +76,8 @@ export function LaunchWizard() {
   const [fsRows, setFsRows] = useState<FsRow[]>([])
   const [userData, setUserData] = useState("")
   const [keyName, setKeyName] = useState("")
+  const [creatingKey, setCreatingKey] = useState(false)
+  const keyPairs = useApi<KeyPair[]>(KEY_PAIRS_PATH)
   const [profile, setProfile] = useState("")
   const [mdEndpoint, setMdEndpoint] = useState<"enabled" | "disabled">("enabled")
   const [mdTokens, setMdTokens] = useState<"optional" | "required">("required")
@@ -388,9 +391,27 @@ export function LaunchWizard() {
               htmlFor="key-name"
               optional
               error={err("keyName")}
-              help="An existing key pair created or imported with the EC2 API (aws ec2 create-key-pair / import-key-pair). Leave empty to launch without one."
+              help="Choose a key pair, or create one. Leave as none to launch without a key pair."
             >
-              <Input id="key-name" value={keyName} onChange={(e) => setKeyName(e.target.value)} placeholder="my-key" className="max-w-md" autoComplete="off" spellCheck={false} />
+              <div className="flex max-w-md items-center gap-2">
+                <Select value={keyName || "__none"} onValueChange={(v) => setKeyName(v === "__none" ? "" : v)}>
+                  <SelectTrigger id="key-name" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Proceed without a key pair</SelectItem>
+                    {(keyPairs.data ?? []).map((k) => (
+                      <SelectItem key={k.id} value={k.name}>
+                        {k.name} ({k.type})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button type="button" variant="outline" size="sm" onClick={() => setCreatingKey(true)}>
+                  <Plus /> Create
+                </Button>
+              </div>
+              {creatingKey && <CreateKeyPairDialog onClose={() => setCreatingKey(false)} onCreated={(k) => setKeyName(k.name)} />}
             </Field>
           </Section>
 

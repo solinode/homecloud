@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { AlarmTabs } from "./alarm-history"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
@@ -153,7 +154,7 @@ export function AlarmList() {
         }
         expanded={(a) =>
           a.name === selected[0] ? (
-            <KeyValueGrid
+            <AlarmTabs name={a.name} details={<KeyValueGrid
               columns={3}
               items={[
                 { label: "State reason", value: a.state_reason, wide: true },
@@ -178,7 +179,7 @@ export function AlarmList() {
                 { label: "Created", value: formatDate(a.created_at) },
                 { label: "ARN", value: <CopyableText value={a.arn} />, wide: true },
               ]}
-            />
+            />} />
           ) : null
         }
         actions={

@@ -99,7 +99,10 @@ export const SERVICES: ServiceDef[] = [
       },
       {
         title: "Elastic Block Store",
-        items: [{ label: "Volumes", href: "/ec2/volumes/" }],
+        items: [
+          { label: "Volumes", href: "/ec2/volumes/" },
+          { label: "Snapshots", href: "/ec2/snapshots/" },
+        ],
       },
       {
         title: "Load Balancing",
@@ -112,6 +115,7 @@ export const SERVICES: ServiceDef[] = [
         title: "Network & Security",
         items: [
           { label: "Security groups", href: "/vpc/security-groups/" },
+          { label: "Key pairs", href: "/ec2/key-pairs/" },
           { label: "VPCs", href: "/vpc/" },
         ],
       },
@@ -222,6 +226,8 @@ export const SERVICES: ServiceDef[] = [
         items: [
           { label: "Your VPCs", href: "/vpc/" },
           { label: "Subnets", href: "/vpc/subnets/" },
+          { label: "Route tables", href: "/vpc/route-tables/" },
+          { label: "Internet gateways", href: "/vpc/internet-gateways/" },
         ],
       },
       {
@@ -295,7 +301,13 @@ export const SERVICES: ServiceDef[] = [
     nav: [
       { items: [{ label: "Overview", href: "/cloudwatch/" }] },
       { title: "Alarms", items: [{ label: "All alarms", href: "/cloudwatch/alarms/" }] },
-      { title: "Logs", items: [{ label: "Log groups", href: "/cloudwatch/logs/", match: ["/cloudwatch/logs/group/"] }] },
+      {
+        title: "Logs",
+        items: [
+          { label: "Log groups", href: "/cloudwatch/logs/", match: ["/cloudwatch/logs/group/"] },
+          { label: "Logs Insights", href: "/cloudwatch/insights/" },
+        ],
+      },
       { title: "Metrics", items: [{ label: "All metrics", href: "/cloudwatch/metrics/" }] },
     ],
   },
@@ -357,9 +369,11 @@ export const SERVICES: ServiceDef[] = [
         title: "Buses",
         items: [
           { label: "Rules", href: "/events/", match: ["/events/rule/", "/events/create/"] },
+          { label: "Event buses", href: "/events/buses/" },
           { label: "Send events", href: "/events/send/" },
         ],
       },
+      { title: "Scheduler", items: [{ label: "Schedules", href: "/events/scheduler/" }] },
     ],
   },
   {

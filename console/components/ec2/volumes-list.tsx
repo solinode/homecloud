@@ -20,7 +20,8 @@ import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-e
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
-import type { Volume } from "@/lib/types"
+import type { Snapshot, Volume } from "@/lib/types"
+import { CreateSnapshotDialog, SNAPSHOTS_PATH } from "./snapshots-list"
 import { instanceHref } from "./instance-actions"
 
 const VOLUMES_PATH = "/api/v1/ec2/volumes"
@@ -63,6 +64,7 @@ export function VolumesList() {
   const [selected, setSelected] = useState<string[]>([])
   const [creating, setCreating] = useState(false)
   const [deleting, setDeleting] = useState<Volume | null>(null)
+  const [snapshotting, setSnapshotting] = useState(false)
   const sel = data?.find((v) => v.id === selected[0])
 
   return (
@@ -92,6 +94,7 @@ export function VolumesList() {
             <ActionsMenu
               disabled={!sel}
               items={[
+                { label: "Create snapshot", onSelect: () => setSnapshotting(true), disabled: !sel || sel.state === "creating" || sel.state === "error" },
                 {
                   label: "Delete volume",
                   destructive: true,
@@ -135,6 +138,7 @@ export function VolumesList() {
         }}
       />
       <CreateVolumeDialog open={creating} onOpenChange={setCreating} />
+      {snapshotting && sel && <CreateSnapshotDialog volumeId={sel.id} onClose={() => setSnapshotting(false)} />}
     </div>
   )
 }
@@ -144,6 +148,7 @@ function CreateVolumeDialog({ open, onOpenChange }: { open: boolean; onOpenChang
   const [size, setSize] = useState("8")
   const [az, setAz] = useState(ZONES[0])
   const [snapshot, setSnapshot] = useState("")
+  const snapshots = useApi<Snapshot[]>(SNAPSHOTS_PATH)
   const [tags, setTags] = useState<TagRow[]>([])
   const [submitted, setSubmitted] = useState(false)
   const [pending, setPending] = useState(false)
@@ -217,9 +222,23 @@ function CreateVolumeDialog({ open, onOpenChange }: { open: boolean; onOpenChang
             htmlFor="vol-snap"
             optional
             error={submitted ? snapErr : undefined}
-            help="Restore the volume's data from an EBS snapshot (created with aws ec2 create-snapshot)."
+            help="Restore the volume's data from a completed snapshot."
           >
-            <Input id="vol-snap" value={snapshot} onChange={(e) => setSnapshot(e.target.value)} placeholder="snap-0123456789abcdef0" className="font-mono" spellCheck={false} />
+            <Select value={snapshot || "__none"} onValueChange={(v) => setSnapshot(v === "__none" ? "" : v)}>
+              <SelectTrigger id="vol-snap" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none">No snapshot (empty volume)</SelectItem>
+                {(snapshots.data ?? [])
+                  .filter((s) => s.state === "completed")
+                  .map((s) => (
+                    <SelectItem key={s.id} value={s.id}>
+                      {s.id} - {s.volume_size} GiB {s.description ? `(${s.description})` : ""}
+                    </SelectItem>
+                  ))}
+              </SelectContent>
+            </Select>
           </Field>
           <Field label="Tags" optional>
             <TagsEditor rows={tags} onChange={setTags} />

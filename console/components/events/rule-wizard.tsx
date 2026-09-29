@@ -28,6 +28,7 @@ import {
   CRON_FIELDS,
   EVENTS_PATH,
   RULES_PATH,
+  busQuery,
   TARGET_KINDS,
   describeSchedule,
   formatUtc,
@@ -42,6 +43,7 @@ import {
   targetName,
   type TargetKind,
 } from "./common"
+import { BusSelect } from "./bus-select"
 
 type RuleType = "schedule" | "pattern"
 
@@ -156,7 +158,7 @@ interface TargetOption {
 }
 
 /** useTargetOptions lists the functions, queues, topics and state machines a rule can target. */
-function useTargetOptions() {
+export function useTargetOptions() {
   const fns = useApi<LambdaFunction[]>("/api/v1/lambda/functions", { revalidateOnFocus: false })
   const queues = useApi<Queue[]>("/api/v1/sqs/queues", { revalidateOnFocus: false })
   const topics = useApi<Topic[]>("/api/v1/sns/topics", { revalidateOnFocus: false })
@@ -174,9 +176,12 @@ export function RuleWizard() {
   const router = useRouter()
   const editName = useQueryParam("name")
   const editing = !!editName
+  const busParam = useQueryParam("bus") || "default"
+  const [bus, setBus] = useState(busParam)
+  useEffect(() => setBus(busParam), [busParam])
 
-  const existing = useApi<EventRule>(editing ? `${RULES_PATH}/${seg(editName)}` : null, { revalidateOnFocus: false, keepPreviousData: false })
-  const allRules = useApi<EventRule[]>(editing ? null : RULES_PATH, { revalidateOnFocus: false })
+  const existing = useApi<EventRule>(editing ? `${RULES_PATH}/${seg(editName)}` : null, { revalidateOnFocus: false, keepPreviousData: false, query: busQuery(bus) })
+  const allRules = useApi<EventRule[]>(editing ? null : RULES_PATH, { revalidateOnFocus: false, query: busQuery(bus) })
   const targetOpts = useTargetOptions()
 
   const [name, setName] = useState("")
@@ -318,11 +323,11 @@ export function RuleWizard() {
     }
     setPending(true)
     try {
-      const r = await api.put<EventRule>(`${RULES_PATH}/${seg(name)}`, body)
+      const r = await api.put<EventRule>(`${RULES_PATH}/${seg(name)}`, body, busQuery(bus))
       const when = r.schedule_expression && hasNextRun(r) ? ` Next run ${formatDate(r.next_run)}${r.state === "DISABLED" ? " once enabled" : ""}.` : ""
       toast.success(`${editing ? "Saved" : "Created"} rule ${r.name}.${when}`)
       await revalidate(RULES_PATH)
-      router.push(ruleHref(r.name))
+      router.push(ruleHref(r.name, bus))
     } catch (e) {
       toast.error(errorMessage(e))
       setPending(false)
@@ -333,7 +338,7 @@ export function RuleWizard() {
   const crumbs = [
     { label: "EventBridge", href: "/events/" },
     { label: "Rules", href: "/events/" },
-    ...(editing ? [{ label: editName, href: ruleHref(editName) }, { label: "Edit" }] : [{ label: "Create rule" }]),
+    ...(editing ? [{ label: editName, href: ruleHref(editName, bus) }, { label: "Edit" }] : [{ label: "Create rule" }]),
   ]
 
   if (editing && existing.error && !existing.data) {
@@ -382,6 +387,9 @@ export function RuleWizard() {
           {/* ---- Details ---- */}
           <Section title="Rule details">
             <div className="flex flex-col gap-4">
+              <Field label="Event bus" htmlFor="rule-bus" help={editing ? "A rule's bus cannot be changed." : "Schedules run on the default bus only; event patterns work on any bus."}>
+                <BusSelect id="rule-bus" value={bus} onChange={setBus} disabled={editing} className="max-w-md" />
+              </Field>
               <Field
                 label="Name"
                 htmlFor="rule-name"
@@ -671,7 +679,7 @@ export function RuleWizard() {
                   {editing ? "Save changes" : "Create rule"}
                 </Button>
                 <Button type="button" variant="outline" asChild>
-                  <Link href={editing ? ruleHref(editName) : "/events/"}>Cancel</Link>
+                  <Link href={editing ? ruleHref(editName, bus) : "/events/"}>Cancel</Link>
                 </Button>
               </div>
             </div>
