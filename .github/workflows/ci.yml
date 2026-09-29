@@ -15,8 +15,15 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: cli/go.mod
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      # AWS compatibility tests drive the real AWS CLI (preinstalled on the runner) and boto3.
+      - run: pip install boto3 && aws --version
       - run: go vet ./...
       - run: go test -race ./...
+        env:
+          HC_TEST_PYTHON: python3
       - name: Cross-compile
         run: |
           for p in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
@@ -54,6 +61,9 @@ jobs:
         run: |
           nohup ./bin/homecloud serve > serve.log 2>&1 &
           for i in $(seq 1 60); do curl -fsS localhost:8080/api/v1/health && break; sleep 2; done
+          # Background components pull images on first start; wait for S3 (MinIO) to be ready.
+          for i in $(seq 1 90); do grep -q "s3: MinIO ready" serve.log && break; sleep 2; done
+          grep "ready" serve.log || true
       - name: Smoke test
         run: HC=$PWD/bin/homecloud ./scripts/smoke.sh
       - name: Server log
