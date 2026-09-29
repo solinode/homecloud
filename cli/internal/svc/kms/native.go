@@ -3,6 +3,9 @@ package kms
 import (
 	"crypto/rand"
 	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"strings"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
@@ -21,12 +24,22 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("POST /api/v1/kms/keys/{id}/rotate", "kms:RotateKeyOnDemand", s.nativeRotate, d)
 	r.Handle("POST /api/v1/kms/keys/{id}/schedule-deletion", "kms:ScheduleKeyDeletion", s.nativeScheduleDeletion, d)
 	r.Handle("POST /api/v1/kms/keys/{id}/cancel-deletion", "kms:CancelKeyDeletion", s.nativeCancelDeletion, d)
+	r.Handle("GET /api/v1/kms/keys/{id}/policy", "kms:GetKeyPolicy", s.nativeGetPolicy, d)
+	r.Handle("PUT /api/v1/kms/keys/{id}/policy", "kms:PutKeyPolicy", s.nativePutPolicy, d)
+	r.Handle("GET /api/v1/kms/keys/{id}/grants", "kms:ListGrants", s.nativeListGrants, d)
+	r.Handle("POST /api/v1/kms/keys/{id}/grants", "kms:CreateGrant", s.nativeCreateGrant, d)
+	r.Handle("DELETE /api/v1/kms/keys/{id}/grants/{grant}", "kms:RevokeGrant", s.nativeRevokeGrant, d)
+	r.Handle("GET /api/v1/kms/keys/{id}/public-key", "kms:GetPublicKey", s.nativePublicKey, d)
 	r.Handle("GET /api/v1/kms/aliases", "kms:ListAliases", s.listAliases)
 	r.Handle("POST /api/v1/kms/aliases", "kms:CreateAlias", s.nativeCreateAlias, d)
 	r.Handle("DELETE /api/v1/kms/aliases/{name...}", "kms:DeleteAlias", s.nativeDeleteAlias, d)
 	r.Handle("POST /api/v1/kms/encrypt", "kms:Encrypt", s.nativeEncrypt, d)
 	r.Handle("POST /api/v1/kms/decrypt", "kms:Decrypt", s.nativeDecrypt, d)
 	r.Handle("POST /api/v1/kms/generate-data-key", "kms:GenerateDataKey", s.nativeDataKey, d)
+	r.Handle("POST /api/v1/kms/sign", "kms:Sign", s.nativeSign, d)
+	r.Handle("POST /api/v1/kms/verify", "kms:Verify", s.nativeVerify, d)
+	r.Handle("POST /api/v1/kms/generate-mac", "kms:GenerateMac", s.nativeGenerateMac, d)
+	r.Handle("POST /api/v1/kms/verify-mac", "kms:VerifyMac", s.nativeVerifyMac, d)
 	r.Handle("POST /api/v1/kms/generate-random", "kms:GenerateRandom", s.nativeRandom)
 }
 
@@ -180,6 +193,7 @@ type cryptoInput struct {
 	EncryptionContext map[string]string `json:"encryption_context"`
 	NumberOfBytes     int               `json:"number_of_bytes"`
 	KeySpec           string            `json:"key_spec"`
+	Algorithm         string            `json:"encryption_algorithm"`
 }
 
 func (s *Service) nativeEncrypt(c *httpx.Ctx) (any, error) {
@@ -198,11 +212,11 @@ func (s *Service) nativeEncrypt(c *httpx.Ctx) (any, error) {
 	if err := checkPlaintext(pt); err != nil {
 		return nil, err
 	}
-	blob, _, err := s.encrypt(k, pt, in.EncryptionContext, "")
+	blob, alg, err := s.encrypt(k, pt, in.EncryptionContext, in.Algorithm)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{"ciphertext_blob": base64.StdEncoding.EncodeToString(blob), "key_id": k.ARN}, nil
+	return map[string]string{"ciphertext_blob": base64.StdEncoding.EncodeToString(blob), "key_id": k.ARN, "encryption_algorithm": alg}, nil
 }
 
 func (s *Service) nativeDecrypt(c *httpx.Ctx) (any, error) {
@@ -214,11 +228,11 @@ func (s *Service) nativeDecrypt(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, invalidCiphertext()
 	}
-	pt, k, _, err := s.decrypt(c.Authorize, "kms:Decrypt", blob, in.EncryptionContext, in.KeyID, "")
+	pt, k, alg, err := s.decrypt(c.Authorize, "kms:Decrypt", blob, in.EncryptionContext, in.KeyID, in.Algorithm)
 	if err != nil {
 		return nil, err
 	}
-	return map[string]string{"plaintext": base64.StdEncoding.EncodeToString(pt), "key_id": k.ARN}, nil
+	return map[string]string{"plaintext": base64.StdEncoding.EncodeToString(pt), "key_id": k.ARN, "encryption_algorithm": alg}, nil
 }
 
 func (s *Service) nativeDataKey(c *httpx.Ctx) (any, error) {
@@ -247,4 +261,193 @@ func (s *Service) nativeRandom(c *httpx.Ctx) (any, error) {
 	b := make([]byte, in.NumberOfBytes)
 	_, _ = rand.Read(b)
 	return map[string]string{"plaintext": base64.StdEncoding.EncodeToString(b)}, nil
+}
+
+func (s *Service) nativeGetPolicy(c *httpx.Ctx) (any, error) {
+	k, err := s.keyFor(c.Authorize, "kms:GetKeyPolicy", c.Param("id"))
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"policy_name": "default", "policy": s.policyOf(k)}, nil
+}
+
+func (s *Service) nativePutPolicy(c *httpx.Ctx) (any, error) {
+	var in struct {
+		Policy string `json:"policy"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	if err := s.putPolicy(c.Authorize, c.Param("id"), "default", in.Policy); err != nil {
+		return nil, err
+	}
+	return map[string]string{"policy_name": "default", "policy": in.Policy}, nil
+}
+
+func grantView(g Grant) map[string]any {
+	return map[string]any{"grant_id": g.ID, "name": g.Name, "grantee_principal": g.GranteePrincipal,
+		"retiring_principal": g.RetiringPrincipal, "operations": g.Operations, "constraints": g.Constraints, "created_at": g.CreatedAt}
+}
+
+func (s *Service) nativeListGrants(c *httpx.Ctx) (any, error) {
+	k, err := s.keyFor(c.Authorize, "kms:ListGrants", c.Param("id"))
+	if err != nil {
+		return nil, err
+	}
+	out := []map[string]any{}
+	for _, g := range k.Grants {
+		out = append(out, grantView(g))
+	}
+	return out, nil
+}
+
+func (s *Service) nativeCreateGrant(c *httpx.Ctx) (any, error) {
+	var in struct {
+		Name              string          `json:"name"`
+		GranteePrincipal  string          `json:"grantee_principal"`
+		RetiringPrincipal string          `json:"retiring_principal"`
+		Operations        []string        `json:"operations"`
+		Constraints       json.RawMessage `json:"constraints"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	g, err := s.createGrant(c.Authorize, c.Param("id"), Grant{Name: in.Name, GranteePrincipal: in.GranteePrincipal,
+		RetiringPrincipal: in.RetiringPrincipal, Operations: in.Operations, Constraints: in.Constraints})
+	if err != nil {
+		return nil, err
+	}
+	v := grantView(g)
+	v["grant_token"] = g.Token
+	return v, nil
+}
+
+func (s *Service) nativeRevokeGrant(c *httpx.Ctx) (any, error) {
+	return nil, s.removeGrant(c.Authorize, "kms:RevokeGrant", c.Param("id"), c.Param("grant"), "")
+}
+
+func (s *Service) nativePublicKey(c *httpx.Ctx) (any, error) {
+	k, err := s.keyFor(c.Authorize, "kms:GetPublicKey", c.Param("id"))
+	if err != nil {
+		return nil, err
+	}
+	if !k.rsa() && !k.ecc() {
+		return nil, errf("UnsupportedOperationException", "%s is not an asymmetric key", k.ARN)
+	}
+	if err := usable(k); err != nil {
+		return nil, err
+	}
+	pub, err := s.publicKeyDER(k)
+	if err != nil {
+		return nil, err
+	}
+	pemBody := base64.StdEncoding.EncodeToString(pub)
+	var lines []string
+	for len(pemBody) > 64 {
+		lines, pemBody = append(lines, pemBody[:64]), pemBody[64:]
+	}
+	lines = append(lines, pemBody)
+	return map[string]any{"key_id": core.CanonicalARN(k.ARN), "public_key": base64.StdEncoding.EncodeToString(pub),
+		"pem":      "-----BEGIN PUBLIC KEY-----\n" + strings.Join(lines, "\n") + "\n-----END PUBLIC KEY-----\n",
+		"key_spec": k.KeySpec, "key_usage": k.KeyUsage,
+		"encryption_algorithms": encryptionAlgorithms(k), "signing_algorithms": signingAlgorithms(k)}, nil
+}
+
+// signInput carries base64 message, signature and MAC fields.
+type signInput struct {
+	KeyID       string `json:"key_id"`
+	Message     string `json:"message"` // base64
+	MessageType string `json:"message_type"`
+	Algorithm   string `json:"algorithm"` // signing or MAC algorithm
+	Signature   string `json:"signature"` // base64
+	Mac         string `json:"mac"`       // base64
+}
+
+func b64(name, v string) ([]byte, error) {
+	b, err := base64.StdEncoding.DecodeString(v)
+	if err != nil {
+		return nil, core.BadRequest("%s must be base64", name)
+	}
+	return b, nil
+}
+
+func (in signInput) decode() (msg, sig, mac []byte, err error) {
+	if msg, err = b64("message", in.Message); err != nil {
+		return
+	}
+	if sig, err = b64("signature", in.Signature); err != nil {
+		return
+	}
+	mac, err = b64("mac", in.Mac)
+	return
+}
+
+// invalid reports a failed verification (as opposed to a request error).
+func invalid(err error, code string) bool {
+	var e *core.Error
+	return errors.As(err, &e) && e.Code == code
+}
+
+func (s *Service) nativeSign(c *httpx.Ctx) (any, error) {
+	var in signInput
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	msg, _, _, err := in.decode()
+	if err != nil {
+		return nil, err
+	}
+	sig, k, err := s.sign(c.Authorize, in.KeyID, msg, in.MessageType, in.Algorithm)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"key_id": core.CanonicalARN(k.ARN), "signature": base64.StdEncoding.EncodeToString(sig), "algorithm": in.Algorithm}, nil
+}
+
+func (s *Service) nativeVerify(c *httpx.Ctx) (any, error) {
+	var in signInput
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	msg, sig, _, err := in.decode()
+	if err != nil {
+		return nil, err
+	}
+	k, err := s.verify(c.Authorize, in.KeyID, msg, in.MessageType, in.Algorithm, sig)
+	if err != nil && !invalid(err, "KMSInvalidSignatureException") {
+		return nil, err
+	}
+	return map[string]any{"key_id": core.CanonicalARN(k.ARN), "valid": err == nil, "algorithm": in.Algorithm}, nil
+}
+
+func (s *Service) nativeGenerateMac(c *httpx.Ctx) (any, error) {
+	var in signInput
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	msg, _, _, err := in.decode()
+	if err != nil {
+		return nil, err
+	}
+	mac, k, err := s.mac(c.Authorize, "kms:GenerateMac", in.KeyID, msg, in.Algorithm)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]string{"key_id": core.CanonicalARN(k.ARN), "mac": base64.StdEncoding.EncodeToString(mac), "algorithm": in.Algorithm}, nil
+}
+
+func (s *Service) nativeVerifyMac(c *httpx.Ctx) (any, error) {
+	var in signInput
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	msg, _, mac, err := in.decode()
+	if err != nil {
+		return nil, err
+	}
+	k, err := s.verifyMac(c.Authorize, in.KeyID, msg, in.Algorithm, mac)
+	if err != nil && !invalid(err, "KMSInvalidMacException") {
+		return nil, err
+	}
+	return map[string]any{"key_id": core.CanonicalARN(k.ARN), "valid": err == nil, "algorithm": in.Algorithm}, nil
 }

@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, EyeOff, Info, KeyRound, Loader2, Pencil, RefreshCw, Tag, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, EyeOff, Info, KeyRound, Loader2, Pencil, RefreshCw, Tag, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -55,7 +55,8 @@ function Mask() {
   return <span className="text-muted-foreground font-mono tracking-widest">••••••••</span>
 }
 
-function Labels({ labels }: { labels?: string[] | null }) {
+/** Labels shows version labels; with onRemove each gets a remove button. */
+function Labels({ labels, onRemove, disabled }: { labels?: string[] | null; onRemove?: (label: string) => void; disabled?: boolean }) {
   if (!labels?.length) return <span className="text-muted-foreground">-</span>
   return (
     <span className="flex flex-wrap gap-1">
@@ -63,6 +64,18 @@ function Labels({ labels }: { labels?: string[] | null }) {
         <span key={l} className="bg-muted inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-xs">
           <Tag className="text-muted-foreground size-3" />
           {l}
+          {onRemove && (
+            <button
+              type="button"
+              className="text-muted-foreground hover:text-foreground -mr-0.5 rounded disabled:opacity-50"
+              onClick={() => onRemove(l)}
+              disabled={disabled}
+              aria-label={`Remove label ${l}`}
+              title="Remove label"
+            >
+              <X className="size-3" />
+            </button>
+          )}
         </span>
       ))}
     </span>
@@ -303,6 +316,9 @@ function History({ p, onChanged }: { p: SsmParameter; onChanged: () => void }) {
     refreshInterval: 15_000,
   })
   const [labeling, setLabeling] = useState<SsmParameterVersion | null>(null)
+  const [removing, setRemoving] = useState<{ version: number; label: string } | null>(null)
+  const [unlabeling, setUnlabeling] = useState(false)
+  const unlabel = (version: number, label: string) => setRemoving({ version, label })
   const versions = [...(data ?? [])].reverse()
   // Versions keep their own type, so a parameter that was once a SecureString still has encrypted history.
   const secure = p.type === "SecureString" || versions.some((v) => v.type === "SecureString")
@@ -384,7 +400,7 @@ function History({ p, onChanged }: { p: SsmParameter; onChanged: () => void }) {
                       {principalName(v.modified_by) || "-"}
                     </td>
                     <td className="px-3 py-2 align-top">
-                      <Labels labels={v.labels} />
+                      <Labels labels={v.labels} disabled={unlabeling} onRemove={(l) => unlabel(v.version, l)} />
                     </td>
                     <td className="px-4 py-2 text-right align-top">
                       <Button variant="outline" size="sm" onClick={() => setLabeling(v)}>
@@ -405,6 +421,27 @@ function History({ p, onChanged }: { p: SsmParameter; onChanged: () => void }) {
           </p>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!removing}
+        onOpenChange={(o) => !o && setRemoving(null)}
+        title={`Remove label ${removing?.label ?? ""}?`}
+        description={removing ? `Reads of ${p.name}:${removing.label} will fail until the label is attached to a version again.` : undefined}
+        actionLabel="Remove label"
+        onConfirm={async () => {
+          if (!removing) return
+          setUnlabeling(true)
+          try {
+            await api.post(`${PARAMETER_PATH}/unlabel`, { name: p.name, version: removing.version, labels: [removing.label] })
+            toast.success(`Label ${removing.label} removed`)
+            setRemoving(null)
+            mutate()
+            onChanged()
+          } finally {
+            setUnlabeling(false)
+          }
+        }}
+      />
 
       <LabelDialog
         name={p.name}

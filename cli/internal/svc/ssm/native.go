@@ -17,6 +17,7 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("DELETE /api/v1/ssm/parameter", "ssm:DeleteParameter", s.nativeDelete, d)
 	r.Handle("GET /api/v1/ssm/parameter/history", "ssm:GetParameterHistory", s.nativeHistory, d)
 	r.Handle("POST /api/v1/ssm/parameter/labels", "ssm:LabelParameterVersion", s.nativeLabel, d)
+	r.Handle("POST /api/v1/ssm/parameter/unlabel", "ssm:UnlabelParameterVersion", s.nativeUnlabel, d)
 	r.Handle("GET /api/v1/ssm/parameters-by-path", "ssm:GetParametersByPath", s.nativeByPath, d)
 }
 
@@ -144,4 +145,26 @@ func (s *Service) nativeByPath(c *httpx.Ctx) (any, error) {
 		out = append(out, s.render(ps[i], vs[i], vals[i]))
 	}
 	return out, nil
+}
+
+func (s *Service) nativeUnlabel(c *httpx.Ctx) (any, error) {
+	var in struct {
+		Name    string   `json:"name"`
+		Version int      `json:"version"`
+		Labels  []string `json:"labels"`
+	}
+	if err := c.Bind(&in); err != nil {
+		return nil, err
+	}
+	removed, invalid, err := s.unlabel(c.Authorize, in.Name, in.Version, in.Labels)
+	if err != nil {
+		return nil, err
+	}
+	if removed == nil {
+		removed = []string{}
+	}
+	if invalid == nil {
+		invalid = []string{}
+	}
+	return map[string]any{"removed_labels": removed, "invalid_labels": invalid}, nil
 }

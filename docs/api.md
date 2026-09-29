@@ -16,6 +16,12 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 
 | Method | Path | IAM action |
 |---|---|---|
+| GET | `/api/v1/iam/instance-profiles` | `iam:ListInstanceProfiles` |
+| POST | `/api/v1/iam/instance-profiles` | `iam:CreateInstanceProfile` |
+| GET | `/api/v1/iam/instance-profiles/{name}` | `iam:GetInstanceProfile` |
+| DELETE | `/api/v1/iam/instance-profiles/{name}` | `iam:DeleteInstanceProfile` |
+| POST | `/api/v1/iam/instance-profiles/{name}/roles` | `iam:AddRoleToInstanceProfile` |
+| DELETE | `/api/v1/iam/instance-profiles/{name}/roles/{role}` | `iam:RemoveRoleFromInstanceProfile` |
 | POST | `/api/v1/auth/login` | `(public)` |
 | POST | `/api/v1/auth/logout` | `sts:Logout` |
 | GET | `/api/v1/auth/whoami` | `sts:GetCallerIdentity` |
@@ -31,6 +37,8 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | DELETE | `/api/v1/iam/users/{name}/policies/{policy}` | `iam:DetachUserPolicy` |
 | PUT | `/api/v1/iam/users/{name}/inline-policies/{policy}` | `iam:PutUserPolicy` |
 | DELETE | `/api/v1/iam/users/{name}/inline-policies/{policy}` | `iam:DeleteUserPolicy` |
+| PUT | `/api/v1/iam/users/{name}/permissions-boundary` | `iam:PutUserPermissionsBoundary` |
+| DELETE | `/api/v1/iam/users/{name}/permissions-boundary` | `iam:DeleteUserPermissionsBoundary` |
 | GET | `/api/v1/iam/users/{name}/access-keys` | `iam:ListAccessKeys` |
 | POST | `/api/v1/iam/users/{name}/access-keys` | `iam:CreateAccessKey` |
 | PATCH | `/api/v1/iam/users/{name}/access-keys/{key}` | `iam:UpdateAccessKey` |
@@ -43,11 +51,17 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | DELETE | `/api/v1/iam/groups/{name}/members/{user}` | `iam:RemoveUserFromGroup` |
 | POST | `/api/v1/iam/groups/{name}/policies` | `iam:AttachGroupPolicy` |
 | DELETE | `/api/v1/iam/groups/{name}/policies/{policy}` | `iam:DetachGroupPolicy` |
+| PUT | `/api/v1/iam/groups/{name}/inline-policies/{policy}` | `iam:PutGroupPolicy` |
+| DELETE | `/api/v1/iam/groups/{name}/inline-policies/{policy}` | `iam:DeleteGroupPolicy` |
 | GET | `/api/v1/iam/policies` | `iam:ListPolicies` |
 | POST | `/api/v1/iam/policies` | `iam:CreatePolicy` |
 | GET | `/api/v1/iam/policies/{name}` | `iam:GetPolicy` |
 | PUT | `/api/v1/iam/policies/{name}` | `iam:CreatePolicyVersion` |
 | DELETE | `/api/v1/iam/policies/{name}` | `iam:DeletePolicy` |
+| GET | `/api/v1/iam/policies/{name}/versions` | `iam:ListPolicyVersions` |
+| POST | `/api/v1/iam/policies/{name}/versions` | `iam:CreatePolicyVersion` |
+| PUT | `/api/v1/iam/policies/{name}/default-version` | `iam:SetDefaultPolicyVersion` |
+| DELETE | `/api/v1/iam/policies/{name}/versions/{version}` | `iam:DeletePolicyVersion` |
 | POST | `/api/v1/iam/simulate` | `iam:SimulatePrincipalPolicy` |
 | GET | `/api/v1/iam/roles` | `iam:ListRoles` |
 | POST | `/api/v1/iam/roles` | `iam:CreateRole` |
@@ -60,6 +74,10 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | PUT | `/api/v1/iam/roles/{name}/inline-policies/{policy}` | `iam:PutRolePolicy` |
 | DELETE | `/api/v1/iam/roles/{name}/inline-policies/{policy}` | `iam:DeleteRolePolicy` |
 | POST | `/api/v1/iam/roles/{name}/revoke-sessions` | `iam:PutRolePolicy` |
+| PUT | `/api/v1/iam/roles/{name}/permissions-boundary` | `iam:PutRolePermissionsBoundary` |
+| DELETE | `/api/v1/iam/roles/{name}/permissions-boundary` | `iam:DeleteRolePermissionsBoundary` |
+| PUT | `/api/v1/iam/roles/{name}/tags` | `iam:TagRole` |
+| DELETE | `/api/v1/iam/roles/{name}/tags` | `iam:UntagRole` |
 | POST | `/api/v1/sts/assume-role` | `sts:AssumeRole` |
 
 ## Cognito (user pools)
@@ -290,6 +308,7 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | PATCH | `/api/v1/lambda/event-source-mappings/{id}` | `lambda:UpdateEventSourceMapping` |
 | DELETE | `/api/v1/lambda/event-source-mappings/{id}` | `lambda:DeleteEventSourceMapping` |
 | GET | `/api/v1/lambda/runtimes` | `lambda:ListRuntimes` |
+| GET | `/api/v1/lambda/account` | `lambda:GetAccountSettings` |
 | GET | `/api/v1/lambda/functions` | `lambda:ListFunctions` |
 | POST | `/api/v1/lambda/functions` | `lambda:CreateFunction` |
 | GET | `/api/v1/lambda/functions/{name}` | `lambda:GetFunction` |
@@ -299,7 +318,24 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | DELETE | `/api/v1/lambda/functions/{name}` | `lambda:DeleteFunction` |
 | POST | `/api/v1/lambda/functions/{name}/invoke` | `lambda:InvokeFunction` |
 | PUT | `/api/v1/lambda/functions/{name}/url` | `lambda:CreateFunctionUrlConfig` |
+| GET | `/api/v1/lambda/functions/{name}/versions` | `lambda:ListVersionsByFunction` |
+| POST | `/api/v1/lambda/functions/{name}/versions` | `lambda:PublishVersion` |
+| GET | `/api/v1/lambda/functions/{name}/aliases` | `lambda:ListAliases` |
+| POST | `/api/v1/lambda/functions/{name}/aliases` | `lambda:CreateAlias` |
+| PATCH | `/api/v1/lambda/functions/{name}/aliases/{alias}` | `lambda:UpdateAlias` |
+| DELETE | `/api/v1/lambda/functions/{name}/aliases/{alias}` | `lambda:DeleteAlias` |
+| PUT | `/api/v1/lambda/functions/{name}/concurrency` | `lambda:PutFunctionConcurrency` |
+| DELETE | `/api/v1/lambda/functions/{name}/concurrency` | `lambda:DeleteFunctionConcurrency` |
+| GET | `/api/v1/lambda/functions/{name}/event-invoke-config` | `lambda:GetFunctionEventInvokeConfig` |
+| PUT | `/api/v1/lambda/functions/{name}/event-invoke-config` | `lambda:PutFunctionEventInvokeConfig` |
+| DELETE | `/api/v1/lambda/functions/{name}/event-invoke-config` | `lambda:DeleteFunctionEventInvokeConfig` |
+| GET | `/api/v1/lambda/functions/{name}/policy` | `lambda:GetPolicy` |
+| GET | `/api/v1/lambda/layers` | `lambda:ListLayers` |
+| POST | `/api/v1/lambda/layers` | `lambda:PublishLayerVersion` |
+| GET | `/api/v1/lambda/layers/{layer}/versions` | `lambda:ListLayerVersions` |
+| DELETE | `/api/v1/lambda/layers/{layer}/versions/{version}` | `lambda:DeleteLayerVersion` |
 | ANY | `/lambda-url/{name}/{path...}` | `(public)` |
+| GET | `/lambda-code/{token}` | `(public)` |
 
 ## SQS (queues)
 
@@ -332,6 +368,9 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/sns/topics/{name}/subscriptions` | `sns:Subscribe` |
 | PATCH | `/api/v1/sns/subscriptions/{arn}` | `sns:SetSubscriptionAttributes` |
 | DELETE | `/api/v1/sns/subscriptions/{arn}` | `sns:Unsubscribe` |
+| GET | `/api/v1/sns/confirm-subscription` | `sns:ConfirmSubscription` |
+| GET | `/api/v1/sns/unsubscribe` | `sns:Unsubscribe` |
+| GET | `/api/v1/sns/SimpleNotificationService.pem` | `sns:GetSigningCertificate` |
 
 ## DynamoDB (key-value)
 
@@ -403,6 +442,12 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | PUT | `/api/v1/secrets/{name}/value` | `secretsmanager:PutSecretValue` |
 | DELETE | `/api/v1/secrets/{name}` | `secretsmanager:DeleteSecret` |
 | POST | `/api/v1/secrets/{name}/restore` | `secretsmanager:RestoreSecret` |
+| POST | `/api/v1/secrets/{name}/rotate` | `secretsmanager:RotateSecret` |
+| POST | `/api/v1/secrets/{name}/cancel-rotation` | `secretsmanager:CancelRotateSecret` |
+| GET | `/api/v1/secrets/{name}/policy` | `secretsmanager:GetResourcePolicy` |
+| PUT | `/api/v1/secrets/{name}/policy` | `secretsmanager:PutResourcePolicy` |
+| DELETE | `/api/v1/secrets/{name}/policy` | `secretsmanager:DeleteResourcePolicy` |
+| PUT | `/api/v1/secrets/{name}/stages` | `secretsmanager:UpdateSecretVersionStage` |
 | POST | `/api/v1/secrets/random-password` | `secretsmanager:GetRandomPassword` |
 
 ## KMS (encryption keys)
@@ -418,12 +463,22 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/kms/keys/{id}/rotate` | `kms:RotateKeyOnDemand` |
 | POST | `/api/v1/kms/keys/{id}/schedule-deletion` | `kms:ScheduleKeyDeletion` |
 | POST | `/api/v1/kms/keys/{id}/cancel-deletion` | `kms:CancelKeyDeletion` |
+| GET | `/api/v1/kms/keys/{id}/policy` | `kms:GetKeyPolicy` |
+| PUT | `/api/v1/kms/keys/{id}/policy` | `kms:PutKeyPolicy` |
+| GET | `/api/v1/kms/keys/{id}/grants` | `kms:ListGrants` |
+| POST | `/api/v1/kms/keys/{id}/grants` | `kms:CreateGrant` |
+| DELETE | `/api/v1/kms/keys/{id}/grants/{grant}` | `kms:RevokeGrant` |
+| GET | `/api/v1/kms/keys/{id}/public-key` | `kms:GetPublicKey` |
 | GET | `/api/v1/kms/aliases` | `kms:ListAliases` |
 | POST | `/api/v1/kms/aliases` | `kms:CreateAlias` |
 | DELETE | `/api/v1/kms/aliases/{name...}` | `kms:DeleteAlias` |
 | POST | `/api/v1/kms/encrypt` | `kms:Encrypt` |
 | POST | `/api/v1/kms/decrypt` | `kms:Decrypt` |
 | POST | `/api/v1/kms/generate-data-key` | `kms:GenerateDataKey` |
+| POST | `/api/v1/kms/sign` | `kms:Sign` |
+| POST | `/api/v1/kms/verify` | `kms:Verify` |
+| POST | `/api/v1/kms/generate-mac` | `kms:GenerateMac` |
+| POST | `/api/v1/kms/verify-mac` | `kms:VerifyMac` |
 | POST | `/api/v1/kms/generate-random` | `kms:GenerateRandom` |
 
 ## Systems Manager Parameter Store
@@ -436,6 +491,7 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | DELETE | `/api/v1/ssm/parameter` | `ssm:DeleteParameter` |
 | GET | `/api/v1/ssm/parameter/history` | `ssm:GetParameterHistory` |
 | POST | `/api/v1/ssm/parameter/labels` | `ssm:LabelParameterVersion` |
+| POST | `/api/v1/ssm/parameter/unlabel` | `ssm:UnlabelParameterVersion` |
 | GET | `/api/v1/ssm/parameters-by-path` | `ssm:GetParametersByPath` |
 
 ## CloudWatch (metrics, logs, alarms)

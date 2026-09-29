@@ -329,7 +329,11 @@ function PermissionsTab({ role, policies, loading, onChanged }: { role: IamRole;
       <PermissionsBoundarySection
         kind="role"
         arn={role.permissions_boundary}
-        readOnlyNote="A permissions boundary can be chosen when the role is created. Changing it later needs the AWS API (PutRolePermissionsBoundary / DeleteRolePermissionsBoundary)."
+        onSet={async (arn) => {
+          const p = `${IAM}/roles/${seg(role.name)}/permissions-boundary`
+          await (arn ? api.put(p, { policy: arn }) : api.del(p))
+          onChanged()
+        }}
       />
 
       <AttachPoliciesDialog

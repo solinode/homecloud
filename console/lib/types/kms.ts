@@ -54,4 +54,28 @@ export interface KmsDecryptResult {
   plaintext: string
   /** Key ARN. */
   key_id: string
+  encryption_algorithm?: string
+}
+
+export interface KmsGrant {
+  grant_id: string
+  name?: string
+  grantee_principal: string
+  retiring_principal?: string
+  operations: string[]
+  constraints?: unknown
+  created_at: string
+  /** Only returned when the grant is created. */
+  grant_token?: string
+}
+
+export interface KmsPublicKey {
+  key_id: string
+  /** base64 DER (SubjectPublicKeyInfo). */
+  public_key: string
+  pem: string
+  key_spec: string
+  key_usage: string
+  encryption_algorithms?: string[] | null
+  signing_algorithms?: string[] | null
 }

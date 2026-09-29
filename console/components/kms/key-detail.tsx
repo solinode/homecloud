@@ -30,9 +30,9 @@ import { revalidate, useAction, useApi, useQueryParam, useSetQueryParam } from "
 import type { KmsKey } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { CodeBlock } from "@/components/s3/common"
 
-import { CryptoTool } from "./crypto-tool"
+import { AsymmetricTool, CryptoTool } from "./crypto-tool"
+import { GrantsSection, KeyPolicySection } from "./permissions"
 import {
   AliasInput,
   KEYS_PATH,
@@ -43,7 +43,6 @@ import {
   ManagedBadge,
   USAGE_LABEL,
   aliasError,
-  apiOrigin,
   isServiceManaged,
   isSymmetric,
   keyKind,
@@ -52,7 +51,7 @@ import {
   useKeyActions,
 } from "./shared"
 
-const TABS = ["details", "aliases", "crypto"] as const
+const TABS = ["details", "permissions", "aliases", "crypto"] as const
 type Tab = (typeof TABS)[number]
 
 const READ_ONLY_REASON = "HomeCloud managed keys are created and rotated by the service that owns them and cannot be changed."
@@ -175,6 +174,7 @@ export function KeyDetail() {
       <Tabs value={tab} onValueChange={(v) => setParam("tab", v === "details" ? null : v)}>
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
+          <TabsTrigger value="permissions">Key policy and grants</TabsTrigger>
           <TabsTrigger value="aliases">
             Aliases <span className="text-muted-foreground text-xs">({key.aliases?.length ?? 0})</span>
           </TabsTrigger>
@@ -183,11 +183,15 @@ export function KeyDetail() {
         <TabsContent value="details">
           <DetailsTab k={key} managed={managed} actions={actions} onSaved={() => mutate()} />
         </TabsContent>
+        <TabsContent value="permissions" className="flex flex-col gap-4">
+          <KeyPolicySection k={key} readOnly={managed} />
+          <GrantsSection k={key} readOnly={managed} />
+        </TabsContent>
         <TabsContent value="aliases">
           <AliasesTab k={key} managed={managed} onChanged={() => mutate()} />
         </TabsContent>
         <TabsContent value="crypto">
-          {symmetric ? <CryptoTool keyId={key.id} lockKey /> : <AsymmetricOps k={key} />}
+          {symmetric ? <CryptoTool keyId={key.id} lockKey /> : <AsymmetricTool k={key} />}
         </TabsContent>
       </Tabs>
 
@@ -399,32 +403,6 @@ function RotationSection({ k, managed, actions }: { k: KmsKey; managed: boolean;
             { label: "Key material versions", value: String(k.key_versions) },
           ]}
         />
-      </div>
-    </Section>
-  )
-}
-
-function AsymmetricOps({ k }: { k: KmsKey }) {
-  const kind = keyKind(k.key_spec)
-  const ops =
-    kind === "hmac"
-      ? "GenerateMac and VerifyMac"
-      : k.key_usage === "SIGN_VERIFY"
-        ? "Sign, Verify and GetPublicKey"
-        : "Encrypt and Decrypt with RSAES_OAEP_SHA_1 / RSAES_OAEP_SHA_256, and GetPublicKey"
-  const cli =
-    kind === "hmac"
-      ? `aws --endpoint-url ${apiOrigin()} kms generate-mac --key-id ${k.id} \\\n  --mac-algorithm HMAC_SHA_${k.key_spec.replace("HMAC_", "")} --message fileb://message.txt`
-      : k.key_usage === "SIGN_VERIFY"
-        ? `aws --endpoint-url ${apiOrigin()} kms sign --key-id ${k.id} \\\n  --message fileb://message.txt --message-type RAW \\\n  --signing-algorithm ${k.key_spec.startsWith("ECC_") ? `ECDSA_SHA_${k.key_spec.slice(-3) === "521" ? "512" : k.key_spec.slice(-3)}` : "RSASSA_PSS_SHA_256"}`
-        : `aws --endpoint-url ${apiOrigin()} kms encrypt --key-id ${k.id} \\\n  --plaintext fileb://message.txt --encryption-algorithm RSAES_OAEP_SHA_256`
-  return (
-    <Section title="Cryptographic operations" description={`This ${KIND_LABEL[kind].toLowerCase()} key supports ${ops}.`}>
-      <div className="flex flex-col gap-3 text-sm">
-        <p className="text-muted-foreground">
-          The console&apos;s encrypt / decrypt tool works with symmetric keys only. Use this key through the AWS-compatible KMS API, for example with the AWS CLI:
-        </p>
-        <CodeBlock code={cli} />
       </div>
     </Section>
   )
