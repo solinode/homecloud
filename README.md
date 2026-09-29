@@ -43,6 +43,7 @@ No third parties. No vendor lock-in. No surprise billing.
 | **Identity** | IAM | Users, groups, managed and custom JSON policies with allow/deny and resource ARNs, access keys, console passwords, a policy simulator |
 | **Secrets & keys** | Secrets Manager, KMS, SSM Parameter Store | Versioned secrets, customer keys with encrypt/decrypt, data keys, rotation and encryption context, hierarchical configuration parameters with SecureString values |
 | **Monitoring** | CloudWatch | Per-resource CPU/memory/network/disk metrics, custom metrics, alarms that notify SNS topics or webhooks, log groups for every function and container |
+| **Infrastructure as code** | CloudFormation | YAML/JSON stack templates for 30 resource types across every service, with parameters, outputs, `!Ref`/`!GetAtt`/`!Sub`/`!Join`, dependency ordering, readiness waits, rollback, updates and ordered deletion |
 | **Audit** | CloudTrail | A record of every change and every denied request, with who, what, when and from where |
 
 Everything runs as containers on Docker, labelled so HomeCloud never touches containers it didn't create. See **[docs/architecture.md](docs/architecture.md)** for how each service is built and **[docs/api.md](docs/api.md)** for the full API reference.
@@ -77,10 +78,10 @@ homecloud serve
 
 On first start HomeCloud creates your account, prints the **root console password** once, and writes CLI credentials to `~/.homecloud/credentials`. Open **http://127.0.0.1:8080** and sign in as `root`.
 
-To reach it from other machines, bind to your LAN or Tailscale address:
+To reach it from other machines, bind to your LAN or Tailscale address (add `--tls-self-signed`, or `--tls-cert`/`--tls-key`, to serve HTTPS):
 
 ```bash
-homecloud serve --addr 0.0.0.0:8080 --public-host homelab.tailnet.ts.net
+homecloud serve --addr 0.0.0.0:8080 --public-host homelab.tailnet.ts.net --tls-self-signed
 ```
 
 ### Use it from the CLI
@@ -117,6 +118,10 @@ homecloud elb create web --listen 80=api-tg
 homecloud ecs register api --image localhost:5500/myapi:1 --port 8000 --secret DB_PASS=prod/db:password
 homecloud ecs create-service api api --count 3 --target-group api-tg
 
+# Infrastructure as code (see docs/examples/pipeline.yaml)
+homecloud cfn create pipeline docs/examples/pipeline.yaml -p Env=dev
+homecloud cfn delete pipeline
+
 # Anything else
 homecloud api GET /api/v1/cloudwatch/alarms
 ```
@@ -141,7 +146,8 @@ aws --endpoint-url http://localhost:9500 s3 ls
 * ✅ **Phase 3 (first cut):** Observability and governance: CloudWatch metrics/logs/alarms, CloudTrail, IAM, Secrets Manager
 * ✅ **Containers:** ECS services and tasks, ECR registry, load balancers, shared file systems
 * ✅ **Workflows:** Step Functions
-* 🔄 **Next:** VM-backed instances (QEMU/KVM), TLS certificates (ACM), DNS (Route 53), infrastructure as code, multi-node clusters
+* ✅ **Infrastructure as code:** CloudFormation-style stacks
+* 🔄 **Next:** VM-backed instances (QEMU/KVM), TLS certificates (ACM), DNS (Route 53), Auto Scaling, Cognito, multi-node clusters
 * 🔄 **Phase 4:** Edge compute and hardware integrations
 
 📍 **[Explore the full roadmap](https://github.com/orgs/homecloudhq/projects/1/views/1)**

@@ -81,7 +81,17 @@ The data directory defaults to `~/.homecloud` (override with `--data-dir` or `HO
 
 **Step Functions.** Definitions are Amazon States Language JSON, validated on create. Each execution runs in the server as an interpreter over the state graph with InputPath → Parameters → task → ResultSelector → ResultPath → OutputPath processing, `States.Format`/`JsonToString`/`StringToJson`/`Array` intrinsics, the `$$` context object, retries with exponential backoff, catchers, concurrent Parallel branches and Map iterations. Task resources are Lambda functions (direct ARN or `arn:hc:states:::lambda:invoke`), `arn:hc:states:::sqs:sendMessage` and `arn:hc:states:::sns:publish`. Every transition is recorded in the execution history (`sfn/<execution>.json`); executions interrupted by a restart are marked ABORTED. State machines can be EventBridge targets.
 
+**CloudFormation.** Templates (YAML with short tags, or JSON) are parsed into a dependency graph from `Ref`, `GetAtt`, `Sub` references and `DependsOn`. Each resource type maps onto the service's own create/describe/delete API; resource properties are the API's request fields. The engine calls those routes in-process with the caller's identity (so stacks can do exactly what the caller could), waits for asynchronous resources (instances, databases, load balancers) to become ready, and rolls back on failure. Updates replace changed resources and everything that depends on them; deletes run in reverse order and honour `DeletionPolicy: Retain`.
+
 **CloudWatch.** A collector samples every managed container every 30 s (CPU, memory, network, disk I/O, processes) into namespaces `HC/EC2`, `HC/RDS`, `HC/ElastiCache`; Lambda publishes `HC/Lambda` invocations, errors and duration. Alarms evaluate on each cycle and notify SNS topics or webhooks on state changes.
+
+## Security notes
+
+- The API binds to `127.0.0.1` by default. When exposing it, use TLS (`--tls-cert/--tls-key` or `--tls-self-signed`; the CLI trusts a self-signed certificate through `ca_file` in its credentials).
+- HomeCloud needs access to the Docker socket, which is root-equivalent on the host; treat HomeCloud administrators as host administrators.
+- Console sign-in is throttled after 10 failures per client IP in 5 minutes. Access-key secrets and session tokens are stored as SHA-256 hashes; passwords as bcrypt; secrets and SecureStrings are encrypted under `master.key` (keep it with your backups, and keep it private).
+- The container registry listens on loopback only. MinIO's S3 endpoint and database ports marked public listen on all interfaces and require credentials.
+- One Docker host runs one HomeCloud installation; the server refuses to start against another installation's containers.
 
 ## Limits and differences from AWS
 

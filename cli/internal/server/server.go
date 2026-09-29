@@ -18,6 +18,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/cfn"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cloudwatch"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/dynamodb"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2"
@@ -165,6 +166,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	}
 	eventsSvc := events.New(env)
 	sfnSvc := sfn.New(env)
+	cfnSvc := cfn.New(env)
 	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc, sfn: sfnSvc}
 	sfnSvc.Tasks = tg
 	eventsSvc.Deliver, eventsSvc.Exists = tg.deliver, tg.exists
@@ -175,7 +177,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 	mux := http.NewServeMux()
 	rt := &httpx.Router{Mux: mux, Auth: iamSvc, Account: account, Audit: trailSvc.Record}
-	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, trailSvc} {
+	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, trailSvc} {
 		s.Routes(rt)
 	}
 	started := time.Now()
@@ -186,6 +188,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		httpx.WriteError(w, core.Errf(http.StatusNotFound, "UnknownOperation", "no API route for %s %s", r.Method, r.URL.Path))
 	})
 	mux.Handle("/", web.Handler())
+	cfnSvc.Handler = mux
 
 	// Background work.
 	go cw.Run(ctx)

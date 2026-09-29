@@ -195,11 +195,16 @@ func (s *Service) render(lb LoadBalancer) string {
 			b.WriteString("  access_log /dev/stdout hc;\n  client_max_body_size 100m;\n")
 			b.WriteString("  location = /__hc_health { return 200 'ok'; }\n")
 			hasRoot := false
+			seen := map[string]bool{}
 			for _, r := range rs {
 				p := r.PathPrefix
 				if p == "" {
 					p = "/"
 				}
+				if seen[p] { // first rule by priority wins; nginx rejects duplicates
+					continue
+				}
+				seen[p] = true
 				if p == "/" {
 					hasRoot = true
 				}
@@ -604,6 +609,11 @@ func (s *Service) addRule(c *httpx.Ctx) (any, error) {
 		}
 		for i := range lb.Listeners {
 			if lb.Listeners[i].ID == c.Param("id") {
+				for _, o := range lb.Listeners[i].Rules {
+					if o.PathPrefix == r.PathPrefix && o.HostHeader == r.HostHeader {
+						return core.Conflict("listener already has a rule for host %q and path %q", r.HostHeader, r.PathPrefix)
+					}
+				}
 				r.ID = core.RandHex(12)
 				if r.Priority == 0 {
 					r.Priority = len(lb.Listeners[i].Rules) + 1

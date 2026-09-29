@@ -4,6 +4,7 @@ package httpx
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
@@ -28,6 +29,15 @@ type Principal struct {
 	AccessKey string `json:"access_key,omitempty"`
 	// Can reports whether the principal may perform action on resource.
 	Can func(action, resource string) bool `json:"-"`
+}
+
+type principalKey struct{}
+
+// WithPrincipal marks an in-process request as made by p. Only server code can
+// set context values, so this lets services call other services' routes with
+// the original caller's permissions (e.g. CloudFormation stacks).
+func WithPrincipal(ctx context.Context, p *Principal) context.Context {
+	return context.WithValue(ctx, principalKey{}, p)
 }
 
 type Authenticator interface {
@@ -78,10 +88,13 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 			return r.PathValue(m[1 : len(m)-1])
 		})
 		if !o.public {
-			p, err := rt.Auth.Authenticate(r)
-			if err != nil {
-				WriteError(sw, err)
-				return
+			p, ok := r.Context().Value(principalKey{}).(*Principal)
+			if !ok {
+				var err error
+				if p, err = rt.Auth.Authenticate(r); err != nil {
+					WriteError(sw, err)
+					return
+				}
 			}
 			c.P = p
 			// Identity calls (sts:*) are always allowed, as in AWS.
