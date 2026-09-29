@@ -303,7 +303,7 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("POST /api/v1/kms/keys/{id}/cancel-deletion", "kms:CancelKeyDeletion", s.cancelDeletion, d)
 	r.Handle("GET /api/v1/kms/aliases", "kms:ListAliases", s.listAliases)
 	r.Handle("POST /api/v1/kms/aliases", "kms:CreateAlias", s.createAlias)
-	r.Handle("DELETE /api/v1/kms/aliases/{name...}", "kms:DeleteAlias", s.deleteAlias)
+	r.Handle("DELETE /api/v1/kms/aliases/{name...}", "kms:DeleteAlias", s.deleteAlias, httpx.Deferred())
 	r.Handle("POST /api/v1/kms/encrypt", "kms:Encrypt", s.encrypt, d)
 	r.Handle("POST /api/v1/kms/decrypt", "kms:Decrypt", s.decrypt, d)
 	r.Handle("POST /api/v1/kms/generate-data-key", "kms:GenerateDataKey", s.dataKey, d)
@@ -505,10 +505,12 @@ func (s *Service) deleteAlias(c *httpx.Ctx) (any, error) {
 	if strings.HasPrefix(name, "alias/hc/") {
 		return nil, core.BadRequest("service-managed aliases cannot be deleted")
 	}
-	if a, err := store.Get[alias](s.env.Store, cAliases, name); err == nil {
-		if err := c.Authorize("kms:DeleteAlias", s.env.ARN("kms", "key/"+a.KeyID)); err != nil {
-			return nil, err
-		}
+	a, err := store.Get[alias](s.env.Store, cAliases, name)
+	if err != nil {
+		return nil, core.Errf(http.StatusNotFound, "NotFoundException", "alias %q does not exist", name)
+	}
+	if err := c.Authorize("kms:DeleteAlias", s.env.ARN("kms", "key/"+a.KeyID)); err != nil {
+		return nil, err
 	}
 	if err := store.Delete(s.env.Store, cAliases, name); err != nil {
 		return nil, core.Errf(http.StatusNotFound, "NotFoundException", "alias %q does not exist", name)

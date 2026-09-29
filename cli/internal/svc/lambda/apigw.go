@@ -235,11 +235,12 @@ func (s *Service) serveURL(c *httpx.Ctx) (any, error) {
 func (s *Service) apigwRoutes(r *httpx.Router) {
 	r.Handle("GET /api/v1/apigateway/apis", "apigateway:GET", s.listAPIs)
 	r.Handle("POST /api/v1/apigateway/apis", "apigateway:POST", s.createAPI)
-	r.Handle("GET /api/v1/apigateway/apis/{id}", "apigateway:GET", s.getAPI)
-	r.Handle("PATCH /api/v1/apigateway/apis/{id}", "apigateway:PATCH", s.patchAPI)
-	r.Handle("DELETE /api/v1/apigateway/apis/{id}", "apigateway:DELETE", s.deleteAPI)
-	r.Handle("POST /api/v1/apigateway/apis/{id}/routes", "apigateway:POST", s.addRoute)
-	r.Handle("DELETE /api/v1/apigateway/apis/{id}/routes/{route}", "apigateway:DELETE", s.deleteRoute)
+	res := httpx.Res("arn:hc:apigateway:local-1::/apis/{id}")
+	r.Handle("GET /api/v1/apigateway/apis/{id}", "apigateway:GET", s.getAPI, res)
+	r.Handle("PATCH /api/v1/apigateway/apis/{id}", "apigateway:PATCH", s.patchAPI, res)
+	r.Handle("DELETE /api/v1/apigateway/apis/{id}", "apigateway:DELETE", s.deleteAPI, res)
+	r.Handle("POST /api/v1/apigateway/apis/{id}/routes", "apigateway:POST", s.addRoute, res)
+	r.Handle("DELETE /api/v1/apigateway/apis/{id}/routes/{route}", "apigateway:DELETE", s.deleteRoute, res)
 	r.Handle("/apigw/{id}/{path...}", "", s.serveAPI, httpx.Public())
 }
 

@@ -49,3 +49,17 @@ func TestValidate(t *testing.T) {
 		t.Error("bad effect should be invalid")
 	}
 }
+
+func TestReadOnlyExcludesSecrets(t *testing.T) {
+	for _, bp := range builtinPolicies {
+		if bp.Name != "ReadOnlyAccess" {
+			continue
+		}
+		if evaluate([]PolicyDocument{bp.Doc}, "secretsmanager:GetSecretValue", "*") != explicitDeny {
+			t.Fatal("ReadOnlyAccess can read secret values")
+		}
+		if evaluate([]PolicyDocument{bp.Doc}, "ec2:DescribeInstances", "*") != allow {
+			t.Fatal("ReadOnlyAccess cannot describe")
+		}
+	}
+}
