@@ -105,26 +105,52 @@ func (s *Service) save() {
 	}
 }
 
-// Put records one datapoint.
+const maxSeries = 20000
+
+// Put records one datapoint. Points outside [now-24h, now+2h] are dropped.
 func (s *Service) Put(ns, name string, dims map[string]string, unit string, v float64, t time.Time) {
 	if t.IsZero() {
 		t = time.Now().UTC()
+	}
+	if t.Before(time.Now().Add(-retention)) || t.After(time.Now().Add(2*time.Hour)) || math.IsNaN(v) || math.IsInf(v, 0) {
+		return
 	}
 	k := seriesKey(ns, name, dims)
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	x := s.series[k]
 	if x == nil {
+		if len(s.series) >= maxSeries {
+			return
+		}
 		x = &Series{Namespace: ns, Name: name, Dimensions: dims, Unit: unit}
 		s.series[k] = x
 	}
-	x.Points = append(x.Points, Point{T: t, V: v})
-	cut := time.Now().Add(-retention)
-	i := 0
-	for i < len(x.Points) && x.Points[i].T.Before(cut) {
-		i++
+	// Keep points ordered even when a timestamp arrives late.
+	i := len(x.Points)
+	for i > 0 && x.Points[i-1].T.After(t) {
+		i--
 	}
-	x.Points = x.Points[i:]
+	x.Points = append(x.Points, Point{})
+	copy(x.Points[i+1:], x.Points[i:])
+	x.Points[i] = Point{T: t, V: v}
+}
+
+// prune drops expired points and series that no longer have any.
+func (s *Service) prune() {
+	cut := time.Now().Add(-retention)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	for k, x := range s.series {
+		i := 0
+		for i < len(x.Points) && x.Points[i].T.Before(cut) {
+			i++
+		}
+		x.Points = x.Points[i:]
+		if len(x.Points) == 0 {
+			delete(s.series, k)
+		}
+	}
 }
 
 // delta converts a cumulative counter into a per-interval value.
@@ -155,6 +181,7 @@ func (s *Service) Run(ctx context.Context) {
 	saveEvery := 0
 	for {
 		s.collect(ctx)
+		s.prune()
 		s.evaluateAlarms()
 		saveEvery++
 		if saveEvery%4 == 0 {

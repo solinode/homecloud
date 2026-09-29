@@ -122,14 +122,39 @@ func New(env *svc.Env, v *vpc.Service) *Service {
 
 var nameRe = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,30}[a-zA-Z0-9])?$`)
 
+// Rule conditions are rendered into nginx configuration, so they are whitelisted.
+var (
+	pathRe = regexp.MustCompile(`^/[A-Za-z0-9._~%/*-]*$`)
+	hostRe = regexp.MustCompile(`^(\*\.)?[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?(\.[A-Za-z0-9]([A-Za-z0-9-]*[A-Za-z0-9])?)*$`)
+)
+
 // ---- config rendering ----
 
 func upstream(tg string) string { return "tg_" + strings.ReplaceAll(tg, "-", "_") }
 
-func (s *Service) healthOf(tg, target string) *Target {
+func healthKey(tg, target string, port int) string { return fmt.Sprintf("%s/%s:%d", tg, target, port) }
+
+// healthOf returns a copy of a target's health (nil if never checked).
+func (s *Service) healthOf(tg, target string, port int) *Target {
 	s.hmu.Lock()
 	defer s.hmu.Unlock()
-	return s.health[tg+"/"+target]
+	h := s.health[healthKey(tg, target, port)]
+	if h == nil {
+		return nil
+	}
+	cp := *h
+	return &cp
+}
+
+// forget drops health state for a target (all ports).
+func (s *Service) forget(tg, target string) {
+	s.hmu.Lock()
+	defer s.hmu.Unlock()
+	for k := range s.health {
+		if strings.HasPrefix(k, tg+"/"+target+":") {
+			delete(s.health, k)
+		}
+	}
 }
 
 func (s *Service) render(lb LoadBalancer) string {
@@ -158,7 +183,7 @@ func (s *Service) render(lb LoadBalancer) string {
 		servers := 0
 		if err == nil {
 			for _, t := range tg.Targets {
-				h := s.healthOf(n, t.ID)
+				h := s.healthOf(n, t.ID, t.Port)
 				ip, _, ok := s.resolve(t.ID)
 				if !ok || (h != nil && h.Health != "healthy" && h.Health != "initial") {
 					continue
@@ -346,7 +371,10 @@ func (s *Service) provision(lb LoadBalancer) {
 		fail(err)
 		return
 	}
-	_, _ = store.Update(s.env.Store, cLBs, lb.Name, func(x *LoadBalancer) error { x.ContainerID = cid; return nil })
+	if _, err := store.Update(s.env.Store, cLBs, lb.Name, func(x *LoadBalancer) error { x.ContainerID = cid; return nil }); err != nil {
+		_ = s.env.Docker.Remove(cid) // deleted while provisioning
+		return
+	}
 	lb.ContainerID = cid
 	if err := s.env.Docker.CopyIn(ctx, cid, "/", s.files(lb), 0o600); err != nil {
 		fail(err)
@@ -403,6 +431,14 @@ func (s *Service) Run(ctx context.Context) {
 					}
 					due[lb.Name+"/"+name] = time.Now().Add(time.Duration(tg.HealthCheck.IntervalSeconds) * time.Second)
 					if s.check(ctx, lb, tg) {
+						// Every balancer routing to this group needs the new healthy set.
+						for _, other := range s.usedBy(tg.Name) {
+							if other != lb.Name {
+								if err := s.push(ctx, other); err != nil {
+									log.Printf("elb: reload %s: %v", other, err)
+								}
+							}
+						}
 						changed = true
 					}
 				}
@@ -417,47 +453,53 @@ func (s *Service) Run(ctx context.Context) {
 }
 
 // check probes each target from inside the load balancer; reports whether any health state flipped.
+// Health state is only read and written under hmu.
 func (s *Service) check(ctx context.Context, lb LoadBalancer, tg TargetGroup) bool {
 	changed := false
 	for _, t := range tg.Targets {
-		key := tg.Name + "/" + t.ID
+		key := healthKey(tg.Name, t.ID, t.Port)
+		ip, _, ok := s.resolve(t.ID)
+		var probeErr string
+		url := ""
+		if ok {
+			url = fmt.Sprintf("http://%s:%d%s", ip, t.Port, tg.HealthCheck.Path)
+			cctx, cancel := context.WithTimeout(ctx, 6*time.Second)
+			res, err := s.env.Docker.Exec(cctx, lb.ContainerID, []string{"wget", "-q", "-T", "4", "-O", "/dev/null", url}, nil)
+			cancel()
+			ok = err == nil && res.ExitCode == 0
+			if res != nil {
+				probeErr = strings.TrimSpace(res.Stderr)
+			}
+		}
 		s.hmu.Lock()
 		h := s.health[key]
 		if h == nil {
 			h = &Target{Health: "initial"}
 			s.health[key] = h
 		}
-		s.hmu.Unlock()
-		ip, _, ok := s.resolve(t.ID)
-		if !ok {
-			if h.Health != "unavailable" {
-				h.Health, h.Reason, changed = "unavailable", "target has no private IP (stopped or terminated)", true
-			}
-			continue
-		}
-		url := fmt.Sprintf("http://%s:%d%s", ip, t.Port, tg.HealthCheck.Path)
-		cctx, cancel := context.WithTimeout(ctx, 6*time.Second)
-		res, err := s.env.Docker.Exec(cctx, lb.ContainerID, []string{"wget", "-q", "-T", "4", "-O", "/dev/null", url}, nil)
-		cancel()
-		ok = err == nil && res.ExitCode == 0
-		if ok != h.lastGood {
-			h.streak = 0
-		}
-		h.lastGood = ok
-		h.streak++
 		prev := h.Health
-		switch {
-		case ok && (h.Health != "healthy") && (h.streak >= tg.HealthCheck.HealthyThreshold || h.Health == "initial"):
-			h.Health, h.Reason = "healthy", ""
-		case !ok && h.Health != "unhealthy" && (h.streak >= tg.HealthCheck.UnhealthyThreshold || h.Health == "initial"):
-			h.Health, h.Reason = "unhealthy", "health check to "+url+" failed"
-			if res != nil && res.Stderr != "" {
-				h.Reason += ": " + strings.TrimSpace(res.Stderr)
+		if url == "" {
+			h.Health, h.Reason = "unavailable", "target has no private IP (stopped or terminated)"
+		} else {
+			if ok != h.lastGood {
+				h.streak = 0
+			}
+			h.lastGood = ok
+			h.streak++
+			switch {
+			case ok && h.Health != "healthy" && (h.streak >= tg.HealthCheck.HealthyThreshold || h.Health == "initial" || h.Health == "unavailable"):
+				h.Health, h.Reason = "healthy", ""
+			case !ok && h.Health != "unhealthy" && (h.streak >= tg.HealthCheck.UnhealthyThreshold || h.Health == "initial" || h.Health == "unavailable"):
+				h.Health, h.Reason = "unhealthy", "health check to "+url+" failed"
+				if probeErr != "" {
+					h.Reason += ": " + probeErr
+				}
 			}
 		}
 		if prev != h.Health {
 			changed = true
 		}
+		s.hmu.Unlock()
 	}
 	return changed
 }
@@ -628,6 +670,10 @@ func (s *Service) deleteLB(c *httpx.Ctx) (any, error) {
 
 // changeListeners edits listeners; port changes need a new container.
 func (s *Service) changeListeners(name string, recreate bool, fn func(lb *LoadBalancer) error) (any, error) {
+	before, err := store.Get[LoadBalancer](s.env.Store, cLBs, name)
+	if err != nil {
+		return nil, core.NotFound("load balancer", name)
+	}
 	lb, err := store.Update(s.env.Store, cLBs, name, fn)
 	if err == store.ErrNotFound {
 		return nil, core.NotFound("load balancer", name)
@@ -641,7 +687,10 @@ func (s *Service) changeListeners(name string, recreate bool, fn func(lb *LoadBa
 		return lb, nil
 	}
 	if err := s.push(context.Background(), name); err != nil {
-		return nil, err
+		// nginx rejected the configuration: restore the previous listeners.
+		_ = store.Put(s.env.Store, cLBs, name, before)
+		_ = s.push(context.Background(), name)
+		return nil, core.Errf(http.StatusBadRequest, "InvalidConfigurationRequest", "the load balancer rejected this change: %v", err)
 	}
 	return lb, nil
 }
@@ -682,11 +731,11 @@ func (s *Service) addRule(c *httpx.Ctx) (any, error) {
 	if r.PathPrefix == "" && r.HostHeader == "" {
 		return nil, core.BadRequest("a rule needs a path_prefix or host_header condition")
 	}
-	if r.PathPrefix != "" && !strings.HasPrefix(r.PathPrefix, "/") {
-		return nil, core.BadRequest("path_prefix must start with /")
+	if r.PathPrefix != "" && !pathRe.MatchString(r.PathPrefix) {
+		return nil, core.BadRequest("path_prefix must start with / and use only letters, digits and . _ ~ %% / * -")
 	}
-	if strings.ContainsAny(r.PathPrefix+r.HostHeader, " ;{}'\"\\\n") {
-		return nil, core.BadRequest("conditions may not contain spaces, quotes, braces or semicolons")
+	if r.HostHeader != "" && !hostRe.MatchString(r.HostHeader) {
+		return nil, core.BadRequest("host_header must be a host name, optionally starting with *.")
 	}
 	return s.changeListeners(c.Param("name"), false, func(lb *LoadBalancer) error {
 		tg, err := store.Get[TargetGroup](s.env.Store, cTGs, r.TargetGroup)
@@ -701,6 +750,9 @@ func (s *Service) addRule(c *httpx.Ctx) (any, error) {
 				for _, o := range lb.Listeners[i].Rules {
 					if o.PathPrefix == r.PathPrefix && o.HostHeader == r.HostHeader {
 						return core.Conflict("listener already has a rule for host %q and path %q", r.HostHeader, r.PathPrefix)
+					}
+					if r.Priority != 0 && o.Priority == r.Priority {
+						return core.Conflict("listener already has a rule with priority %d", r.Priority)
 					}
 				}
 				r.ID = core.RandHex(12)
@@ -740,7 +792,7 @@ func (s *Service) tgView(tg TargetGroup) TargetGroup {
 		} else {
 			tg.Targets[i].IP = ""
 		}
-		if h := s.healthOf(tg.Name, t.ID); h != nil {
+		if h := s.healthOf(tg.Name, t.ID, t.Port); h != nil {
 			tg.Targets[i].Health, tg.Targets[i].Reason = h.Health, h.Reason
 		} else {
 			tg.Targets[i].Health, tg.Targets[i].Reason = "unused", "not attached to an active load balancer"
@@ -922,9 +974,7 @@ func (s *Service) deregister(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	s.hmu.Lock()
-	delete(s.health, tg.Name+"/"+c.Param("target"))
-	s.hmu.Unlock()
+	s.forget(tg.Name, c.Param("target"))
 	s.pushUsers(tg.Name)
 	return s.tgView(tg), nil
 }
@@ -954,9 +1004,7 @@ func (s *Service) SetTarget(tgName, id string, port int, add bool) error {
 		return err
 	}
 	if !add {
-		s.hmu.Lock()
-		delete(s.health, tgName+"/"+id)
-		s.hmu.Unlock()
+		s.forget(tgName, id)
 	}
 	s.pushUsers(tgName)
 	return nil
@@ -978,4 +1026,22 @@ func (s *Service) EnsureTarget(tgName, id string) error {
 		return nil
 	}
 	return s.SetTarget(tgName, id, 0, true)
+}
+
+// PrivateIP resolves a load balancer name to its private IP (for DNS aliases).
+func (s *Service) PrivateIP(name string) (string, bool) {
+	lb, err := store.Get[LoadBalancer](s.env.Store, cLBs, name)
+	if err != nil || lb.State != "active" {
+		return "", false
+	}
+	return lb.PrivateIP, true
+}
+
+// Recover re-provisions load balancers whose provisioning was interrupted by a restart.
+func (s *Service) Recover() {
+	for _, lb := range store.List[LoadBalancer](s.env.Store, cLBs) {
+		if lb.State == "provisioning" {
+			go s.provision(lb)
+		}
+	}
 }

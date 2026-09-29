@@ -98,6 +98,37 @@ type Service struct {
 	secrets *secrets.Service
 	hostCPU float64
 	busy    sync.Map // instance id -> operation in flight
+	snapMu  sync.Mutex
+}
+
+// Recover settles instances whose operation was interrupted by a restart.
+func (s *Service) Recover() {
+	for _, i := range store.List[Instance](s.env.Store, cInstances) {
+		switch i.Status {
+		case "creating", "restoring", "starting", "rebooting", "backing-up", "modifying", "stopping", "deleting":
+		default:
+			continue
+		}
+		status, reason := "failed", "HomeCloud restarted during "+i.Status
+		if i.ContainerID != "" {
+			switch s.env.Docker.State(i.ContainerID) {
+			case "running":
+				if i.Status != "creating" && i.Status != "restoring" {
+					status, reason = "available", ""
+				}
+			case "exited", "created":
+				if i.Status == "stopping" {
+					status, reason = "stopped", ""
+				}
+			}
+		}
+		s.setStatus(i.ID, status, reason)
+	}
+	for _, sn := range store.List[Snapshot](s.env.Store, cSnapshots) {
+		if sn.Status == "creating" {
+			s.removeSnapshot(sn.ID)
+		}
+	}
 }
 
 func New(env *svc.Env, v *vpc.Service, sec *secrets.Service) *Service {
@@ -197,8 +228,9 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("GET /api/v1/rds/instances/{id}/logs", "rds:DownloadDBLogFilePortion", s.logs, res)
 	r.Handle("POST /api/v1/rds/instances/{id}/snapshots", "rds:CreateDBSnapshot", s.createSnapshot, res)
 	r.Handle("GET /api/v1/rds/snapshots", "rds:DescribeDBSnapshots", s.listSnapshots)
-	r.Handle("DELETE /api/v1/rds/snapshots/{snap}", "rds:DeleteDBSnapshot", s.deleteSnapshot)
-	r.Handle("POST /api/v1/rds/snapshots/{snap}/restore", "rds:RestoreDBInstanceFromDBSnapshot", s.restore)
+	snapRes := httpx.Res("arn:hc:rds:local-1:{account}:snapshot:{snap}")
+	r.Handle("DELETE /api/v1/rds/snapshots/{snap}", "rds:DeleteDBSnapshot", s.deleteSnapshot, snapRes)
+	r.Handle("POST /api/v1/rds/snapshots/{snap}/restore", "rds:RestoreDBInstanceFromDBSnapshot", s.restore, snapRes)
 }
 
 func (s *Service) listEngines(c *httpx.Ctx) (any, error) {
@@ -220,6 +252,7 @@ func (s *Service) list(c *httpx.Ctx) (any, error) {
 func (s *Service) describe(c *httpx.Ctx) (any, error) { return s.get(c.Param("id")) }
 
 var idRe = regexp.MustCompile(`^[a-z][a-z0-9-]{0,62}$`)
+var dbNameRe = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_$-]{0,62}$`)
 var userRe = regexp.MustCompile(`^[a-zA-Z][a-zA-Z0-9_]{0,31}$`)
 
 type createInput struct {
@@ -415,6 +448,13 @@ func (s *Service) boot(i Instance, e Engine, in createInput, network string, sna
 		fail(err)
 		return
 	}
+	// If the instance was deleted while we were creating it, clean up and stop.
+	if !store.Has(s.env.Store, cInstances, i.ID) {
+		_ = s.env.Docker.Remove(cid)
+		_ = s.env.Docker.RemoveVolume(vol)
+		return
+	}
+	_, _ = store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error { x.ContainerID = cid; return nil })
 	// Redis-style snapshots are restored by placing the RDB file before first start.
 	if restoreCache {
 		b, err := os.ReadFile(s.snapshotFile(snap.ID))
@@ -456,7 +496,11 @@ func (s *Service) boot(i Instance, e Engine, in createInput, network string, sna
 			return
 		}
 		if res.ExitCode != 0 {
-			log.Printf("rds: restore %s exited %d: %s", i.ID, res.ExitCode, tail(res.Stdout+res.Stderr, 500))
+			msg := fmt.Sprintf("snapshot restored with errors (exit %d): %s", res.ExitCode, tail(res.Stdout+res.Stderr, 300))
+			log.Printf("rds: %s: %s", i.ID, msg)
+			defer func() {
+				_, _ = store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error { x.StatusReason = msg; return nil })
+			}()
 		}
 	}
 	_, _ = store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error {
@@ -475,8 +519,11 @@ func (s *Service) boot(i Instance, e Engine, in createInput, network string, sna
 func (s *Service) enableAOF(ctx context.Context, cid string, e Engine, spec runtime.RunSpec, pass string) (string, error) {
 	cli := e.Name + "-cli --no-auth-warning -a " + q(pass)
 	res, err := s.env.Docker.Exec(ctx, cid, sh(cli+" CONFIG SET appendonly yes"), nil)
-	if err != nil || res.ExitCode != 0 {
-		return "", fmt.Errorf("enable AOF: %v %s", err, res.Stdout)
+	if err != nil {
+		return "", fmt.Errorf("enable AOF: %w", err)
+	}
+	if res.ExitCode != 0 {
+		return "", fmt.Errorf("enable AOF: %s", tail(res.Stdout+res.Stderr, 300))
 	}
 	for i := 0; i < 60; i++ {
 		res, err = s.env.Docker.Exec(ctx, cid, sh(cli+" INFO persistence"), nil)
@@ -748,9 +795,9 @@ func (s *Service) resetPassword(c *httpx.Ctx) (any, error) {
 	case "postgres":
 		cmd = sh("psql -U " + q(i.MasterUsername) + " -d postgres -c " + q(fmt.Sprintf(`ALTER USER "%s" WITH PASSWORD '%s'`, i.MasterUsername, in.Password)))
 	case "mysql":
-		cmd = sh("mysql -h127.0.0.1 -uroot -p" + q(old) + " -e " + q(fmt.Sprintf("ALTER USER 'root'@'%%' IDENTIFIED BY '%s'; ALTER USER 'root'@'localhost' IDENTIFIED BY '%s'; ALTER USER '%s'@'%%' IDENTIFIED BY '%s';", in.Password, in.Password, i.MasterUsername, in.Password)))
+		cmd = sh("MYSQL_PWD=" + q(old) + " mysql -h127.0.0.1 -uroot -e " + q(fmt.Sprintf("ALTER USER 'root'@'%%' IDENTIFIED BY '%s'; ALTER USER 'root'@'localhost' IDENTIFIED BY '%s'; ALTER USER '%s'@'%%' IDENTIFIED BY '%s';", in.Password, in.Password, i.MasterUsername, in.Password)))
 	case "mariadb":
-		cmd = sh("mariadb -h127.0.0.1 -uroot -p" + q(old) + " -e " + q(fmt.Sprintf("ALTER USER 'root'@'%%' IDENTIFIED BY '%s'; ALTER USER 'root'@'localhost' IDENTIFIED BY '%s'; ALTER USER '%s'@'%%' IDENTIFIED BY '%s';", in.Password, in.Password, i.MasterUsername, in.Password)))
+		cmd = sh("MYSQL_PWD=" + q(old) + " mariadb -h127.0.0.1 -uroot -e " + q(fmt.Sprintf("ALTER USER 'root'@'%%' IDENTIFIED BY '%s'; ALTER USER 'root'@'localhost' IDENTIFIED BY '%s'; ALTER USER '%s'@'%%' IDENTIFIED BY '%s';", in.Password, in.Password, i.MasterUsername, in.Password)))
 	case "mongodb":
 		cmd = sh("mongosh --quiet -u " + q(i.MasterUsername) + " -p " + q(old) + " --authenticationDatabase admin admin --eval " + q(fmt.Sprintf(`db.changeUserPassword("%s", "%s")`, i.MasterUsername, in.Password)))
 	default:
@@ -801,6 +848,11 @@ func (s *Service) query(c *httpx.Ctx) (any, error) {
 	}
 	if in.Database == "" {
 		in.Database = i.DBName
+	}
+	// A plain identifier: psql and mongosh would treat "host=..." or a URI as a
+	// connection target and send the master password there.
+	if !dbNameRe.MatchString(in.Database) {
+		return nil, core.BadRequest("database must be a plain name (letters, digits, _ $ -)")
 	}
 	pass, err := s.password(i)
 	if err != nil {
@@ -856,7 +908,9 @@ func (s *Service) snapshot(ctx context.Context, i Instance, typ, id string) (Sna
 	if e.dump == nil {
 		return Snapshot{}, core.BadRequest("engine %s does not support snapshots", e.Name)
 	}
+	s.snapMu.Lock()
 	if store.Has(s.env.Store, cSnapshots, id) {
+		s.snapMu.Unlock()
 		return Snapshot{}, core.Conflict("snapshot %q already exists", id)
 	}
 	pass, err := s.password(i)
@@ -866,7 +920,9 @@ func (s *Service) snapshot(ctx context.Context, i Instance, typ, id string) (Sna
 	sn := Snapshot{ID: id, ARN: s.env.ARN("rds", "snapshot:"+id), SourceInstance: i.ID, Kind: i.Kind, Engine: i.Engine,
 		EngineVersion: i.EngineVersion, Type: typ, Status: "creating", MasterUsername: i.MasterUsername, DBName: i.DBName,
 		PasswordCT: s.secrets.Encrypt([]byte(pass)), StorageGB: i.StorageGB, CreatedAt: core.Now()}
-	if err := store.Put(s.env.Store, cSnapshots, id, sn); err != nil {
+	err = store.Put(s.env.Store, cSnapshots, id, sn)
+	s.snapMu.Unlock()
+	if err != nil {
 		return sn, err
 	}
 	if err := os.MkdirAll(s.env.Cfg.Path("rds-snapshots"), 0o700); err != nil {
@@ -993,6 +1049,16 @@ func (s *Service) Run(ctx context.Context) {
 			return
 		case <-t.C:
 		}
+		// Automated backups outlive neither their instance nor a retention of 0 (after a grace week).
+		for _, sn := range store.List[Snapshot](s.env.Store, cSnapshots) {
+			if sn.Type != "automated" {
+				continue
+			}
+			inst, err := store.Get[Instance](s.env.Store, cInstances, sn.SourceInstance)
+			if (err != nil || inst.BackupRetentionDays == 0) && time.Since(sn.CreatedAt) > 7*24*time.Hour {
+				s.removeSnapshot(sn.ID)
+			}
+		}
 		for _, i := range store.List[Instance](s.env.Store, cInstances) {
 			if i.BackupRetentionDays <= 0 {
 				continue
@@ -1016,4 +1082,13 @@ func (s *Service) Run(ctx context.Context) {
 			unlock()
 		}
 	}
+}
+
+// PrivateIP resolves a database instance to its private IP (for DNS aliases).
+func (s *Service) PrivateIP(id string) (string, bool) {
+	i, err := store.Get[Instance](s.env.Store, cInstances, id)
+	if err != nil || i.Status == "failed" || i.Status == "deleting" {
+		return "", false
+	}
+	return i.Endpoint.PrivateIP, true
 }

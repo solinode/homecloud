@@ -66,7 +66,7 @@ type Service struct {
 }
 
 func New(env *svc.Env, q *sqs.Service, l *lambda.Service) *Service {
-	return &Service{env: env, sqs: q, lambda: l, http: &http.Client{Timeout: 15 * time.Second}}
+	return &Service{env: env, sqs: q, lambda: l, http: core.WebhookClient(15 * time.Second)}
 }
 
 func uuid() string {
@@ -201,6 +201,10 @@ func (s *Service) post(sub Subscription, body []byte, envelope map[string]any) e
 // Notify delivers an alarm-style notification to a topic ARN or an http(s) URL.
 func (s *Service) Notify(target, subject, message string) {
 	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") {
+		if err := core.CheckWebhookURL(target); err != nil {
+			log.Printf("notify %s: %v", target, err)
+			return
+		}
 		body, _ := json.Marshal(map[string]string{"subject": subject, "message": message})
 		resp, err := s.http.Post(target, "application/json", bytes.NewReader(body))
 		if err != nil {
@@ -227,8 +231,18 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("POST /api/v1/sns/topics/{name}/publish", "sns:Publish", s.publish, res)
 	r.Handle("GET /api/v1/sns/subscriptions", "sns:ListSubscriptions", s.listSubs)
 	r.Handle("POST /api/v1/sns/topics/{name}/subscriptions", "sns:Subscribe", s.subscribe, res)
-	r.Handle("PATCH /api/v1/sns/subscriptions/{arn}", "sns:SetSubscriptionAttributes", s.updateSub)
-	r.Handle("DELETE /api/v1/sns/subscriptions/{arn}", "sns:Unsubscribe", s.unsubscribe)
+	r.Handle("PATCH /api/v1/sns/subscriptions/{arn}", "sns:SetSubscriptionAttributes", s.updateSub, httpx.Deferred())
+	r.Handle("DELETE /api/v1/sns/subscriptions/{arn}", "sns:Unsubscribe", s.unsubscribe, httpx.Deferred())
+}
+
+// topicParam rejects topic path parameters that are not plain names; Publish
+// would otherwise resolve "x:prod" to "prod" after authorizing "x:prod".
+func topicParam(c *httpx.Ctx) (string, error) {
+	n := c.Param("name")
+	if strings.Contains(n, ":") {
+		return "", core.BadRequest("use the topic name, not an ARN, in the path")
+	}
+	return n, nil
 }
 
 func (s *Service) topicView(t Topic) map[string]any {
@@ -262,7 +276,7 @@ func (s *Service) createTopic(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	fifo := strings.HasSuffix(in.Name, ".fifo")
-	if !nameRe.MatchString(strings.TrimSuffix(in.Name, ".fifo")) {
+	if !nameRe.MatchString(strings.TrimSuffix(in.Name, ".fifo")) || strings.Contains(in.Name, ":") {
 		return nil, core.BadRequest("topic names are 1-256 letters, digits, hyphens or underscores")
 	}
 	if t, err := store.Get[Topic](s.env.Store, cTopics, in.Name); err == nil {
@@ -333,7 +347,11 @@ func (s *Service) publish(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	id, err := s.Publish(c.Param("name"), in.Subject, in.Message, in.MessageAttributes)
+	name, err := topicParam(c)
+	if err != nil {
+		return nil, err
+	}
+	id, err := s.Publish(name, in.Subject, in.Message, in.MessageAttributes)
 	if err != nil {
 		return nil, err
 	}
@@ -360,6 +378,9 @@ func (s *Service) subscribe(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	if _, err := topicParam(c); err != nil {
+		return nil, err
+	}
 	t, err := store.Get[Topic](s.env.Store, cTopics, c.Param("name"))
 	if err != nil {
 		return nil, core.NotFound("topic", c.Param("name"))
@@ -370,6 +391,9 @@ func (s *Service) subscribe(c *httpx.Ctx) (any, error) {
 		if !ok {
 			return nil, core.NotFound("queue", in.Endpoint)
 		}
+		if err := c.Authorize("sqs:SendMessage", arn); err != nil {
+			return nil, err
+		}
 		in.Endpoint = arn
 	case "lambda":
 		name := nameFromARN(in.Endpoint)
@@ -377,9 +401,15 @@ func (s *Service) subscribe(c *httpx.Ctx) (any, error) {
 			return nil, core.NotFound("function", name)
 		}
 		in.Endpoint = s.env.ARN("lambda", "function:"+name)
+		if err := c.Authorize("lambda:InvokeFunction", in.Endpoint); err != nil {
+			return nil, err
+		}
 	case "http", "https":
 		if !strings.HasPrefix(in.Endpoint, in.Protocol+"://") {
 			return nil, core.BadRequest("endpoint must be a %s:// URL", in.Protocol)
+		}
+		if err := core.CheckWebhookURL(in.Endpoint); err != nil {
+			return nil, err
 		}
 	default:
 		return nil, core.BadRequest("protocol must be sqs, lambda, http or https")
@@ -402,6 +432,9 @@ func (s *Service) updateSub(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	if err := s.authorizeSub(c, "sns:SetSubscriptionAttributes"); err != nil {
+		return nil, err
+	}
 	sub, err := store.Update(s.env.Store, cSubs, c.Param("arn"), func(x *Subscription) error {
 		if in.RawMessageDelivery != nil {
 			x.RawMessageDelivery = *in.RawMessageDelivery
@@ -417,9 +450,26 @@ func (s *Service) updateSub(c *httpx.Ctx) (any, error) {
 	return sub, err
 }
 
+// authorizeSub checks action against the subscription's topic.
+func (s *Service) authorizeSub(c *httpx.Ctx, action string) error {
+	sub, err := store.Get[Subscription](s.env.Store, cSubs, c.Param("arn"))
+	if err != nil {
+		return core.NotFound("subscription", c.Param("arn"))
+	}
+	return c.Authorize(action, sub.TopicARN)
+}
+
 func (s *Service) unsubscribe(c *httpx.Ctx) (any, error) {
+	if err := s.authorizeSub(c, "sns:Unsubscribe"); err != nil {
+		return nil, err
+	}
 	if err := store.Delete(s.env.Store, cSubs, c.Param("arn")); err != nil {
 		return nil, core.NotFound("subscription", c.Param("arn"))
 	}
 	return nil, nil
+}
+
+// TopicExists reports whether a topic exists.
+func (s *Service) TopicExists(name string) bool {
+	return store.Has(s.env.Store, cTopics, nameFromARN(name))
 }

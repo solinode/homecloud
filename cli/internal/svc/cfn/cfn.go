@@ -90,7 +90,10 @@ type Service struct {
 	env *svc.Env
 	// Handler is the API (set by the server) that resource operations call into.
 	Handler http.Handler
+	// Refresh re-reads a principal's current permissions (set by the server from IAM).
+	Refresh func(*httpx.Principal) (*httpx.Principal, error)
 	locks   sync.Map
+	mu      sync.Mutex // guards stack status transitions
 }
 
 func New(env *svc.Env) *Service { return &Service{env: env} }
@@ -103,7 +106,11 @@ func Parse(src string) (*Template, error) {
 	if err := yaml.Unmarshal([]byte(src), &node); err != nil {
 		return nil, fmt.Errorf("template is not valid YAML or JSON: %w", err)
 	}
-	v, err := decodeNode(&node)
+	if len(src) > 1<<20 {
+		return nil, fmt.Errorf("template is larger than 1 MB")
+	}
+	d := &decoder{active: map[*yaml.Node]bool{}}
+	v, err := d.decode(&node)
 	if err != nil {
 		return nil, err
 	}
@@ -128,22 +135,40 @@ func Parse(src string) (*Template, error) {
 
 var logicalRe = regexp.MustCompile(`^[A-Za-z0-9]{1,255}$`)
 
-func decodeNode(n *yaml.Node) (any, error) {
+// decoder converts YAML nodes to plain values, refusing alias cycles and
+// alias "bombs" that would expand to huge documents.
+type decoder struct {
+	active map[*yaml.Node]bool
+	nodes  int
+}
+
+const maxNodes = 100000
+
+func (d *decoder) decode(n *yaml.Node) (any, error) {
+	d.nodes++
+	if d.nodes > maxNodes {
+		return nil, fmt.Errorf("template expands to more than %d values", maxNodes)
+	}
 	switch n.Kind {
 	case yaml.DocumentNode:
 		if len(n.Content) == 0 {
 			return nil, nil
 		}
-		return decodeNode(n.Content[0])
+		return d.decode(n.Content[0])
 	case yaml.AliasNode:
-		return decodeNode(n.Alias)
+		if d.active[n.Alias] {
+			return nil, fmt.Errorf("template contains a recursive alias")
+		}
+		d.active[n.Alias] = true
+		defer delete(d.active, n.Alias)
+		return d.decode(n.Alias)
 	}
 	var v any
 	switch n.Kind {
 	case yaml.MappingNode:
 		m := map[string]any{}
 		for i := 0; i+1 < len(n.Content); i += 2 {
-			val, err := decodeNode(n.Content[i+1])
+			val, err := d.decode(n.Content[i+1])
 			if err != nil {
 				return nil, err
 			}
@@ -153,7 +178,7 @@ func decodeNode(n *yaml.Node) (any, error) {
 	case yaml.SequenceNode:
 		arr := []any{}
 		for _, c := range n.Content {
-			val, err := decodeNode(c)
+			val, err := d.decode(c)
 			if err != nil {
 				return nil, err
 			}
@@ -164,8 +189,8 @@ func decodeNode(n *yaml.Node) (any, error) {
 		if err := n.Decode(&v); err != nil {
 			v = n.Value
 		}
-		if strings.HasPrefix(n.Tag, "!") {
-			v = n.Value
+		if strings.HasPrefix(n.Tag, "!") && !strings.HasPrefix(n.Tag, "!!") {
+			v = n.Value // arguments of short-form intrinsics (!Ref x) are strings
 		}
 	}
 	if strings.HasPrefix(n.Tag, "!") && !strings.HasPrefix(n.Tag, "!!") {
@@ -475,6 +500,14 @@ func order(t *Template) ([]string, error) {
 // ---- API calls ----
 
 func (s *Service) call(ctx context.Context, p *httpx.Principal, method, path string, body any) (any, error) {
+	if s.Refresh != nil {
+		// Act with the caller's current permissions, not those at submission time.
+		fresh, err := s.Refresh(p)
+		if err != nil {
+			return nil, fmt.Errorf("the stack's caller can no longer act: %w", err)
+		}
+		p = fresh
+	}
 	var rd io.Reader = http.NoBody
 	if body != nil {
 		b, _ := json.Marshal(body)
@@ -510,6 +543,12 @@ func (s *Service) createResource(ctx context.Context, p *httpx.Principal, typ st
 	spec := types[typ]
 	method, path, _ := strings.Cut(spec.Create, " ")
 	path = fill(path, "", props)
+	if method == http.MethodPut && spec.Get != "" {
+		// Upsert-style APIs would silently take over an existing resource.
+		if _, err := s.call(ctx, p, "GET", fill(spec.Get, fmt.Sprint(props["name"]), props), nil); err == nil {
+			return "", nil, fmt.Errorf("%s %v already exists", typ, props["name"])
+		}
+	}
 	body := map[string]any{}
 	for k, v := range props {
 		body[k] = v

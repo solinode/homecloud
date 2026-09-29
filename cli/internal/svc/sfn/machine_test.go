@@ -149,3 +149,40 @@ func TestChoiceOperators(t *testing.T) {
 		}
 	}
 }
+
+func TestReviewRegressions(t *testing.T) {
+	// Intrinsics without arguments fail the execution instead of panicking.
+	_, err, _ := run(t, `{"StartAt":"P","States":{"P":{"Type":"Pass","Parameters":{"x.$":"States.JsonToString()"},"End":true}}}`, map[string]any{})
+	if err == nil {
+		t.Fatal("expected an error")
+	}
+	// Catch with ResultPath null passes the failing state's input through.
+	out, err, _ := run(t, `{"StartAt":"A","States":{
+	  "A":{"Type":"Pass","Result":{"x":"state-input"},"Next":"B"},
+	  "B":{"Type":"Task","Resource":"arn:hc:lambda:local-1:1:function:broken","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":null,"Next":"C"}],"End":true},
+	  "C":{"Type":"Pass","End":true}}}`, map[string]any{"orig": true})
+	if err != nil || out.(map[string]any)["x"] != "state-input" {
+		t.Fatalf("ResultPath null: %v %v", out, err)
+	}
+	// A machine timeout during a Wait is a timeout, not an abort.
+	_, err, _ = run(t, `{"StartAt":"W","TimeoutSeconds":1,"States":{"W":{"Type":"Wait","Seconds":3,"End":true}}}`, map[string]any{})
+	if se, ok := err.(*StateError); !ok || se.Name != "States.Timeout" {
+		t.Fatalf("got %v", err)
+	}
+}
+
+func TestTaskPermissions(t *testing.T) {
+	m, _ := parse(json.RawMessage(`{"StartAt":"A","States":{
+	  "A":{"Type":"Task","Resource":"arn:hc:lambda:local-1:1:function:f1","Next":"B"},
+	  "B":{"Type":"Task","Resource":"arn:hc:states:::sqs:sendMessage","Parameters":{"QueueName":"q1","MessageBody":"x"},"Next":"C"},
+	  "C":{"Type":"Task","Resource":"arn:hc:states:::lambda:invoke","Parameters":{"FunctionName.$":"$.fn"},"End":true}}}`))
+	got := map[string]bool{}
+	for _, p := range taskPermissions(m, "1") {
+		got[p[0]+" "+p[1]] = true
+	}
+	for _, want := range []string{"lambda:InvokeFunction arn:hc:lambda:local-1:1:function:f1", "sqs:SendMessage arn:hc:sqs:local-1:1:q1", "lambda:InvokeFunction *"} {
+		if !got[want] {
+			t.Errorf("missing %s in %v", want, got)
+		}
+	}
+}

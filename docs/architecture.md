@@ -89,6 +89,8 @@ The data directory defaults to `~/.homecloud` (override with `--data-dir` or `HO
 
 **Cognito.** Each user pool has its own RSA-2048 signing key (encrypted under the master key) and issues RS256 ID and access tokens with issuer `http(s)://<host>:<port>/cognito/<pool>`; the public JWKS and OpenID discovery documents let any app verify them. Refresh tokens are opaque and stored hashed; global sign-out revokes refresh tokens and every access token issued before it. Application-facing endpoints (`/cognito/<pool>/sign-up`, `/auth`, `/respond`, `/userinfo`, `/change-password`, `/sign-out`) need no IAM credentials; sign-in failures are throttled per user and client IP. API Gateway routes with `authorization: JWT` validate tokens against the API's authorizer pool and pass the claims to the function in `requestContext.authorizer.jwt.claims`.
 
+**Route 53.** A managed CoreDNS server (`homecloud-dns`) is attached to every VPC at the reserved address `base+2` (the S3 endpoint uses `base+3`). New instances, ECS tasks and Lambda environments get it as the upstream of Docker's embedded DNS, so container names (`ip-…internal`, `<db>.rds.internal`) keep resolving while hosted zones are layered on top. Zones are rendered as zone files that CoreDNS reloads within seconds; alias records resolve to a resource's current private IP at render time. Public zones are also served on the host's DNS port (default 8053, UDP and TCP) for LAN clients; private zones answer only clients inside their VPCs.
+
 **CloudWatch.** A collector samples every managed container every 30 s (CPU, memory, network, disk I/O, processes) into namespaces `HC/EC2`, `HC/RDS`, `HC/ElastiCache`; Lambda publishes `HC/Lambda` invocations, errors and duration. Alarms evaluate on each cycle and notify SNS topics or webhooks on state changes.
 
 ## Security notes
@@ -98,6 +100,9 @@ The data directory defaults to `~/.homecloud` (override with `--data-dir` or `HO
 - Console sign-in is throttled after 10 failures per client IP in 5 minutes. Access-key secrets and session tokens are stored as SHA-256 hashes; passwords as bcrypt; secrets and SecureStrings are encrypted under `master.key` (keep it with your backups, and keep it private).
 - The container registry listens on loopback only. MinIO's S3 endpoint and database ports marked public listen on all interfaces and require credentials.
 - One Docker host runs one HomeCloud installation; the server refuses to start against another installation's containers.
+- User-supplied content (static websites, function URLs, HTTP APIs, inline object views) is served with a `Content-Security-Policy: sandbox` header, because it shares an origin with the console.
+- Webhooks (SNS HTTP subscriptions, alarm actions) may not target loopback or link-local addresses, checked again at connect time.
+- Delivery targets are authorized when they are configured: an EventBridge rule, SNS subscription, queue trigger, API route or state machine can only reach resources its creator could reach directly.
 
 ## Limits and differences from AWS
 

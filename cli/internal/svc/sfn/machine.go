@@ -147,6 +147,9 @@ func fail(name, format string, a ...any) *StateError {
 }
 
 func matchesError(list []string, name string) bool {
+	if name == "States.Aborted" {
+		return false // a stopped execution never runs catchers or retries
+	}
 	for _, e := range list {
 		if e == name || (e == "States.ALL" && name != "States.Runtime") || (e == "States.TaskFailed" && !strings.HasPrefix(name, "States.")) {
 			return true
@@ -228,12 +231,10 @@ func (r *runner) run(ctx context.Context, m *Machine, input any) (any, error) {
 				if matchesError(c.ErrorEquals, se.Name) {
 					rp, keep := r.path(c.ResultPath, "$")
 					errOut := map[string]any{"Error": se.Name, "Cause": se.Cause}
-					if keep {
+					if keep { // with ResultPath null the state's input passes through unchanged
 						if data, err = set(data, rp, errOut); err != nil {
 							return nil, fail("States.Runtime", "%v", err)
 						}
-					} else {
-						data = input
 					}
 					r.record(s.Type+"StateExited", name, map[string]any{"caught": se, "next": c.Next})
 					name, handled = c.Next, true
@@ -314,7 +315,7 @@ func (r *runner) step(ctx context.Context, name string, s *State, raw any) (any,
 		r.record("WaitStateWaiting", name, map[string]any{"seconds": d.Seconds()})
 		select {
 		case <-ctx.Done():
-			return nil, "", fail("States.Aborted", "stopped while waiting")
+			return nil, "", ctxErr(ctx)
 		case <-time.After(d):
 		}
 		result = in
@@ -332,19 +333,22 @@ func (r *runner) step(ctx context.Context, name string, s *State, raw any) (any,
 	case "Parallel":
 		outs := make([]any, len(s.Branches))
 		errs := make([]error, len(s.Branches))
+		bctx, cancel := context.WithCancel(ctx)
 		var wg sync.WaitGroup
 		for i, b := range s.Branches {
 			wg.Add(1)
 			go func(i int, b *Machine) {
 				defer wg.Done()
-				outs[i], errs[i] = r.child().run(ctx, b, effective)
+				outs[i], errs[i] = r.child().run(bctx, b, effective)
+				if errs[i] != nil {
+					cancel() // one failed branch stops its siblings
+				}
 			}(i, b)
 		}
 		wg.Wait()
-		for _, e := range errs {
-			if e != nil {
-				return nil, "", e
-			}
+		cancel()
+		if err := firstError(errs); err != nil {
+			return nil, "", err
 		}
 		result = outs
 	case "Map":
@@ -455,6 +459,8 @@ func (r *runner) task(ctx context.Context, name string, s *State, input any) (an
 		cancel()
 		if timedOut {
 			err = fail("States.Timeout", "task timed out after %d seconds", s.TimeoutSeconds)
+		} else if err != nil && ctx.Err() != nil {
+			return nil, ctxErr(ctx) // the execution itself timed out or was stopped
 		}
 		if err == nil {
 			r.record("TaskSucceeded", name, map[string]any{"output": out})
@@ -486,7 +492,7 @@ func (r *runner) task(ctx context.Context, name string, s *State, input any) (an
 			r.record("TaskRetrying", name, map[string]any{"attempt": attempts[i], "wait_seconds": wait.Seconds(), "error": se.Name})
 			select {
 			case <-ctx.Done():
-				return nil, fail("States.Aborted", "stopped while retrying")
+				return nil, ctxErr(ctx)
 			case <-time.After(wait):
 			}
 			retried = true
@@ -558,6 +564,30 @@ func (r *runner) callResource(ctx context.Context, resource string, input any) (
 	return nil, fail("States.Runtime", "unsupported Resource %q", resource)
 }
 
+// ctxErr maps a finished context to the States error it represents.
+func ctxErr(ctx context.Context) error {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
+		return fail("States.Timeout", "the execution timed out")
+	}
+	return fail("States.Aborted", "the execution was stopped")
+}
+
+// firstError prefers a real failure over the aborts it caused in siblings.
+func firstError(errs []error) error {
+	var aborted error
+	for _, e := range errs {
+		if e == nil {
+			continue
+		}
+		if se, ok := e.(*StateError); ok && se.Name == "States.Aborted" {
+			aborted = e
+			continue
+		}
+		return e
+	}
+	return aborted
+}
+
 func firstOf(m map[string]any, keys ...string) any {
 	for _, k := range keys {
 		if v, ok := m[k]; ok {
@@ -602,12 +632,12 @@ func (r *runner) mapState(ctx context.Context, s *State, in any) (any, error) {
 	if limit <= 0 || limit > 40 {
 		limit = 40
 	}
-	out := make([]any, len(items))
-	errs := make([]error, len(items))
-	sem := make(chan struct{}, limit)
-	var wg sync.WaitGroup
+	if len(items) > 10000 {
+		return nil, fail("States.Runtime", "Map input has %d items; the limit is 10000", len(items))
+	}
+	inputs := make([]any, len(items))
 	for i, item := range items {
-		itemIn := item
+		inputs[i] = item
 		if selector != nil {
 			ctxObj := map[string]any{"Map": map[string]any{"Item": map[string]any{"Index": i, "Value": item}}}
 			for k, v := range r.context {
@@ -617,21 +647,33 @@ func (r *runner) mapState(ctx context.Context, s *State, in any) (any, error) {
 			if err != nil {
 				return nil, fail("States.Runtime", "ItemSelector: %v", err)
 			}
-			itemIn = sv
+			inputs[i] = sv
+		}
+	}
+	out := make([]any, len(items))
+	errs := make([]error, len(items))
+	mctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+	sem := make(chan struct{}, limit)
+	var wg sync.WaitGroup
+	for i := range inputs {
+		if mctx.Err() != nil {
+			break
 		}
 		wg.Add(1)
 		sem <- struct{}{}
-		go func(i int, itemIn any) {
+		go func(i int) {
 			defer wg.Done()
 			defer func() { <-sem }()
-			out[i], errs[i] = r.child().run(ctx, proc, itemIn)
-		}(i, itemIn)
+			out[i], errs[i] = r.child().run(mctx, proc, inputs[i])
+			if errs[i] != nil {
+				cancel()
+			}
+		}(i)
 	}
 	wg.Wait()
-	for _, e := range errs {
-		if e != nil {
-			return nil, e
-		}
+	if err := firstError(errs); err != nil {
+		return nil, err
 	}
 	return out, nil
 }

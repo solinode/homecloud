@@ -11,6 +11,7 @@ import (
 	"os"
 	"regexp"
 	"slices"
+	"strings"
 	"sync"
 	"time"
 
@@ -45,6 +46,7 @@ type HistoryEvent struct {
 }
 
 type Execution struct {
+	deleted      bool
 	ID           string         `json:"id"`
 	ARN          string         `json:"arn"`
 	Name         string         `json:"name"`
@@ -97,6 +99,9 @@ func (s *Service) load() {
 
 // saveLocked persists one execution; callers hold s.mu (or own x exclusively).
 func (s *Service) saveLocked(x *Execution) {
+	if x.deleted {
+		return
+	}
 	_ = os.MkdirAll(s.dir(), 0o700)
 	b, _ := json.Marshal(x)
 	tmp := s.dir() + "/" + x.ID + ".json.tmp"
@@ -168,7 +173,16 @@ func (s *Service) Start(machine, name string, input any) (*Execution, error) {
 	record("ExecutionStarted", "", map[string]any{"input": input})
 	go func() {
 		defer cancel()
-		out, err := r.run(ctx, m, clone(input))
+		var out any
+		var err error
+		func() {
+			defer func() {
+				if p := recover(); p != nil {
+					err = fail("States.Runtime", "internal error: %v", p)
+				}
+			}()
+			out, err = r.run(ctx, m, clone(input))
+		}()
 		s.mu.Lock()
 		defer s.mu.Unlock()
 		n := core.Now()
@@ -230,8 +244,8 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("DELETE /api/v1/sfn/state-machines/{name}", "states:DeleteStateMachine", s.delete, res)
 	r.Handle("POST /api/v1/sfn/state-machines/{name}/executions", "states:StartExecution", s.startRoute, res)
 	r.Handle("GET /api/v1/sfn/state-machines/{name}/executions", "states:ListExecutions", s.listExecutions, res)
-	r.Handle("GET /api/v1/sfn/executions/{id}", "states:DescribeExecution", s.getExecution)
-	r.Handle("POST /api/v1/sfn/executions/{id}/stop", "states:StopExecution", s.stop)
+	r.Handle("GET /api/v1/sfn/executions/{id}", "states:DescribeExecution", s.getExecution, httpx.Deferred())
+	r.Handle("POST /api/v1/sfn/executions/{id}/stop", "states:StopExecution", s.stop, httpx.Deferred())
 	r.Handle("POST /api/v1/sfn/validate", "states:ValidateStateMachineDefinition", s.validate)
 }
 
@@ -295,6 +309,9 @@ func (s *Service) create(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.authorizeTasks(c, def); err != nil {
+		return nil, err
+	}
 	m := StateMachine{Name: in.Name, ARN: s.env.ARN("states", "stateMachine:"+in.Name), Definition: def, Status: "ACTIVE",
 		CreatedAt: core.Now(), UpdatedAt: core.Now(), Tags: in.Tags}
 	return m, store.Put(s.env.Store, cMachines, m.Name, m)
@@ -319,6 +336,9 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := s.authorizeTasks(c, def); err != nil {
+		return nil, err
+	}
 	m, err := store.Update(s.env.Store, cMachines, c.Param("name"), func(m *StateMachine) error {
 		m.Definition, m.UpdatedAt = def, core.Now()
 		return nil
@@ -340,6 +360,7 @@ func (s *Service) delete(c *httpx.Ctx) (any, error) {
 			if cancel := s.cancel[id]; cancel != nil {
 				cancel()
 			}
+			x.deleted = true
 			delete(s.execs, id)
 			_ = os.Remove(s.dir() + "/" + id + ".json")
 		}
@@ -410,15 +431,19 @@ func (s *Service) stop(c *httpx.Ctx) (any, error) {
 	s.mu.Lock()
 	x, ok := s.execs[c.Param("id")]
 	cancel := s.cancel[c.Param("id")]
+	var machine, status string
+	if ok {
+		machine, status = x.StateMachine, x.Status
+	}
 	s.mu.Unlock()
 	if !ok {
 		return nil, core.Errf(http.StatusNotFound, "ExecutionDoesNotExist", "execution %q does not exist", c.Param("id"))
 	}
-	if err := c.Authorize("states:StopExecution", s.env.ARN("states", "stateMachine:"+x.StateMachine)); err != nil {
+	if err := c.Authorize("states:StopExecution", s.env.ARN("states", "stateMachine:"+machine)); err != nil {
 		return nil, err
 	}
 	if cancel == nil {
-		return nil, core.Errf(http.StatusConflict, "ExecutionNotRunning", "execution is %s", x.Status)
+		return nil, core.Errf(http.StatusConflict, "ExecutionNotRunning", "execution is %s", status)
 	}
 	cancel()
 	return map[string]string{"status": "stopping"}, nil
@@ -441,3 +466,78 @@ func (s *Service) validate(c *httpx.Ctx) (any, error) {
 	}
 	return map[string]any{"valid": len(errs) == 0, "errors": errs}, nil
 }
+
+// taskPermissions lists the permissions a machine's Task states need: the
+// creator must hold them, since executions act on their behalf. Targets chosen
+// at run time (".$" parameters) need the permission on every resource.
+func taskPermissions(m *Machine, account string) [][2]string {
+	var out [][2]string
+	var walk func(m *Machine)
+	walk = func(m *Machine) {
+		for _, st := range m.States {
+			for _, b := range st.Branches {
+				walk(b)
+			}
+			if st.ItemProcessor != nil {
+				walk(st.ItemProcessor)
+			}
+			if st.Iterator != nil {
+				walk(st.Iterator)
+			}
+			if st.Type != "Task" {
+				continue
+			}
+			params, _ := st.Parameters.(map[string]any)
+			static := func(keys ...string) string {
+				for _, k := range keys {
+					if v, ok := params[k].(string); ok {
+						return v
+					}
+				}
+				return "*"
+			}
+			arnFor := func(service, v string) string {
+				if v == "*" || strings.HasPrefix(v, "arn:") {
+					return v
+				}
+				return fmt.Sprintf("arn:hc:%s:local-1:%s:%s", service, account, v)
+			}
+			switch r := st.Resource; {
+			case strings.HasSuffix(r, ":lambda:invoke") || strings.HasSuffix(r, ":lambda:invoke.waitForTaskToken"):
+				fn := static("FunctionName")
+				if fn != "*" {
+					fn = arnFor("lambda", "function:"+fnName(fn))
+				}
+				out = append(out, [2]string{"lambda:InvokeFunction", fn})
+			case strings.Contains(r, ":lambda:") && strings.Contains(r, ":function:"):
+				out = append(out, [2]string{"lambda:InvokeFunction", arnFor("lambda", "function:"+fnName(r))})
+			case strings.HasSuffix(r, ":sqs:sendMessage"):
+				q := static("QueueName", "QueueUrl")
+				if q != "*" {
+					q = arnFor("sqs", q[strings.LastIndexAny(q, "/:")+1:])
+				}
+				out = append(out, [2]string{"sqs:SendMessage", q})
+			case strings.HasSuffix(r, ":sns:publish"):
+				out = append(out, [2]string{"sns:Publish", static("TopicArn")})
+			}
+		}
+	}
+	walk(m)
+	return out
+}
+
+func (s *Service) authorizeTasks(c *httpx.Ctx, def json.RawMessage) error {
+	m, errs := parse(def)
+	if m == nil {
+		return core.BadRequest("%v", errs)
+	}
+	for _, p := range taskPermissions(m, s.env.AccountID) {
+		if err := c.Authorize(p[0], p[1]); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Exists reports whether a state machine exists.
+func (s *Service) Exists(name string) bool { return store.Has(s.env.Store, cMachines, name) }

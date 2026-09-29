@@ -2,10 +2,13 @@ package cloudwatch
 
 import (
 	"bufio"
+	"bytes"
+	"encoding/hex"
 	"encoding/json"
-	"net/url"
+	"log"
 	"os"
 	"path/filepath"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,12 +59,35 @@ func newLogStore(env *svc.Env) (*logStore, error) {
 	return &logStore{env: env, dir: dir}, os.MkdirAll(dir, 0o700)
 }
 
+// File names are hex-encoded so no group or stream name ("..", "/", ...) can
+// escape the logs directory.
 func (l *logStore) groupDir(group string) string {
-	return filepath.Join(l.dir, url.PathEscape(group))
+	return filepath.Join(l.dir, "g-"+hex.EncodeToString([]byte(group)))
 }
 
 func (l *logStore) streamFile(group, stream string) string {
-	return filepath.Join(l.groupDir(group), url.PathEscape(stream)+".jsonl")
+	return filepath.Join(l.groupDir(group), hex.EncodeToString([]byte(stream))+".jsonl")
+}
+
+const maxEventBytes = 256 << 10
+
+var (
+	groupNameRe  = regexp.MustCompile(`^[\.\-_/#A-Za-z0-9]{1,512}$`)
+	streamNameRe = regexp.MustCompile(`^[^:*]{1,512}$`)
+)
+
+func validGroup(name string) error {
+	if !groupNameRe.MatchString(name) || name == "." || name == ".." {
+		return core.BadRequest("log group names are 1-512 of letters, digits and . - _ / #, and may not be . or ..")
+	}
+	return nil
+}
+
+func validStream(name string) error {
+	if !streamNameRe.MatchString(name) || strings.ContainsAny(name, "\x00\n\r") {
+		return core.BadRequest("log stream names are 1-512 characters without : or *")
+	}
+	return nil
 }
 
 type rawEvent struct {
@@ -71,15 +97,21 @@ type rawEvent struct {
 
 // Append writes events to group/stream, creating the group if needed.
 func (s *Service) Append(group, stream string, events ...LogEvent) error {
-	if !store.Has(s.env.Store, cLogGroups, group) {
+	if err := validGroup(group); err != nil {
+		return err
+	}
+	if err := validStream(stream); err != nil {
+		return err
+	}
+	l := s.logs
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if !store.Has(s.env.Store, cLogGroups, group) { // checked under l.mu, so creation cannot race
 		g := LogGroup{Name: group, ARN: s.env.ARN("logs", "log-group:"+group), CreatedAt: core.Now(), Source: "stored"}
 		if err := store.Put(s.env.Store, cLogGroups, group, g); err != nil {
 			return err
 		}
 	}
-	l := s.logs
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	if err := os.MkdirAll(l.groupDir(group), 0o700); err != nil {
 		return err
 	}
@@ -92,6 +124,9 @@ func (s *Service) Append(group, stream string, events ...LogEvent) error {
 	for _, e := range events {
 		if e.Timestamp.IsZero() {
 			e.Timestamp = time.Now()
+		}
+		if len(e.Message) > maxEventBytes {
+			e.Message = e.Message[:maxEventBytes] + " [truncated]"
 		}
 		b, _ := json.Marshal(rawEvent{T: e.Timestamp.UnixMilli(), M: e.Message})
 		w.Write(b)
@@ -115,7 +150,11 @@ func (l *logStore) streams(group string) []LogStream {
 		if err != nil {
 			continue
 		}
-		n, _ := url.PathUnescape(name)
+		nb, err := hex.DecodeString(name)
+		if err != nil {
+			continue
+		}
+		n := string(nb)
 		out = append(out, LogStream{Name: n, LastEventTime: info.ModTime().UTC(), StoredBytes: info.Size()})
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].LastEventTime.After(out[j].LastEventTime) })
@@ -138,7 +177,7 @@ func (l *logStore) read(group, stream string, start, end time.Time, filter strin
 			continue
 		}
 		sc := bufio.NewScanner(f)
-		sc.Buffer(make([]byte, 1024*1024), 1024*1024)
+		sc.Buffer(make([]byte, 64*1024), 2*maxEventBytes)
 		for sc.Scan() {
 			var r rawEvent
 			if json.Unmarshal(sc.Bytes(), &r) != nil {
@@ -152,6 +191,9 @@ func (l *logStore) read(group, stream string, start, end time.Time, filter strin
 				continue
 			}
 			out = append(out, LogEvent{Timestamp: t, Message: r.M, Stream: n})
+		}
+		if err := sc.Err(); err != nil {
+			log.Printf("logs: read %s/%s: %v", group, n, err)
 		}
 		f.Close()
 	}
@@ -171,8 +213,42 @@ func (l *logStore) enforceRetention() {
 		for _, st := range l.streams(g.Name) {
 			if st.LastEventTime.Before(cut) {
 				_ = os.Remove(l.streamFile(g.Name, st.Name))
+				continue
 			}
+			l.trim(g.Name, st.Name, cut)
 		}
+	}
+}
+
+// trim rewrites a stream without the events older than cut.
+func (l *logStore) trim(group, stream string, cut time.Time) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	path := l.streamFile(group, stream)
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return
+	}
+	var keep bytes.Buffer
+	dropped := false
+	for _, line := range bytes.Split(b, []byte("\n")) {
+		if len(line) == 0 {
+			continue
+		}
+		var r rawEvent
+		if json.Unmarshal(line, &r) == nil && time.UnixMilli(r.T).Before(cut) {
+			dropped = true
+			continue
+		}
+		keep.Write(line)
+		keep.WriteByte('\n')
+	}
+	if !dropped {
+		return
+	}
+	tmp := path + ".tmp"
+	if os.WriteFile(tmp, keep.Bytes(), 0o600) == nil {
+		_ = os.Rename(tmp, path)
 	}
 }
 
@@ -275,9 +351,14 @@ func (s *Service) createGroup(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	if in.Name == "" || strings.HasPrefix(in.Name, containerGroupPrefix) {
-		return nil, core.BadRequest("name is required and may not start with the reserved prefix %s", containerGroupPrefix)
+	if err := validGroup(in.Name); err != nil {
+		return nil, err
 	}
+	if strings.HasPrefix(in.Name, containerGroupPrefix) {
+		return nil, core.BadRequest("log group names may not start with the reserved prefix %s", containerGroupPrefix)
+	}
+	s.logs.mu.Lock()
+	defer s.logs.mu.Unlock()
 	if store.Has(s.env.Store, cLogGroups, in.Name) {
 		return nil, core.Conflict("log group %q already exists", in.Name)
 	}
@@ -394,6 +475,12 @@ func (s *Service) putEvents(c *httpx.Ctx) (any, error) {
 	g := c.Param("group")
 	if strings.HasPrefix(g, containerGroupPrefix) {
 		return nil, core.BadRequest("container log groups are read-only")
+	}
+	if !store.Has(s.env.Store, cLogGroups, g) {
+		return nil, core.NotFound("log group", g)
+	}
+	if len(in.Events) > 10000 {
+		return nil, core.BadRequest("at most 10000 events per call")
 	}
 	return map[string]int{"accepted": len(in.Events)}, s.Append(g, c.Param("stream"), in.Events...)
 }

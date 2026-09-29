@@ -271,6 +271,22 @@ func (s *Service) Authenticate(r *http.Request) (*httpx.Principal, error) {
 	return s.principal(u, keyID), nil
 }
 
+// Refresh re-reads a principal's user, access key and policies, so long-running
+// work (CloudFormation stacks) acts with the caller's current permissions.
+func (s *Service) Refresh(p *httpx.Principal) (*httpx.Principal, error) {
+	u, err := store.Get[User](s.env.Store, cUsers, p.UserName)
+	if err != nil {
+		return nil, fmt.Errorf("user %s no longer exists", p.UserName)
+	}
+	if p.AccessKey != "" {
+		k, err := store.Get[AccessKey](s.env.Store, cKeys, p.AccessKey)
+		if err != nil || k.Status != "Active" {
+			return nil, fmt.Errorf("access key %s is no longer active", p.AccessKey)
+		}
+	}
+	return s.principal(u, p.AccessKey), nil
+}
+
 func (s *Service) principal(u User, keyID string) *httpx.Principal {
 	p := &httpx.Principal{AccountID: s.env.AccountID, UserName: u.Name, ARN: u.ARN, Root: u.Root, AccessKey: keyID}
 	if u.Root {

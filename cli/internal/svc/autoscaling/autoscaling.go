@@ -123,9 +123,15 @@ func (s *Service) Run(ctx context.Context) {
 	}
 }
 
-func (s *Service) reconcile(g Group) {
+func (s *Service) reconcile(stale Group) {
+	defer core.Recover("autoscaling " + stale.Name)
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	// Act on the current record, not the caller's copy (it may be outdated or deleted).
+	g, err := store.Get[Group](s.env.Store, cGroups, stale.Name)
+	if err != nil {
+		return
+	}
 	live, dead := s.members(g.Name)
 	// Replace instances that stopped (an unhealthy instance in a group is terminated).
 	for _, i := range dead {
@@ -313,9 +319,31 @@ func validate(g *Group) error {
 	return nil
 }
 
+// authorizeLaunch checks that the caller could launch the group's instances
+// themselves; the group acts on their behalf.
+func (s *Service) authorizeLaunch(c *httpx.Ctx, l LaunchConfig, targetGroups []string) error {
+	if err := c.Authorize("ec2:RunInstances", "*"); err != nil {
+		return err
+	}
+	for _, m := range l.FileSystems {
+		if err := c.Authorize("elasticfilesystem:ClientMount", s.env.ARN("elasticfilesystem", "file-system/"+m.FileSystemID)); err != nil {
+			return err
+		}
+	}
+	for _, tg := range targetGroups {
+		if err := c.Authorize("elasticloadbalancing:RegisterTargets", s.env.ARN("elasticloadbalancing", "targetgroup/"+tg)); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) create(c *httpx.Ctx) (any, error) {
 	var g Group
 	if err := c.Bind(&g); err != nil {
+		return nil, err
+	}
+	if err := s.authorizeLaunch(c, g.Launch, g.TargetGroups); err != nil {
 		return nil, err
 	}
 	if !nameRe.MatchString(g.Name) {
@@ -370,6 +398,11 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 	}
 	if err := c.Bind(&in); err != nil {
 		return nil, err
+	}
+	if in.Launch != nil {
+		if err := s.authorizeLaunch(c, *in.Launch, nil); err != nil {
+			return nil, err
+		}
 	}
 	g, err := store.Update(s.env.Store, cGroups, c.Param("name"), func(g *Group) error {
 		if in.MinSize != nil {

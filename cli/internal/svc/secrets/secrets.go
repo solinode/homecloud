@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	"regexp"
+	"sync"
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
@@ -61,6 +62,24 @@ func (s Secret) view() Secret {
 type Service struct {
 	env  *svc.Env
 	aead cipher.AEAD
+	mu   sync.Mutex // serialises creation
+}
+
+// managed rejects API changes to secrets that a service owns (RDS master
+// credentials, the S3 root keys); they change through that service.
+func managed(sec Secret) error {
+	if sec.ManagedBy != "" {
+		return core.Errf(http.StatusConflict, "ManagedSecret", "secret %q is managed by %s and cannot be changed directly", sec.Name, sec.ManagedBy)
+	}
+	return nil
+}
+
+// readCheck adds the service-level permission some managed secrets need.
+func readCheck(c *httpx.Ctx, sec Secret) error {
+	if sec.ManagedBy == "s3" { // MinIO root keys are as powerful as s3:AdministerServiceCredentials
+		return c.Authorize("s3:AdministerServiceCredentials", "*")
+	}
+	return nil
 }
 
 func New(env *svc.Env) (*Service, error) {
@@ -227,6 +246,8 @@ func (s *Service) create(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if store.Has(s.env.Store, cSecrets, in.Name) {
 		return nil, core.Conflict("secret %q already exists", in.Name)
 	}
@@ -257,6 +278,9 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	sec, err := store.Update(s.env.Store, cSecrets, c.Param("name"), func(x *Secret) error {
+		if err := managed(*x); err != nil {
+			return err
+		}
 		if in.Description != nil {
 			x.Description = *in.Description
 		}
@@ -273,6 +297,11 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 }
 
 func (s *Service) getValue(c *httpx.Ctx) (any, error) {
+	if sec, err := store.Get[Secret](s.env.Store, cSecrets, c.Param("name")); err == nil {
+		if err := readCheck(c, sec); err != nil {
+			return nil, err
+		}
+	}
 	val, v, err := s.Value(c.Param("name"), c.Query("version_stage"), c.Query("version_id"))
 	if err != nil {
 		return nil, err
@@ -287,8 +316,12 @@ func (s *Service) putValue(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	if !store.Has(s.env.Store, cSecrets, c.Param("name")) {
+	cur, err := store.Get[Secret](s.env.Store, cSecrets, c.Param("name"))
+	if err != nil {
 		return nil, core.NotFound("secret", c.Param("name"))
+	}
+	if err := managed(cur); err != nil {
+		return nil, err
 	}
 	sec, err := s.Put(c.Param("name"), in.Value, "", "")
 	if err != nil {
@@ -299,8 +332,12 @@ func (s *Service) putValue(c *httpx.Ctx) (any, error) {
 
 func (s *Service) delete(c *httpx.Ctx) (any, error) {
 	name := c.Param("name")
-	if !store.Has(s.env.Store, cSecrets, name) {
+	cur, err := store.Get[Secret](s.env.Store, cSecrets, name)
+	if err != nil {
 		return nil, core.NotFound("secret", name)
+	}
+	if err := managed(cur); err != nil {
+		return nil, err
 	}
 	if c.Query("force") == "true" {
 		return nil, store.Delete(s.env.Store, cSecrets, name)

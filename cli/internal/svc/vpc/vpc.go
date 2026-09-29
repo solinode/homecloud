@@ -83,8 +83,8 @@ type Service struct {
 	mu  sync.Mutex // serialises IP allocation
 	// InUse reports whether a security group is referenced by a resource; set by EC2.
 	InUse func(sgID string) bool
-	// AfterCreate is called with the Docker network of every new VPC.
-	AfterCreate func(network string)
+	// AfterCreate is called with every new VPC.
+	AfterCreate func(v VPC)
 }
 
 func New(env *svc.Env) *Service { return &Service{env: env} }
@@ -167,7 +167,7 @@ func (s *Service) createVPC(name string, cidr netip.Prefix, internet, def bool) 
 	}
 	sg := SecurityGroup{ID: core.NewID("sg"), VpcID: id, Name: "default", Description: "default VPC security group", Ingress: []Rule{}, CreatedAt: core.Now()}
 	if s.AfterCreate != nil {
-		go s.AfterCreate(v.Network)
+		go s.AfterCreate(v)
 	}
 	return v, store.Put(s.env.Store, cSGs, sg.ID, sg)
 }
@@ -303,7 +303,11 @@ func (s *Service) PublishedPorts(ids []string) []runtime.Port {
 					continue
 				}
 				seen[k] = true
-				out = append(out, runtime.Port{ContainerPort: p, Protocol: r.Protocol})
+				port := runtime.Port{ContainerPort: p, Protocol: r.Protocol}
+				if r.CIDR == "127.0.0.1/32" {
+					port.HostIP = "127.0.0.1"
+				}
+				out = append(out, port)
 			}
 		}
 	}
@@ -311,6 +315,28 @@ func (s *Service) PublishedPorts(ids []string) []runtime.Port {
 }
 
 func (s *Service) GetVPC(id string) (VPC, error) { return store.Get[VPC](s.env.Store, cVPCs, id) }
+
+// List returns every VPC.
+func (s *Service) List() []VPC { return store.List[VPC](s.env.Store, cVPCs) }
+
+// DNSAddress is the VPC's resolver address: the base of its CIDR plus two, as in AWS.
+// The allocator never hands it out (the first four addresses of a subnet are reserved).
+func DNSAddress(cidr string) string { return reserved(cidr, 2) }
+
+// S3Address is where the shared S3 endpoint (s3.internal) sits in a VPC: base plus three.
+func S3Address(cidr string) string { return reserved(cidr, 3) }
+
+func reserved(cidr string, n int) string {
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return ""
+	}
+	a := p.Masked().Addr()
+	for i := 0; i < n; i++ {
+		a = a.Next()
+	}
+	return a.String()
+}
 
 // DefaultVPCID returns the ID of the default VPC.
 func (s *Service) DefaultVPCID() string {
@@ -327,17 +353,20 @@ func (s *Service) DefaultVPCID() string {
 func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("GET /api/v1/vpc/vpcs", "ec2:DescribeVpcs", s.listVPCs)
 	r.Handle("POST /api/v1/vpc/vpcs", "ec2:CreateVpc", s.createVPCRoute)
-	r.Handle("GET /api/v1/vpc/vpcs/{id}", "ec2:DescribeVpcs", s.getVPC)
+	vpcRes := httpx.Res("arn:hc:ec2:local-1:{account}:vpc/{id}")
+	subRes := httpx.Res("arn:hc:ec2:local-1:{account}:subnet/{id}")
+	sgRes := httpx.Res("arn:hc:ec2:local-1:{account}:security-group/{id}")
+	r.Handle("GET /api/v1/vpc/vpcs/{id}", "ec2:DescribeVpcs", s.getVPC, vpcRes)
 	r.Handle("DELETE /api/v1/vpc/vpcs/{id}", "ec2:DeleteVpc", s.deleteVPC, httpx.Res("arn:hc:ec2:local-1:{account}:vpc/{id}"))
 	r.Handle("GET /api/v1/vpc/subnets", "ec2:DescribeSubnets", s.listSubnets)
 	r.Handle("POST /api/v1/vpc/subnets", "ec2:CreateSubnet", s.createSubnet)
-	r.Handle("DELETE /api/v1/vpc/subnets/{id}", "ec2:DeleteSubnet", s.deleteSubnet)
+	r.Handle("DELETE /api/v1/vpc/subnets/{id}", "ec2:DeleteSubnet", s.deleteSubnet, subRes)
 	r.Handle("GET /api/v1/vpc/security-groups", "ec2:DescribeSecurityGroups", s.listSGs)
 	r.Handle("POST /api/v1/vpc/security-groups", "ec2:CreateSecurityGroup", s.createSG)
-	r.Handle("GET /api/v1/vpc/security-groups/{id}", "ec2:DescribeSecurityGroups", s.getSG)
-	r.Handle("DELETE /api/v1/vpc/security-groups/{id}", "ec2:DeleteSecurityGroup", s.deleteSG)
-	r.Handle("POST /api/v1/vpc/security-groups/{id}/ingress", "ec2:AuthorizeSecurityGroupIngress", s.addRule)
-	r.Handle("DELETE /api/v1/vpc/security-groups/{id}/ingress/{rule}", "ec2:RevokeSecurityGroupIngress", s.removeRule)
+	r.Handle("GET /api/v1/vpc/security-groups/{id}", "ec2:DescribeSecurityGroups", s.getSG, sgRes)
+	r.Handle("DELETE /api/v1/vpc/security-groups/{id}", "ec2:DeleteSecurityGroup", s.deleteSG, sgRes)
+	r.Handle("POST /api/v1/vpc/security-groups/{id}/ingress", "ec2:AuthorizeSecurityGroupIngress", s.addRule, sgRes)
+	r.Handle("DELETE /api/v1/vpc/security-groups/{id}/ingress/{rule}", "ec2:RevokeSecurityGroupIngress", s.removeRule, sgRes)
 }
 
 type subnetView struct {
@@ -588,8 +617,15 @@ func normalizeRule(r Rule) (Rule, error) {
 	if r.CIDR == "" {
 		r.CIDR = "0.0.0.0/0"
 	}
-	if _, err := netip.ParsePrefix(r.CIDR); err != nil {
-		return r, core.BadRequest("invalid cidr %q", r.CIDR)
+	// Rules become published host ports, which can be bound to every interface
+	// or to loopback only; other source ranges cannot be enforced.
+	switch r.CIDR {
+	case "0.0.0.0/0", "127.0.0.1/32":
+	default:
+		if _, err := netip.ParsePrefix(r.CIDR); err != nil {
+			return r, core.BadRequest("invalid cidr %q", r.CIDR)
+		}
+		return r, core.BadRequest("cidr must be 0.0.0.0/0 (reachable from anywhere) or 127.0.0.1/32 (this host only); HomeCloud cannot filter other source ranges")
 	}
 	r.ID = core.NewID("sgr")
 	return r, nil

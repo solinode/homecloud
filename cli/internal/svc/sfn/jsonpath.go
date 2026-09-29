@@ -188,6 +188,10 @@ func intrinsic(expr string, input, ctx any) (any, error) {
 		return nil, fmt.Errorf("bad intrinsic %q", expr)
 	}
 	parts := splitArgs(strings.TrimSuffix(args, ")"))
+	need := map[string]int{"States.Format": 1, "States.JsonToString": 1, "States.StringToJson": 1, "States.Array": 0}
+	if n, ok := need[name]; ok && len(parts) < n {
+		return nil, fmt.Errorf("%s needs at least %d argument(s)", name, n)
+	}
 	val := func(a string) (any, error) {
 		a = strings.TrimSpace(a)
 		if strings.HasPrefix(a, "'") && strings.HasSuffix(a, "'") {

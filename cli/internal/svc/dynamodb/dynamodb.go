@@ -15,6 +15,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
@@ -58,6 +59,7 @@ type Item = map[string]any
 type Service struct {
 	env *svc.Env
 	db  *bolt.DB
+	mu  sync.Mutex // serialises table create/delete
 }
 
 func New(env *svc.Env) (*Service, error) {
@@ -83,8 +85,11 @@ func encodeKey(def KeyDef, v any) ([]byte, error) {
 		return []byte(str), nil
 	case "N":
 		f, ok := v.(float64)
-		if !ok {
+		if !ok || math.IsNaN(f) || math.IsInf(f, 0) {
 			return nil, core.BadRequest("key attribute %q must be a number", def.Name)
+		}
+		if f == 0 {
+			f = 0 // -0 and 0 are the same key
 		}
 		bits := math.Float64bits(f)
 		if f >= 0 {
@@ -205,6 +210,8 @@ func (s *Service) createTable(c *httpx.Ctx) (any, error) {
 	if !nameRe.MatchString(in.Name) {
 		return nil, core.BadRequest("table names are 3-255 letters, digits, dots, hyphens or underscores")
 	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	if store.Has(s.env.Store, cTables, in.Name) {
 		return nil, core.Errf(http.StatusConflict, "ResourceInUseException", "table %q already exists", in.Name)
 	}
@@ -262,8 +269,16 @@ func (s *Service) updateTable(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	if in.AddIndex != nil {
+		if in.AddIndex.Name == "" || !nameRe.MatchString(in.AddIndex.Name) {
+			return nil, core.BadRequest("index name must be 3-255 letters, digits, dots, hyphens or underscores")
+		}
 		if err := validKey(&in.AddIndex.PartitionKey, "index partition_key"); err != nil {
 			return nil, err
+		}
+		if in.AddIndex.SortKey != nil {
+			if err := validKey(in.AddIndex.SortKey, "index sort_key"); err != nil {
+				return nil, err
+			}
 		}
 	}
 	t, err := store.Update(s.env.Store, cTables, c.Param("name"), func(t *Table) error {
@@ -301,19 +316,22 @@ func (s *Service) updateTable(c *httpx.Ctx) (any, error) {
 }
 
 func (s *Service) deleteTable(c *httpx.Ctx) (any, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
 	t, err := s.table(c.Param("name"))
 	if err != nil {
 		return nil, err
 	}
-	if err := s.db.Update(func(tx *bolt.Tx) error {
+	// Remove the metadata first so no new request finds a table without a bucket.
+	if err := store.Delete(s.env.Store, cTables, t.Name); err != nil {
+		return nil, err
+	}
+	return nil, s.db.Update(func(tx *bolt.Tx) error {
 		if tx.Bucket([]byte(t.Name)) == nil {
 			return nil
 		}
 		return tx.DeleteBucket([]byte(t.Name))
-	}); err != nil {
-		return nil, err
-	}
-	return nil, store.Delete(s.env.Store, cTables, t.Name)
+	})
 }
 
 // ---- items ----
@@ -554,6 +572,16 @@ func (s *Service) updateItem(c *httpx.Ctx) (any, error) {
 			return nil, core.BadRequest("key attribute %q cannot be updated", a)
 		}
 	}
+	for a := range in.Add {
+		if keyAttrs[a] {
+			return nil, core.BadRequest("key attribute %q cannot be updated", a)
+		}
+	}
+	for _, a := range in.Remove {
+		if keyAttrs[a] {
+			return nil, core.BadRequest("key attribute %q cannot be removed", a)
+		}
+	}
 	k, err := s.keyItem(t, in.Key)
 	if err != nil {
 		return nil, err
@@ -717,6 +745,9 @@ func (s *Service) query(c *httpx.Ctx) (any, error) {
 	scanned := 0
 	err = s.db.View(func(tx *bolt.Tx) error {
 		bk := tx.Bucket([]byte(t.Name))
+		if bk == nil {
+			return core.Errf(http.StatusNotFound, "ResourceNotFoundException", "table %q does not exist", t.Name)
+		}
 		match := func(raw []byte) {
 			var it Item
 			if json.Unmarshal(raw, &it) != nil || expired(t, it) {
@@ -724,6 +755,11 @@ func (s *Service) query(c *httpx.Ctx) (any, error) {
 			}
 			if cmp, ok := compare(it[pkDef.Name], in.PartitionValue); !ok || cmp != 0 {
 				return
+			}
+			if in.Index != "" && skDef != nil {
+				if _, has := it[skDef.Name]; !has {
+					return // items without the index sort key are not in the index
+				}
 			}
 			if in.SortCondition != nil && skDef != nil {
 				sc := *in.SortCondition
@@ -750,34 +786,48 @@ func (s *Service) query(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if skDef != nil {
-		sort.SliceStable(items, func(i, j int) bool {
-			c, _ := compare(items[i][skDef.Name], items[j][skDef.Name])
-			return c < 0
-		})
-	}
+	// Order by (index) sort key, then by primary key, so pagination is stable.
+	sort.SliceStable(items, func(i, j int) bool {
+		if skDef != nil {
+			if c, _ := compare(items[i][skDef.Name], items[j][skDef.Name]); c != 0 {
+				return c < 0
+			}
+		}
+		a, _ := t.itemKey(items[i])
+		b, _ := t.itemKey(items[j])
+		return bytes.Compare(a, b) < 0
+	})
 	if !forward {
 		for i, j := 0, len(items)-1; i < j; i, j = i+1, j-1 {
 			items[i], items[j] = items[j], items[i]
 		}
 	}
-	return s.page(t, items, in.pageInput, scanned), nil
+	return s.page(t, items, in.pageInput, scanned, skDef, forward), nil
 }
 
 // page applies start key, filter, limit and projection to an ordered result.
-func (s *Service) page(t Table, items []Item, in pageInput, scanned int) map[string]any {
-	keyOf := func(it Item) string {
-		k, _ := t.itemKey(it)
-		return string(k)
-	}
-	if in.StartKey != nil {
-		sk := keyOf(in.StartKey)
-		for i, it := range items {
-			if keyOf(it) == sk {
-				items = items[i+1:]
-				break
+// Items resume strictly after the start key's position in the ordering, even if
+// that item has since been deleted. sortDef is the sort key the items are
+// ordered by (nil for scans, which use primary-key order).
+func (s *Service) page(t Table, items []Item, in pageInput, scanned int, sortDef *KeyDef, forward bool) map[string]any {
+	after := func(it Item) bool {
+		if sortDef != nil {
+			c, _ := compare(it[sortDef.Name], in.StartKey[sortDef.Name])
+			if c != 0 {
+				return (c > 0) == forward
 			}
 		}
+		a, _ := t.itemKey(it)
+		b, _ := t.itemKey(in.StartKey)
+		c := bytes.Compare(a, b)
+		return (c > 0) == forward && c != 0
+	}
+	if in.StartKey != nil {
+		i := 0
+		for i < len(items) && !after(items[i]) {
+			i++
+		}
+		items = items[i:]
 	}
 	limit := in.Limit
 	if limit <= 0 || limit > 1000 {
@@ -802,6 +852,9 @@ func (s *Service) page(t Table, items []Item, in pageInput, scanned int) map[str
 		if t.SortKey != nil {
 			lk[t.SortKey.Name] = last[t.SortKey.Name]
 		}
+		if sortDef != nil { // index queries also need the index sort key to resume
+			lk[sortDef.Name] = last[sortDef.Name]
+		}
 		res["last_evaluated_key"] = lk
 	}
 	return res
@@ -818,7 +871,11 @@ func (s *Service) scan(c *httpx.Ctx) (any, error) {
 	}
 	var items []Item
 	err = s.db.View(func(tx *bolt.Tx) error {
-		return tx.Bucket([]byte(t.Name)).ForEach(func(k, v []byte) error {
+		bk := tx.Bucket([]byte(t.Name))
+		if bk == nil {
+			return core.Errf(http.StatusNotFound, "ResourceNotFoundException", "table %q does not exist", t.Name)
+		}
+		return bk.ForEach(func(k, v []byte) error {
 			var it Item
 			if json.Unmarshal(v, &it) == nil && !expired(t, it) {
 				items = append(items, it)
@@ -829,7 +886,7 @@ func (s *Service) scan(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return s.page(t, items, in, len(items)), nil
+	return s.page(t, items, in, len(items), nil, true), nil
 }
 
 // Run deletes items whose TTL attribute has passed.

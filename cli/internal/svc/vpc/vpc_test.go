@@ -19,7 +19,7 @@ func TestNormalizeRule(t *testing.T) {
 	if err != nil || r.ToPort != 80 || r.Protocol != "tcp" || r.CIDR != "0.0.0.0/0" {
 		t.Fatalf("defaults: %+v %v", r, err)
 	}
-	for _, bad := range []Rule{{FromPort: 0}, {FromPort: 10, ToPort: 5}, {FromPort: 1, ToPort: 100}, {FromPort: 22, Protocol: "icmp"}, {FromPort: 22, CIDR: "nope"}} {
+	for _, bad := range []Rule{{FromPort: 0}, {FromPort: 10, ToPort: 5}, {FromPort: 1, ToPort: 100}, {FromPort: 22, Protocol: "icmp"}, {FromPort: 22, CIDR: "nope"}, {FromPort: 22, CIDR: "192.168.1.0/24"}} {
 		if _, err := normalizeRule(bad); err == nil {
 			t.Errorf("%+v should be rejected", bad)
 		}

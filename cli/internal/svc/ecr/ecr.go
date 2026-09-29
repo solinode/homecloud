@@ -180,11 +180,23 @@ func (s *Service) registryStatus(c *httpx.Ctx) (any, error) {
 }
 
 func (s *Service) list(c *httpx.Ctx) (any, error) {
-	if s.ready() == nil {
-		s.sync()
+	if s.ready() != nil {
+		return store.List[Repository](s.env.Store, cRepos), nil
 	}
-	return store.List[Repository](s.env.Store, cRepos), nil
+	s.sync()
+	out := []map[string]any{}
+	for _, r := range store.List[Repository](s.env.Store, cRepos) {
+		var tl struct {
+			Tags []string `json:"tags"`
+		}
+		_, _ = s.get(r.Name+"/tags/list", "", &tl)
+		out = append(out, map[string]any{"name": r.Name, "arn": r.ARN, "uri": r.URI, "tag_mutable": r.TagMutable,
+			"created_at": r.CreatedAt, "description": r.Description, "tags": r.Tags, "image_tag_count": len(tl.Tags)})
+	}
+	return out, nil
 }
+
+var imageRefRe = regexp.MustCompile(`^([A-Za-z0-9_][A-Za-z0-9_.-]{0,127}|sha256:[a-f0-9]{64})$`)
 
 var nameRe = regexp.MustCompile(`^[a-z0-9]+(?:[._-][a-z0-9]+)*(?:/[a-z0-9]+(?:[._-][a-z0-9]+)*)*$`)
 
@@ -364,6 +376,9 @@ func (s *Service) deleteImage(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	repo, ref := c.Query("repository"), c.Query("image")
+	if !imageRefRe.MatchString(ref) {
+		return nil, core.BadRequest("image must be a tag or a sha256: digest")
+	}
 	r, err := store.Get[Repository](s.env.Store, cRepos, repo)
 	if err != nil {
 		return nil, core.Errf(http.StatusNotFound, "RepositoryNotFoundException", "repository %q does not exist", repo)

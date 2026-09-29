@@ -10,6 +10,7 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/binary"
+	"encoding/json"
 	"net/http"
 	"regexp"
 	"sort"
@@ -27,7 +28,7 @@ const (
 	cKeys         = "kms_keys"
 	cAliases      = "kms_aliases"
 	maxPlaintext  = 4096
-	blobVersion   = 1
+	blobVersion   = 2 // 1: context encoded as k=v lines (still decrypted); 2: canonical JSON
 	rotationEvery = 365 * 24 * time.Hour
 )
 
@@ -139,7 +140,26 @@ func (s *Service) material(k Key, version int) ([]byte, error) {
 	return nil, core.Errf(http.StatusBadRequest, "InvalidCiphertextException", "key version %d not found", version)
 }
 
+// aad encodes the encryption context unambiguously (JSON of sorted pairs).
 func aad(ctx map[string]string) []byte {
+	if len(ctx) == 0 {
+		return nil
+	}
+	keys := make([]string, 0, len(ctx))
+	for k := range ctx {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	pairs := make([][2]string, len(keys))
+	for i, k := range keys {
+		pairs[i] = [2]string{k, ctx[k]}
+	}
+	b, _ := json.Marshal(pairs)
+	return b
+}
+
+// aadV1 is the original, ambiguous encoding, kept to decrypt old ciphertexts.
+func aadV1(ctx map[string]string) []byte {
 	if len(ctx) == 0 {
 		return nil
 	}
@@ -189,8 +209,12 @@ func (s *Service) Encrypt(ref string, plaintext []byte, ctx map[string]string) (
 func (s *Service) Decrypt(blob string, ctx map[string]string) ([]byte, string, error) {
 	bad := core.Errf(http.StatusBadRequest, "InvalidCiphertextException", "the ciphertext is invalid or was encrypted with a different encryption context")
 	b, err := base64.StdEncoding.DecodeString(blob)
-	if err != nil || len(b) < 2 || b[0] != blobVersion {
+	if err != nil || len(b) < 2 || (b[0] != 1 && b[0] != 2) {
 		return nil, "", bad
+	}
+	encode := aad
+	if b[0] == 1 {
+		encode = aadV1
 	}
 	n := int(b[1])
 	if len(b) < 2+n+4+12 {
@@ -212,7 +236,7 @@ func (s *Service) Decrypt(blob string, ctx map[string]string) ([]byte, string, e
 	}
 	block, _ := aes.NewCipher(mat)
 	gcm, _ := cipher.NewGCM(block)
-	pt, err := gcm.Open(nil, rest[:gcm.NonceSize()], rest[gcm.NonceSize():], aad(ctx))
+	pt, err := gcm.Open(nil, rest[:gcm.NonceSize()], rest[gcm.NonceSize():], encode(ctx))
 	if err != nil {
 		return nil, "", bad
 	}
@@ -266,22 +290,23 @@ func (s *Service) rotate(id string) error {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:kms:local-1:{account}:key/{id}")
 	r.Handle("GET /api/v1/kms/keys", "kms:ListKeys", s.listKeys)
 	r.Handle("POST /api/v1/kms/keys", "kms:CreateKey", s.createKey)
-	r.Handle("GET /api/v1/kms/keys/{id}", "kms:DescribeKey", s.describe, res)
-	r.Handle("PATCH /api/v1/kms/keys/{id}", "kms:UpdateKeyDescription", s.update, res)
-	r.Handle("POST /api/v1/kms/keys/{id}/enable", "kms:EnableKey", s.setState("Enabled"), res)
-	r.Handle("POST /api/v1/kms/keys/{id}/disable", "kms:DisableKey", s.setState("Disabled"), res)
-	r.Handle("POST /api/v1/kms/keys/{id}/rotate", "kms:RotateKeyOnDemand", s.rotateNow, res)
-	r.Handle("POST /api/v1/kms/keys/{id}/schedule-deletion", "kms:ScheduleKeyDeletion", s.scheduleDeletion, res)
-	r.Handle("POST /api/v1/kms/keys/{id}/cancel-deletion", "kms:CancelKeyDeletion", s.cancelDeletion, res)
+	// {id} may be a key ID, key ARN or alias; handlers authorize the resolved key's ARN.
+	d := httpx.Deferred()
+	r.Handle("GET /api/v1/kms/keys/{id}", "kms:DescribeKey", s.describe, d)
+	r.Handle("PATCH /api/v1/kms/keys/{id}", "kms:UpdateKeyDescription", s.update, d)
+	r.Handle("POST /api/v1/kms/keys/{id}/enable", "kms:EnableKey", s.setState("kms:EnableKey", "Enabled"), d)
+	r.Handle("POST /api/v1/kms/keys/{id}/disable", "kms:DisableKey", s.setState("kms:DisableKey", "Disabled"), d)
+	r.Handle("POST /api/v1/kms/keys/{id}/rotate", "kms:RotateKeyOnDemand", s.rotateNow, d)
+	r.Handle("POST /api/v1/kms/keys/{id}/schedule-deletion", "kms:ScheduleKeyDeletion", s.scheduleDeletion, d)
+	r.Handle("POST /api/v1/kms/keys/{id}/cancel-deletion", "kms:CancelKeyDeletion", s.cancelDeletion, d)
 	r.Handle("GET /api/v1/kms/aliases", "kms:ListAliases", s.listAliases)
 	r.Handle("POST /api/v1/kms/aliases", "kms:CreateAlias", s.createAlias)
 	r.Handle("DELETE /api/v1/kms/aliases/{name...}", "kms:DeleteAlias", s.deleteAlias)
-	r.Handle("POST /api/v1/kms/encrypt", "kms:Encrypt", s.encrypt)
-	r.Handle("POST /api/v1/kms/decrypt", "kms:Decrypt", s.decrypt)
-	r.Handle("POST /api/v1/kms/generate-data-key", "kms:GenerateDataKey", s.dataKey)
+	r.Handle("POST /api/v1/kms/encrypt", "kms:Encrypt", s.encrypt, d)
+	r.Handle("POST /api/v1/kms/decrypt", "kms:Decrypt", s.decrypt, d)
+	r.Handle("POST /api/v1/kms/generate-data-key", "kms:GenerateDataKey", s.dataKey, d)
 	r.Handle("POST /api/v1/kms/generate-random", "kms:GenerateRandom", s.random)
 }
 
@@ -326,16 +351,25 @@ func (s *Service) createKey(c *httpx.Ctx) (any, error) {
 	return k.view(s.aliasesOf(k.ID)), nil
 }
 
-func (s *Service) describe(c *httpx.Ctx) (any, error) {
+// keyFor resolves the {id} path parameter and authorizes action on the key's ARN.
+func (s *Service) keyFor(c *httpx.Ctx, action string) (Key, error) {
 	k, err := s.resolve(c.Param("id"))
+	if err != nil {
+		return k, err
+	}
+	return k, c.Authorize(action, k.ARN)
+}
+
+func (s *Service) describe(c *httpx.Ctx) (any, error) {
+	k, err := s.keyFor(c, "kms:DescribeKey")
 	if err != nil {
 		return nil, err
 	}
 	return k.view(s.aliasesOf(k.ID)), nil
 }
 
-func (s *Service) mutate(c *httpx.Ctx, fn func(*Key) error) (any, error) {
-	k, err := s.resolve(c.Param("id"))
+func (s *Service) mutate(c *httpx.Ctx, action string, fn func(*Key) error) (any, error) {
+	k, err := s.keyFor(c, action)
 	if err != nil {
 		return nil, err
 	}
@@ -359,7 +393,7 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	return s.mutate(c, func(k *Key) error {
+	return s.mutate(c, "kms:UpdateKeyDescription", func(k *Key) error {
 		if in.Description != nil {
 			k.Description = *in.Description
 		}
@@ -370,9 +404,9 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 	})
 }
 
-func (s *Service) setState(state string) httpx.Handler {
+func (s *Service) setState(action, state string) httpx.Handler {
 	return func(c *httpx.Ctx) (any, error) {
-		return s.mutate(c, func(k *Key) error {
+		return s.mutate(c, action, func(k *Key) error {
 			if k.State == "PendingDeletion" {
 				return core.Errf(http.StatusBadRequest, "KMSInvalidStateException", "key is pending deletion; cancel the deletion first")
 			}
@@ -383,7 +417,7 @@ func (s *Service) setState(state string) httpx.Handler {
 }
 
 func (s *Service) rotateNow(c *httpx.Ctx) (any, error) {
-	k, err := s.resolve(c.Param("id"))
+	k, err := s.keyFor(c, "kms:RotateKeyOnDemand")
 	if err != nil {
 		return nil, err
 	}
@@ -410,7 +444,7 @@ func (s *Service) scheduleDeletion(c *httpx.Ctx) (any, error) {
 	if in.PendingWindowDays < 7 || in.PendingWindowDays > 30 {
 		return nil, core.BadRequest("pending_window_days must be 7-30")
 	}
-	return s.mutate(c, func(k *Key) error {
+	return s.mutate(c, "kms:ScheduleKeyDeletion", func(k *Key) error {
 		d := core.Now().Add(time.Duration(in.PendingWindowDays) * 24 * time.Hour)
 		k.State, k.DeletionDate = "PendingDeletion", &d
 		return nil
@@ -418,7 +452,7 @@ func (s *Service) scheduleDeletion(c *httpx.Ctx) (any, error) {
 }
 
 func (s *Service) cancelDeletion(c *httpx.Ctx) (any, error) {
-	return s.mutate(c, func(k *Key) error {
+	return s.mutate(c, "kms:CancelKeyDeletion", func(k *Key) error {
 		if k.State != "PendingDeletion" {
 			return core.Errf(http.StatusBadRequest, "KMSInvalidStateException", "key is not pending deletion")
 		}
@@ -455,6 +489,10 @@ func (s *Service) createAlias(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	// Pointing an alias at a key is an action on that key.
+	if err := c.Authorize("kms:CreateAlias", k.ARN); err != nil {
+		return nil, err
+	}
 	if store.Has(s.env.Store, cAliases, in.Name) {
 		return nil, core.Errf(http.StatusConflict, "AlreadyExistsException", "alias %q already exists", in.Name)
 	}
@@ -466,6 +504,11 @@ func (s *Service) deleteAlias(c *httpx.Ctx) (any, error) {
 	name := c.Param("name")
 	if strings.HasPrefix(name, "alias/hc/") {
 		return nil, core.BadRequest("service-managed aliases cannot be deleted")
+	}
+	if a, err := store.Get[alias](s.env.Store, cAliases, name); err == nil {
+		if err := c.Authorize("kms:DeleteAlias", s.env.ARN("kms", "key/"+a.KeyID)); err != nil {
+			return nil, err
+		}
 	}
 	if err := store.Delete(s.env.Store, cAliases, name); err != nil {
 		return nil, core.Errf(http.StatusNotFound, "NotFoundException", "alias %q does not exist", name)
@@ -508,16 +551,26 @@ func (s *Service) encrypt(c *httpx.Ctx) (any, error) {
 	return map[string]string{"ciphertext_blob": blob, "key_id": arn}, nil
 }
 
+// blobKey reads the key ID from a ciphertext blob header, without decrypting.
+func blobKey(blob string) string {
+	b, err := base64.StdEncoding.DecodeString(blob)
+	if err != nil || len(b) < 2 || len(b) < 2+int(b[1]) {
+		return ""
+	}
+	return string(b[2 : 2+int(b[1])])
+}
+
 func (s *Service) decrypt(c *httpx.Ctx) (any, error) {
 	var in cryptoInput
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	pt, arn, err := s.Decrypt(in.CiphertextBlob, in.EncryptionContext)
-	if err != nil {
+	// Authorize before decrypting, so callers without access learn nothing about the blob.
+	if err := c.Authorize("kms:Decrypt", s.env.ARN("kms", "key/"+blobKey(in.CiphertextBlob))); err != nil {
 		return nil, err
 	}
-	if err := c.Authorize("kms:Decrypt", arn); err != nil {
+	pt, arn, err := s.Decrypt(in.CiphertextBlob, in.EncryptionContext)
+	if err != nil {
 		return nil, err
 	}
 	return map[string]string{"plaintext": base64.StdEncoding.EncodeToString(pt), "key_id": arn}, nil

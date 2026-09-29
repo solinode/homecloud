@@ -141,6 +141,7 @@ var builtinPolicies = []struct {
 	{"SSMReadOnlyAccess", "Read access to Parameter Store.", doc("Allow", "ssm:Get*", "ssm:Describe*")},
 	{"ECRFullAccess", "Full access to container repositories.", doc("Allow", "ecr:*")},
 	{"ECSFullAccess", "Full access to container services and tasks.", doc("Allow", "ecs:*", "elasticloadbalancing:*")},
+	{"Route53FullAccess", "Full access to hosted zones and records.", doc("Allow", "route53:*")},
 	{"CertificateManagerFullAccess", "Full access to TLS certificates and the private CA.", doc("Allow", "acm:*", "acm-pca:*")},
 	{"ElasticLoadBalancingFullAccess", "Full access to load balancers and target groups.", doc("Allow", "elasticloadbalancing:*")},
 	{"EFSFullAccess", "Full access to shared file systems.", doc("Allow", "elasticfilesystem:*")},

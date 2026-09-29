@@ -85,7 +85,8 @@ type User struct {
 	Groups       []string          `json:"groups"`
 	CreatedAt    time.Time         `json:"created_at"`
 	LastSignIn   *time.Time        `json:"last_sign_in,omitempty"`
-	TokensAfter  time.Time         `json:"tokens_after"` // access tokens issued before this are revoked
+	// TokenVersion is embedded in every token; global sign-out increments it.
+	TokenVersion int `json:"token_version"`
 }
 
 func (u User) view() map[string]any {
@@ -97,6 +98,8 @@ type refresh struct {
 	PoolID   string    `json:"pool_id"`
 	ClientID string    `json:"client_id"`
 	Username string    `json:"username"`
+	Sub      string    `json:"sub"`
+	Version  int       `json:"version"`
 	Expires  time.Time `json:"expires"`
 }
 
@@ -108,12 +111,16 @@ type challenge struct {
 }
 
 type Service struct {
-	env     *svc.Env
-	secrets *secrets.Service
-	mu      sync.Mutex
-	keys    map[string]*rsa.PrivateKey
-	fails   map[string][]time.Time
+	env      *svc.Env
+	secrets  *secrets.Service
+	mu       sync.Mutex
+	createMu sync.Mutex
+	keys     map[string]*rsa.PrivateKey
+	fails    map[string][]time.Time
 }
+
+// dummyHash equalises sign-in timing for unknown users.
+var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("homecloud-timing-equaliser"), bcrypt.DefaultCost)
 
 func New(env *svc.Env, sec *secrets.Service) *Service {
 	return &Service{env: env, secrets: sec, keys: map[string]*rsa.PrivateKey{}, fails: map[string][]time.Time{}}
@@ -214,13 +221,18 @@ func (s *Service) issue(p Pool, c Client, u User, withRefresh bool) (*tokens, er
 	if groups == nil {
 		groups = []string{}
 	}
-	id := map[string]any{"sub": u.Sub, "aud": c.ID, "iss": s.issuer(p.ID), "token_use": "id", "auth_time": now.Unix(), "iat": now.Unix(),
-		"exp": exp.Unix(), "cognito:username": u.Username, "cognito:groups": groups}
+	// Attributes first, so they can never overwrite a registered claim.
+	id := map[string]any{}
 	for k, v := range u.Attributes {
 		id[k] = v
 	}
+	for k, v := range map[string]any{"sub": u.Sub, "aud": c.ID, "iss": s.issuer(p.ID), "token_use": "id", "auth_time": now.Unix(), "iat": now.Unix(),
+		"exp": exp.Unix(), "cognito:username": u.Username, "cognito:groups": groups, "hc:tv": u.TokenVersion} {
+		id[k] = v
+	}
 	access := map[string]any{"sub": u.Sub, "iss": s.issuer(p.ID), "client_id": c.ID, "token_use": "access", "scope": "openid profile",
-		"auth_time": now.Unix(), "iat": now.Unix(), "exp": exp.Unix(), "jti": core.RandHex(32), "username": u.Username, "cognito:groups": groups}
+		"auth_time": now.Unix(), "iat": now.Unix(), "exp": exp.Unix(), "jti": core.RandHex(32), "username": u.Username, "cognito:groups": groups,
+		"hc:tv": u.TokenVersion}
 	t := &tokens{ExpiresIn: int(exp.Sub(now).Seconds()), TokenType: "Bearer"}
 	if t.IDToken, err = sign(k, p.KeyID, id); err != nil {
 		return nil, err
@@ -230,7 +242,8 @@ func (s *Service) issue(p Pool, c Client, u User, withRefresh bool) (*tokens, er
 	}
 	if withRefresh {
 		rt := core.NewSecret(64)
-		r := refresh{PoolID: p.ID, ClientID: c.ID, Username: u.Username, Expires: now.Add(time.Duration(c.RefreshTokenDays) * 24 * time.Hour)}
+		r := refresh{PoolID: p.ID, ClientID: c.ID, Username: u.Username, Sub: u.Sub, Version: u.TokenVersion,
+			Expires: now.Add(time.Duration(c.RefreshTokenDays) * 24 * time.Hour)}
 		if err := store.Put(s.env.Store, cRefresh, hashToken(rt), r); err != nil {
 			return nil, err
 		}
@@ -264,15 +277,20 @@ func (s *Service) VerifyToken(poolID, token, audience string) (map[string]any, e
 	if audience != "" && claims["aud"] != audience && claims["client_id"] != audience {
 		return nil, fmt.Errorf("token is not for client %s", audience)
 	}
-	username, _ := claims["cognito:username"].(string)
-	if username == "" {
+	var username string
+	switch claims["token_use"] {
+	case "id":
+		username, _ = claims["cognito:username"].(string)
+	case "access":
 		username, _ = claims["username"].(string)
+	default:
+		return nil, fmt.Errorf("unknown token_use")
 	}
 	u, err := store.Get[User](s.env.Store, cUsers, userKey(p.ID, username))
-	if err != nil || !u.Enabled {
+	if err != nil || !u.Enabled || claims["sub"] != u.Sub {
 		return nil, fmt.Errorf("user is disabled or deleted")
 	}
-	if iat, _ := claims["iat"].(float64); int64(iat) < u.TokensAfter.Unix() {
+	if tv, _ := claims["hc:tv"].(float64); int(tv) != u.TokenVersion {
 		return nil, fmt.Errorf("token was revoked by a sign-out")
 	}
 	return claims, nil
@@ -420,7 +438,10 @@ func (s *Service) deletePool(c *httpx.Ctx) (any, error) {
 			_ = store.Delete(s.env.Store, cClients, cl.ID)
 		}
 	}
-	_ = s.env.Store.Retain(cRefresh, func(_ string, raw json.RawMessage) bool { return !strings.Contains(string(raw), `"pool_id":"`+id+`"`) })
+	_ = s.env.Store.Retain(cRefresh, func(_ string, raw json.RawMessage) bool {
+		var r refresh
+		return json.Unmarshal(raw, &r) != nil || r.PoolID != id
+	})
 	s.mu.Lock()
 	delete(s.keys, id)
 	s.mu.Unlock()
@@ -496,10 +517,28 @@ func (s *Service) listUsers(c *httpx.Ctx) (any, error) {
 
 var usernameRe = regexp.MustCompile(`^[\p{L}\p{M}\p{S}\p{N}\p{P}]{1,128}$`)
 
+// reservedClaims may not be used as user attribute names.
+var reservedClaims = map[string]bool{"sub": true, "aud": true, "iss": true, "exp": true, "iat": true, "nbf": true, "auth_time": true,
+	"token_use": true, "client_id": true, "username": true, "jti": true, "scope": true, "event_id": true, "origin_jti": true}
+
+func checkAttrs(attrs map[string]string) error {
+	for k, v := range attrs {
+		if reservedClaims[k] || strings.HasPrefix(k, "cognito:") || strings.HasPrefix(k, "hc:") || k == "" || len(k) > 64 {
+			return core.BadRequest("attribute name %q is reserved or invalid", k)
+		}
+		if len(v) > 2048 {
+			return core.BadRequest("attribute %q is longer than 2048 characters", k)
+		}
+	}
+	return nil
+}
+
 func (s *Service) newUser(p Pool, username, password string, attrs map[string]string, status string) (User, error) {
 	if !usernameRe.MatchString(username) {
 		return User{}, core.BadRequest("invalid username")
 	}
+	s.createMu.Lock()
+	defer s.createMu.Unlock()
 	if store.Has(s.env.Store, cUsers, userKey(p.ID, username)) {
 		return User{}, core.Errf(http.StatusConflict, "UsernameExistsException", "user %q already exists", username)
 	}
@@ -513,10 +552,8 @@ func (s *Service) newUser(p Pool, username, password string, attrs map[string]st
 	if attrs == nil {
 		attrs = map[string]string{}
 	}
-	for k := range attrs {
-		if k == "sub" || strings.HasPrefix(k, "cognito:") {
-			return User{}, core.BadRequest("attribute %q is reserved", k)
-		}
+	if err := checkAttrs(attrs); err != nil {
+		return User{}, err
 	}
 	h2 := core.RandHex(32)
 	u := User{PoolID: p.ID, Username: username, Sub: h2[0:8] + "-" + h2[8:12] + "-" + h2[12:16] + "-" + h2[16:20] + "-" + h2[20:32],
@@ -541,7 +578,8 @@ func (s *Service) adminCreateUser(c *httpx.Ctx) (any, error) {
 	}
 	generated := ""
 	if in.Password == "" {
-		generated = core.NewSecret(10) + "a1" // satisfies the default policy
+		// Satisfy any policy: long enough, with every character class.
+		generated = core.NewSecret(max(p.PasswordPolicy.MinLength, 12)) + "aA1!"
 		in.Password, in.TemporaryPassword = generated, true
 	}
 	status := "CONFIRMED"
@@ -588,6 +626,7 @@ func (s *Service) adminDeleteUser(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	s.revokeAll(u.PoolID, u.Username)
 	return nil, store.Delete(s.env.Store, cUsers, userKey(u.PoolID, u.Username))
 }
 
@@ -616,11 +655,11 @@ func (s *Service) adminUpdateUser(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := checkAttrs(in.Attributes); err != nil {
+		return nil, err
+	}
 	return s.updateUser(c, func(u *User) error {
 		for k, v := range in.Attributes {
-			if k == "sub" || strings.HasPrefix(k, "cognito:") {
-				return core.BadRequest("attribute %q is reserved", k)
-			}
 			if v == "" {
 				delete(u.Attributes, k)
 			} else {
@@ -675,11 +714,14 @@ func (s *Service) adminSetPassword(c *httpx.Ctx) (any, error) {
 	})
 }
 
+// revokeAll invalidates every token of a user: refresh tokens are deleted and
+// the token version moves on, so outstanding ID and access tokens stop verifying.
 func (s *Service) revokeAll(pool, username string) {
 	_ = s.env.Store.Retain(cRefresh, func(_ string, raw json.RawMessage) bool {
-		return !(strings.Contains(string(raw), `"pool_id":"`+pool+`"`) && strings.Contains(string(raw), `"username":"`+username+`"`))
+		var r refresh
+		return json.Unmarshal(raw, &r) != nil || !(r.PoolID == pool && strings.EqualFold(r.Username, username))
 	})
-	_, _ = store.Update(s.env.Store, cUsers, userKey(pool, username), func(u *User) error { u.TokensAfter = time.Now().Add(time.Second); return nil })
+	_, _ = store.Update(s.env.Store, cUsers, userKey(pool, username), func(u *User) error { u.TokenVersion++; return nil })
 }
 
 func (s *Service) adminSignOut(c *httpx.Ctx) (any, error) {
@@ -766,7 +808,10 @@ func (s *Service) client(p Pool, id, secret string) (Client, error) {
 	return cl, nil
 }
 
-func (s *Service) throttled(key string, fail bool) bool {
+// attempt records a sign-in attempt for key and reports whether it is allowed.
+// Attempts are counted before the password check so parallel guesses cannot
+// slip past the limit; a success clears the record.
+func (s *Service) attempt(key string) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	recent := s.fails[key][:0]
@@ -775,11 +820,25 @@ func (s *Service) throttled(key string, fail bool) bool {
 			recent = append(recent, t)
 		}
 	}
-	if fail {
-		recent = append(recent, time.Now())
+	if len(recent) >= 10 {
+		s.fails[key] = recent
+		return false
 	}
-	s.fails[key] = recent
-	return len(recent) >= 10
+	s.fails[key] = append(recent, time.Now())
+	if len(s.fails) > 100000 { // bound memory under a flood of distinct keys
+		for k, ts := range s.fails {
+			if len(ts) == 0 || time.Since(ts[len(ts)-1]) > 5*time.Minute {
+				delete(s.fails, k)
+			}
+		}
+	}
+	return true
+}
+
+func (s *Service) succeeded(key string) {
+	s.mu.Lock()
+	delete(s.fails, key)
+	s.mu.Unlock()
 }
 
 type authInput struct {
@@ -837,14 +896,18 @@ func (s *Service) auth(c *httpx.Ctx) (any, error) {
 	switch in.Flow {
 	case "", "USER_PASSWORD_AUTH":
 		tk := p.ID + "/" + strings.ToLower(in.Username) + "/" + httpx.ClientIP(c.R)
-		if s.throttled(tk, false) {
+		if !s.attempt(tk) {
 			return nil, core.Errf(http.StatusTooManyRequests, "TooManyRequestsException", "too many failed attempts; try again later")
 		}
 		u, err := store.Get[User](s.env.Store, cUsers, userKey(p.ID, in.Username))
-		if err != nil || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Password)) != nil {
-			s.throttled(tk, true)
+		hash := []byte(u.PasswordHash)
+		if err != nil {
+			hash = dummyHash
+		}
+		if bcrypt.CompareHashAndPassword(hash, []byte(in.Password)) != nil || err != nil {
 			return nil, deny
 		}
+		s.succeeded(tk)
 		if !u.Enabled {
 			return nil, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "user is disabled")
 		}
@@ -865,8 +928,8 @@ func (s *Service) auth(c *httpx.Ctx) (any, error) {
 			return nil, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "invalid refresh token")
 		}
 		u, err := store.Get[User](s.env.Store, cUsers, userKey(p.ID, rt.Username))
-		if err != nil || !u.Enabled {
-			return nil, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "user is disabled or deleted")
+		if err != nil || !u.Enabled || u.Sub != rt.Sub || u.TokenVersion != rt.Version {
+			return nil, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "refresh token is no longer valid")
 		}
 		return s.issue(p, cl, u, false)
 	}
@@ -894,6 +957,9 @@ func (s *Service) respond(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	u, err := store.Update(s.env.Store, cUsers, userKey(p.ID, ch.Username), func(u *User) error {
+		if !u.Enabled {
+			return core.Errf(http.StatusBadRequest, "NotAuthorizedException", "user is disabled")
+		}
 		u.PasswordHash, u.Status = string(h), "CONFIRMED"
 		return nil
 	})
@@ -923,7 +989,10 @@ func (s *Service) bearer(c *httpx.Ctx) (Pool, User, error) {
 		return p, User{}, core.Errf(http.StatusUnauthorized, "NotAuthorizedException", "an access token is required")
 	}
 	u, err := store.Get[User](s.env.Store, cUsers, userKey(p.ID, fmt.Sprint(claims["username"])))
-	return p, u, err
+	if err != nil || u.Sub != claims["sub"] {
+		return p, User{}, core.Errf(http.StatusUnauthorized, "NotAuthorizedException", "user no longer exists")
+	}
+	return p, u, nil
 }
 
 func (s *Service) userinfo(c *httpx.Ctx) (any, error) {
@@ -950,9 +1019,14 @@ func (s *Service) changePassword(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	tk := p.ID + "/change/" + u.Sub
+	if !s.attempt(tk) {
+		return nil, core.Errf(http.StatusTooManyRequests, "TooManyRequestsException", "too many failed attempts; try again later")
+	}
 	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Old)) != nil {
 		return nil, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "incorrect password")
 	}
+	s.succeeded(tk)
 	if err := p.PasswordPolicy.check(in.New); err != nil {
 		return nil, err
 	}

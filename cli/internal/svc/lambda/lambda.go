@@ -88,6 +88,8 @@ type Service struct {
 	Queues QueueSource
 	// VerifyJWT validates user pool tokens for API Gateway routes that require them.
 	VerifyJWT JWTVerifier
+	// DNSFor returns resolver addresses for containers in a VPC (Route 53).
+	DNSFor func(vpcID string) []string
 }
 
 func New(env *svc.Env, cw *cloudwatch.Service, v *vpc.Service) *Service {
@@ -237,7 +239,12 @@ func (s *Service) container(ctx context.Context, f Function) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	var dns []string
+	if s.DNSFor != nil {
+		dns = s.DNSFor(pl.VPC.ID)
+	}
 	id, err := s.env.Docker.Run(ctx, runtime.RunSpec{
+		DNS:        dns,
 		Name:       containerName(f.Name),
 		Image:      rt.Image,
 		Entrypoint: []string{"/bin/sh", "-c"},
@@ -272,6 +279,9 @@ func (s *Service) container(ctx context.Context, f Function) (string, error) {
 }
 
 func (s *Service) retire(name string) {
+	l := s.fnLock(name)
+	l.Lock()
+	defer l.Unlock()
 	s.mu.Lock()
 	delete(s.warm, name)
 	s.mu.Unlock()

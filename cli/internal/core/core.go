@@ -6,10 +6,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"math/big"
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 	"time"
 )
@@ -31,6 +33,7 @@ type Config struct {
 	S3Port        int    `json:"s3_port"`
 	S3ConsolePort int    `json:"s3_console_port"`
 	ECRPort       int    `json:"ecr_port"`
+	DNSPort       int    `json:"dns_port"`           // host port serving public hosted zones (UDP and TCP)
 	TLSCert       string `json:"tls_cert,omitempty"` // PEM files; empty = plain HTTP
 	TLSKey        string `json:"tls_key,omitempty"`
 	Region        string `json:"region"`
@@ -55,6 +58,7 @@ func DefaultConfig() Config {
 		S3Port:        9500,
 		S3ConsolePort: 9501,
 		ECRPort:       5500,
+		DNSPort:       8053,
 		Region:        DefaultRegion,
 	}
 }
@@ -131,3 +135,11 @@ func Conflict(format string, a ...any) *Error {
 
 // Tags are free-form key/value labels attached to resources.
 type Tags map[string]string
+
+// Recover logs a panic in a background goroutine instead of crashing the server.
+// Use as: defer core.Recover("what is running")
+func Recover(what string) {
+	if r := recover(); r != nil {
+		log.Printf("panic in %s: %v\n%s", what, r, debug.Stack())
+	}
+}
