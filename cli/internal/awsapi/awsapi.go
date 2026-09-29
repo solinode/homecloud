@@ -449,7 +449,11 @@ func (q *Req) writeJSON(status int, v any) {
 func (q *Req) writeJSONError(e *Error) {
 	q.W.Header().Set("X-Amzn-ErrorType", e.Code)
 	if e.QueryCode != "" {
-		q.W.Header().Set("x-amzn-query-error", e.QueryCode+";Sender")
+		fault := "Sender"
+		if e.Status >= 500 {
+			fault = "Receiver"
+		}
+		q.W.Header().Set("x-amzn-query-error", e.QueryCode+";"+fault)
 	}
 	ver := "1.1"
 	if q.Svc != nil {
