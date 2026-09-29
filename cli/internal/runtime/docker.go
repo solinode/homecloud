@@ -91,7 +91,27 @@ type RunSpec struct {
 	WorkingDir string
 	Hostname   string
 	DNS        []string // upstream servers for Docker's embedded DNS
+	ExtraHosts []string // "name:ip" entries for /etc/hosts ("host-gateway" is the Docker host)
 	Start      bool
+}
+
+// HostAlias makes the Docker host reachable from containers as host.docker.internal
+// (built in on Docker Desktop and OrbStack; mapped to the bridge gateway on Linux).
+const HostAlias = "host.docker.internal:host-gateway"
+
+// BridgeGateway returns the Docker host's address on the default bridge (Linux),
+// which containers reach through host.docker.internal.
+func (d *Docker) BridgeGateway() string {
+	n, err := d.C.NetworkInfo("bridge")
+	if err != nil {
+		return ""
+	}
+	for _, c := range n.IPAM.Config {
+		if c.Gateway != "" {
+			return c.Gateway
+		}
+	}
+	return ""
 }
 
 func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
@@ -127,6 +147,7 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 	}
 	hc := &docker.HostConfig{
 		DNS:          s.DNS,
+		ExtraHosts:   s.ExtraHosts,
 		Memory:       s.MemoryMB * 1024 * 1024,
 		PortBindings: bindings,
 		Mounts:       mounts,

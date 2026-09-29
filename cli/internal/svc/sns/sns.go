@@ -222,7 +222,7 @@ func (s *Service) Notify(target, subject, message string) {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:sns:local-1:{account}:{name}")
+	res := httpx.Res("arn:aws:sns:{region}:{account}:{name}")
 	r.Handle("GET /api/v1/sns/topics", "sns:ListTopics", s.listTopics)
 	r.Handle("POST /api/v1/sns/topics", "sns:CreateTopic", s.createTopic)
 	r.Handle("GET /api/v1/sns/topics/{name}", "sns:GetTopicAttributes", s.getTopic, res)

@@ -24,7 +24,7 @@ import type { Volume } from "@/lib/types"
 import { instanceHref } from "./instance-actions"
 
 const VOLUMES_PATH = "/api/v1/ec2/volumes"
-const ZONES = ["local-1a", "local-1b", "local-1c"]
+const ZONES = ["us-east-1a", "us-east-1b", "us-east-1c"]
 
 const columns: Column<Volume>[] = [
   { id: "id", header: "Volume ID", cell: (v) => <span className="font-mono text-[13px] font-medium">{v.id}</span>, value: (v) => v.id },

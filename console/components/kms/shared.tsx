@@ -21,7 +21,7 @@ export const KEYS_PATH = `${KMS_PATH}/keys`
 
 export const keyHref = (id: string, tab?: string) => `/kms/key/?id=${encodeURIComponent(id)}${tab ? `&tab=${tab}` : ""}`
 
-/** keyIdFromArn extracts the key id from a key ARN ("arn:hc:kms:...:key/<id>"); other refs pass through. */
+/** keyIdFromArn extracts the key id from a key ARN ("arn:aws:kms:...:key/<id>"); other refs pass through. */
 export function keyIdFromArn(ref: string): string {
   const i = ref.indexOf(":key/")
   return i >= 0 ? ref.slice(i + 5) : ref

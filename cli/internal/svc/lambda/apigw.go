@@ -236,7 +236,7 @@ func (s *Service) serveURL(c *httpx.Ctx) (any, error) {
 func (s *Service) apigwRoutes(r *httpx.Router) {
 	r.Handle("GET /api/v1/apigateway/apis", "apigateway:GET", s.listAPIs)
 	r.Handle("POST /api/v1/apigateway/apis", "apigateway:POST", s.createAPI)
-	res := httpx.Res("arn:hc:apigateway:local-1::/apis/{id}")
+	res := httpx.Res("arn:aws:apigateway:{region}::/apis/{id}")
 	r.Handle("GET /api/v1/apigateway/apis/{id}", "apigateway:GET", s.getAPI, res)
 	r.Handle("PATCH /api/v1/apigateway/apis/{id}", "apigateway:PATCH", s.patchAPI, res)
 	r.Handle("DELETE /api/v1/apigateway/apis/{id}", "apigateway:DELETE", s.deleteAPI, res)

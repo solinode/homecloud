@@ -299,7 +299,7 @@ func (s *Service) bump(id string) {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:route53:::hostedzone/{id}")
+	res := httpx.Res("arn:aws:route53:::hostedzone/{id}")
 	r.Handle("GET /api/v1/route53/zones", "route53:ListHostedZones", s.list)
 	r.Handle("POST /api/v1/route53/zones", "route53:CreateHostedZone", s.create)
 	r.Handle("GET /api/v1/route53/zones/{id}", "route53:GetHostedZone", s.get, res)

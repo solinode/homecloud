@@ -227,7 +227,7 @@ func (r *resolver) ref(name string) (any, error) {
 	case "HC::AccountId", "AWS::AccountId":
 		return strings.Split(r.stack.ARN, ":")[4], nil
 	case "HC::Region", "AWS::Region":
-		return core.DefaultRegion, nil
+		return core.Region, nil
 	}
 	if v, ok := r.params[name]; ok {
 		return v, nil

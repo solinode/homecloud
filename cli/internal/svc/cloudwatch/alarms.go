@@ -91,9 +91,9 @@ func (s *Service) evaluateAlarms() {
 
 func (s *Service) alarmRoutes(r *httpx.Router) {
 	r.Handle("GET /api/v1/cloudwatch/alarms", "cloudwatch:DescribeAlarms", s.listAlarms)
-	r.Handle("GET /api/v1/cloudwatch/alarms/{name}", "cloudwatch:DescribeAlarms", s.getAlarm, httpx.Res("arn:hc:cloudwatch:local-1:{account}:alarm:{name}"))
-	r.Handle("PUT /api/v1/cloudwatch/alarms/{name}", "cloudwatch:PutMetricAlarm", s.putAlarm, httpx.Res("arn:hc:cloudwatch:local-1:{account}:alarm:{name}"))
-	r.Handle("DELETE /api/v1/cloudwatch/alarms/{name}", "cloudwatch:DeleteAlarms", s.deleteAlarm, httpx.Res("arn:hc:cloudwatch:local-1:{account}:alarm:{name}"))
+	r.Handle("GET /api/v1/cloudwatch/alarms/{name}", "cloudwatch:DescribeAlarms", s.getAlarm, httpx.Res("arn:aws:cloudwatch:{region}:{account}:alarm:{name}"))
+	r.Handle("PUT /api/v1/cloudwatch/alarms/{name}", "cloudwatch:PutMetricAlarm", s.putAlarm, httpx.Res("arn:aws:cloudwatch:{region}:{account}:alarm:{name}"))
+	r.Handle("DELETE /api/v1/cloudwatch/alarms/{name}", "cloudwatch:DeleteAlarms", s.deleteAlarm, httpx.Res("arn:aws:cloudwatch:{region}:{account}:alarm:{name}"))
 }
 
 func (s *Service) listAlarms(c *httpx.Ctx) (any, error) {
@@ -119,7 +119,7 @@ func (s *Service) putAlarm(c *httpx.Ctx) (any, error) {
 	}
 	for _, t := range append(append([]string{}, a.AlarmActions...), a.OKActions...) {
 		switch {
-		case strings.HasPrefix(t, "arn:hc:sns:"):
+		case strings.HasPrefix(t, "arn:aws:sns:"):
 			if err := c.Authorize("sns:Publish", t); err != nil {
 				return nil, err
 			}

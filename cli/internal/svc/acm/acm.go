@@ -156,7 +156,7 @@ func uuid() string {
 var domainRe = regexp.MustCompile(`^(\*\.)?([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)*[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?$`)
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:acm:local-1:{account}:certificate/{id}")
+	res := httpx.Res("arn:aws:acm:{region}:{account}:certificate/{id}")
 	r.Handle("GET /api/v1/acm/certificates", "acm:ListCertificates", s.list)
 	r.Handle("POST /api/v1/acm/certificates", "acm:RequestCertificate", s.request)
 	r.Handle("POST /api/v1/acm/certificates/import", "acm:ImportCertificate", s.importCert)

@@ -215,7 +215,7 @@ func (s *Service) PurgeExpired() {
 }
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:secretsmanager:local-1:{account}:secret:{name}")
+	res := httpx.Res("arn:aws:secretsmanager:{region}:{account}:secret:{name}")
 	r.Handle("GET /api/v1/secrets", "secretsmanager:ListSecrets", s.list)
 	r.Handle("POST /api/v1/secrets", "secretsmanager:CreateSecret", s.create)
 	r.Handle("GET /api/v1/secrets/{name}", "secretsmanager:DescribeSecret", s.describe, res)

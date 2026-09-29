@@ -163,7 +163,7 @@ func (s *Service) newRepo(name string, mutable bool, desc string) Repository {
 }
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:ecr:local-1:{account}:repository/{name}")
+	res := httpx.Res("arn:aws:ecr:{region}:{account}:repository/{name}")
 	r.Handle("GET /api/v1/ecr/status", "ecr:DescribeRegistry", s.registryStatus)
 	r.Handle("GET /api/v1/ecr/repositories", "ecr:DescribeRepositories", s.list)
 	r.Handle("POST /api/v1/ecr/repositories", "ecr:CreateRepository", s.create)

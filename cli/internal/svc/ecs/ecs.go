@@ -359,9 +359,9 @@ func (e *ECS) reconcile(ctx context.Context) {
 func (e *ECS) Routes(r *httpx.Router) {
 	r.Handle("GET /api/v1/ecs/task-definitions", "ecs:ListTaskDefinitions", e.listTDs)
 	r.Handle("POST /api/v1/ecs/task-definitions", "ecs:RegisterTaskDefinition", e.registerTD)
-	tdRes := httpx.Res("arn:hc:ecs:local-1:{account}:task-definition/{key}")
-	svcRes := httpx.Res("arn:hc:ecs:local-1:{account}:service/{name}")
-	taskRes := httpx.Res("arn:hc:ecs:local-1:{account}:task/{id}")
+	tdRes := httpx.Res("arn:aws:ecs:{region}:{account}:task-definition/{key}")
+	svcRes := httpx.Res("arn:aws:ecs:{region}:{account}:service/{name}")
+	taskRes := httpx.Res("arn:aws:ecs:{region}:{account}:task/{id}")
 	r.Handle("GET /api/v1/ecs/task-definitions/{key}", "ecs:DescribeTaskDefinition", e.getTD, tdRes)
 	r.Handle("DELETE /api/v1/ecs/task-definitions/{key}", "ecs:DeregisterTaskDefinition", e.deregisterTD, tdRes)
 	r.Handle("GET /api/v1/ecs/services", "ecs:ListServices", e.listServices)

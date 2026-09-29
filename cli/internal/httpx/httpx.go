@@ -27,6 +27,9 @@ type Principal struct {
 	ARN       string `json:"arn"`
 	Root      bool   `json:"root"`
 	AccessKey string `json:"access_key,omitempty"`
+	// RoleName and SessionName are set for temporary role credentials (STS).
+	RoleName    string `json:"role_name,omitempty"`
+	SessionName string `json:"session_name,omitempty"`
 	// Can reports whether the principal may perform action on resource.
 	Can func(action, resource string) bool `json:"-"`
 }
@@ -104,7 +107,7 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 		c := &Ctx{W: w, R: r, Account: rt.Account}
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 		c.W = sw
-		resource := strings.ReplaceAll(o.resource, "{account}", rt.Account)
+		resource := strings.ReplaceAll(strings.ReplaceAll(o.resource, "{account}", rt.Account), "{region}", core.Region)
 		resource = placeholder.ReplaceAllStringFunc(resource, func(m string) string {
 			return r.PathValue(m[1 : len(m)-1])
 		})

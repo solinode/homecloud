@@ -173,7 +173,7 @@ func (s *Service) get(id string) (Instance, error) {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:ec2:local-1:{account}:instance/{id}")
+	res := httpx.Res("arn:aws:ec2:{region}:{account}:instance/{id}")
 	r.Handle("GET /api/v1/ec2/instances", "ec2:DescribeInstances", s.listRoute)
 	r.Handle("POST /api/v1/ec2/instances", "ec2:RunInstances", s.run)
 	r.Handle("GET /api/v1/ec2/instances/{id}", "ec2:DescribeInstances", s.getRoute, res)
@@ -190,8 +190,8 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("GET /api/v1/ec2/instance-types", "ec2:DescribeInstanceTypes", s.listTypes)
 	r.Handle("GET /api/v1/ec2/images", "ec2:DescribeImages", s.listImages)
 	r.Handle("POST /api/v1/ec2/images", "ec2:RegisterImage", s.registerImage)
-	imgRes := httpx.Res("arn:hc:ec2:local-1:{account}:image/{id}")
-	volRes := httpx.Res("arn:hc:ec2:local-1:{account}:volume/{id}")
+	imgRes := httpx.Res("arn:aws:ec2:{region}:{account}:image/{id}")
+	volRes := httpx.Res("arn:aws:ec2:{region}:{account}:volume/{id}")
 	r.Handle("GET /api/v1/ec2/images/{id}", "ec2:DescribeImages", s.getImage, imgRes)
 	r.Handle("DELETE /api/v1/ec2/images/{id}", "ec2:DeregisterImage", s.deregisterImage, imgRes)
 

@@ -19,7 +19,7 @@ Every route lives under the server address (default `http://127.0.0.1:8080`). Re
 
 **Authentication.** Send `Authorization: Bearer <token>` where the token is either a console session token from `POST /api/v1/auth/login` or an access key in the form `<access key id>:<secret access key>`. GET requests may pass the token as `?access_token=` instead (used for browser downloads and WebSockets).
 
-**Authorization.** Each route is guarded by the IAM action listed below. Policies can scope actions to resource ARNs such as `arn:hc:s3:::my-bucket` or `arn:hc:ec2:local-1:<account>:instance/i-123`. Path parameters that contain `/` (secret and log group names) must be URL-encoded.
+**Authorization.** Each route is guarded by the IAM action listed below. Policies can scope actions to resource ARNs such as `arn:aws:s3:::my-bucket` or `arn:aws:ec2:us-east-1:<account>:instance/i-123`. Path parameters that contain `/` (secret and log group names) must be URL-encoded.
 
 **Errors** look like `{"error": {"code": "ResourceNotFound", "message": "..."}}` with a matching HTTP status.
 

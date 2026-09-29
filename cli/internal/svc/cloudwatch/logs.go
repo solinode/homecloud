@@ -312,7 +312,7 @@ func ContainerEvents(raw, stream string) []LogEvent {
 }
 
 func (s *Service) logRoutes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:logs:local-1:{account}:log-group:{group}")
+	res := httpx.Res("arn:aws:logs:{region}:{account}:log-group:{group}")
 	r.Handle("GET /api/v1/logs/groups", "logs:DescribeLogGroups", s.listGroups)
 	r.Handle("POST /api/v1/logs/groups", "logs:CreateLogGroup", s.createGroup)
 	r.Handle("DELETE /api/v1/logs/groups/{group}", "logs:DeleteLogGroup", s.deleteGroup, res)

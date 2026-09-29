@@ -26,7 +26,7 @@ export const queuePath = (name: string) => `${QUEUES_PATH}/${seg(name)}`
 
 export const queueHref = (name: string, tab?: string) => `/sqs/queue/?name=${encodeURIComponent(name)}${tab ? `&tab=${tab}` : ""}`
 
-/** "arn:hc:sqs:local-1:123:jobs" -> "jobs" (also returns plain names unchanged). */
+/** "arn:aws:sqs:us-east-1:123:jobs" -> "jobs" (also returns plain names unchanged). */
 export const nameFromArn = (arn: string) => arn.slice(arn.lastIndexOf(":") + 1)
 
 export function useQueues(refreshInterval = QUEUE_POLL) {

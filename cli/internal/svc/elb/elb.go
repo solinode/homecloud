@@ -507,8 +507,8 @@ func (s *Service) check(ctx context.Context, lb LoadBalancer, tg TargetGroup) bo
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	lbRes := httpx.Res("arn:hc:elasticloadbalancing:local-1:{account}:loadbalancer/app/{name}")
-	tgRes := httpx.Res("arn:hc:elasticloadbalancing:local-1:{account}:targetgroup/{name}")
+	lbRes := httpx.Res("arn:aws:elasticloadbalancing:{region}:{account}:loadbalancer/app/{name}")
+	tgRes := httpx.Res("arn:aws:elasticloadbalancing:{region}:{account}:targetgroup/{name}")
 	r.Handle("GET /api/v1/elb/load-balancers", "elasticloadbalancing:DescribeLoadBalancers", s.listLBs)
 	r.Handle("POST /api/v1/elb/load-balancers", "elasticloadbalancing:CreateLoadBalancer", s.createLB)
 	r.Handle("GET /api/v1/elb/load-balancers/{name}", "elasticloadbalancing:DescribeLoadBalancers", s.getLB, lbRes)

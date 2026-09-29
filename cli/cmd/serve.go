@@ -124,6 +124,43 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 	}
 	apiCmd.Flags().StringVarP(&data, "data", "d", "", "JSON request body ('-' reads stdin)")
 	RootCmd.AddCommand(apiCmd)
+
+	var fish bool
+	awsEnv := &cobra.Command{
+		Use:   "aws-env",
+		Short: "Print environment variables that point the AWS CLI and SDKs at HomeCloud",
+		Long: `Prints AWS_ENDPOINT_URL, credentials and region for the current HomeCloud
+credentials, so AWS tools work against HomeCloud:
+
+  eval "$(homecloud aws-env)"
+  aws s3 ls`,
+		Args: cobra.NoArgs,
+		RunE: func(cmd *cobra.Command, args []string) error {
+			p, err := client.Load()
+			if err != nil {
+				return err
+			}
+			region := p.Region
+			if region == "" || region == core.LegacyRegion {
+				region = core.DefaultRegion
+			}
+			vars := [][2]string{{"AWS_ENDPOINT_URL", p.Endpoint}, {"AWS_ACCESS_KEY_ID", p.AccessKeyID},
+				{"AWS_SECRET_ACCESS_KEY", p.SecretAccessKey}, {"AWS_REGION", region}}
+			if p.CAFile != "" {
+				vars = append(vars, [2]string{"AWS_CA_BUNDLE", p.CAFile})
+			}
+			for _, v := range vars {
+				if fish {
+					fmt.Printf("set -gx %s %q;\n", v[0], v[1])
+				} else {
+					fmt.Printf("export %s=%q\n", v[0], v[1])
+				}
+			}
+			return nil
+		},
+	}
+	awsEnv.Flags().BoolVar(&fish, "fish", false, "print fish shell syntax")
+	RootCmd.AddCommand(awsEnv)
 }
 
 // mergeConfig loads the saved config, applies explicitly set flags and saves the result.

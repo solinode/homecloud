@@ -14,7 +14,7 @@ export const CERTS_PATH = `${ACM_PATH}/certificates`
 
 export const certHref = (id: string) => `/acm/certificate/?id=${encodeURIComponent(id)}`
 
-/** certIdFromArn extracts the certificate id from "arn:hc:acm:...:certificate/<id>". */
+/** certIdFromArn extracts the certificate id from "arn:aws:acm:...:certificate/<id>". */
 export const certIdFromArn = (arn: string) => arn.slice(arn.lastIndexOf("/") + 1)
 
 export const EXPIRY_WARNING_DAYS = 30

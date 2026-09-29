@@ -8,11 +8,14 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
+	goruntime "runtime"
 	"strings"
 	"time"
 
+	"github.com/homecloudhq/homecloud/cli/internal/awsapi"
 	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
 	"github.com/homecloudhq/homecloud/cli/internal/runtime"
@@ -76,6 +79,13 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return err
 	}
+	if err := migrateLegacyRegion(&cfg, logf); err != nil {
+		return fmt.Errorf("migrate region: %w", err)
+	}
+	if cfg.Region == "" {
+		cfg.Region = core.DefaultRegion
+	}
+	core.Region = cfg.Region
 	st, err := store.Open(cfg.Path("state.json"))
 	if err != nil {
 		return err
@@ -98,8 +108,19 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		}
 	}
 	env := &svc.Env{Cfg: cfg, Store: st, Docker: dk, AccountID: account}
+	_, apiPort, _ := net.SplitHostPort(cfg.APIAddr)
+	scheme0 := "http"
+	if cfg.TLSCert != "" {
+		scheme0 = "https"
+	}
+	env.ContainerAPI = scheme0 + "://host.docker.internal:" + apiPort
 
+	secSvc, err := secrets.New(env)
+	if err != nil {
+		return err
+	}
 	iamSvc := iam.New(env)
+	iamSvc.Seal = secSvc
 	boot, err := iamSvc.Bootstrap()
 	if err != nil {
 		return fmt.Errorf("bootstrap iam: %w", err)
@@ -130,10 +151,6 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		logf("root console password reset to: %s", pw)
 	}
 
-	secSvc, err := secrets.New(env)
-	if err != nil {
-		return err
-	}
 	cw, err := cloudwatch.New(env)
 	if err != nil {
 		return err
@@ -224,6 +241,8 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, asgSvc, acmSvc, dnsSvc, trailSvc} {
 		s.Routes(rt)
 	}
+	iamSvc.RegisterAWS()
+	awsHandler := &awsapi.Handler{Creds: iamSvc, Account: account, Audit: trailSvc.Record}
 	if len(httpx.Unscoped) > 0 {
 		return fmt.Errorf("internal error: routes without a resource ARN: %v", httpx.Unscoped)
 	}
@@ -269,6 +288,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		for {
 			trailSvc.Prune()
 			secSvc.PurgeExpired()
+			iamSvc.PurgeExpired()
 			kmsSvc.Maintain()
 			select {
 			case <-ctx.Done():
@@ -278,7 +298,16 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		}
 	}()
 
-	srv := &http.Server{Addr: cfg.APIAddr, Handler: withCORS(sandboxUserContent(mux)), ReadHeaderTimeout: 10 * time.Second}
+	native := withCORS(sandboxUserContent(mux))
+	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// AWS SDK/CLI requests (SigV4-signed, or X-Amz-Target) take the AWS protocols.
+		if awsapi.Match(r) && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
+			awsHandler.ServeHTTP(w, r)
+			return
+		}
+		native.ServeHTTP(w, r)
+	})
+	srv := &http.Server{Addr: cfg.APIAddr, Handler: root, ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
 	go func() {
 		if cfg.TLSCert != "" {
@@ -287,6 +316,27 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		}
 		errc <- srv.ListenAndServe()
 	}()
+	// On Linux, containers reach the host through the bridge gateway, which a
+	// loopback-only API address doesn't cover: listen there too.
+	if goruntime.GOOS == "linux" {
+		if host, _, _ := net.SplitHostPort(cfg.APIAddr); host == "127.0.0.1" || host == "localhost" {
+			if gw := dk.BridgeGateway(); gw != "" {
+				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: root, ReadHeaderTimeout: 10 * time.Second}
+				go func() {
+					var err error
+					if cfg.TLSCert != "" {
+						err = extra.ListenAndServeTLS(cfg.TLSCert, cfg.TLSKey)
+					} else {
+						err = extra.ListenAndServe()
+					}
+					if err != nil && !errors.Is(err, http.ErrServerClosed) {
+						logf("container endpoint %s: %v", extra.Addr, err)
+					}
+				}()
+				defer extra.Close()
+			}
+		}
+	}
 	logf("HomeCloud %s listening on %s (data: %s)", Version, endpoint, cfg.DataDir)
 	select {
 	case <-ctx.Done():

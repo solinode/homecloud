@@ -492,7 +492,7 @@ export function ConsoleHome() {
                     value: health.error ? <StatusBadge status="error" label="Unreachable" /> : <StatusBadge status={health.data?.status ?? "ok"} tone="success" label="Healthy" />,
                   },
                   { label: "Version", value: health.data?.version },
-                  { label: "Region", value: <span className="font-mono">{health.data?.region ?? "local-1"}</span> },
+                  { label: "Region", value: <span className="font-mono">{health.data?.region ?? "us-east-1"}</span> },
                   { label: "Uptime", value: health.data ? formatDuration(health.data.uptime_seconds) : "-" },
                   { label: "Account ID", value: <CopyableText value={session.account_id} /> },
                   { label: "Signed in as", value: session.user.name },

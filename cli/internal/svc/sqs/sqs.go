@@ -447,7 +447,7 @@ func (s *Service) QueueARN(name string) (string, bool) {
 	return q.ARN, err == nil
 }
 
-// NameFromARN resolves "arn:hc:sqs:<region>:<account>:<name>".
+// NameFromARN resolves "arn:aws:sqs:<region>:<account>:<name>".
 func NameFromARN(arn string) string {
 	i := strings.LastIndex(arn, ":")
 	return arn[i+1:]
@@ -456,7 +456,7 @@ func NameFromARN(arn string) string {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:sqs:local-1:{account}:{name}")
+	res := httpx.Res("arn:aws:sqs:{region}:{account}:{name}")
 	r.Handle("GET /api/v1/sqs/queues", "sqs:ListQueues", s.list)
 	r.Handle("POST /api/v1/sqs/queues", "sqs:CreateQueue", s.create)
 	r.Handle("GET /api/v1/sqs/queues/{name}", "sqs:GetQueueAttributes", s.get, res)

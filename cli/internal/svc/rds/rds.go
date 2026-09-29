@@ -213,7 +213,7 @@ func (s *Service) get(id string) (Instance, error) {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:rds:local-1:{account}:db:{id}")
+	res := httpx.Res("arn:aws:rds:{region}:{account}:db:{id}")
 	r.Handle("GET /api/v1/rds/engines", "rds:DescribeDBEngineVersions", s.listEngines)
 	r.Handle("GET /api/v1/rds/instances", "rds:DescribeDBInstances", s.list)
 	r.Handle("POST /api/v1/rds/instances", "rds:CreateDBInstance", s.create)
@@ -228,7 +228,7 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("GET /api/v1/rds/instances/{id}/logs", "rds:DownloadDBLogFilePortion", s.logs, res)
 	r.Handle("POST /api/v1/rds/instances/{id}/snapshots", "rds:CreateDBSnapshot", s.createSnapshot, res)
 	r.Handle("GET /api/v1/rds/snapshots", "rds:DescribeDBSnapshots", s.listSnapshots)
-	snapRes := httpx.Res("arn:hc:rds:local-1:{account}:snapshot:{snap}")
+	snapRes := httpx.Res("arn:aws:rds:{region}:{account}:snapshot:{snap}")
 	r.Handle("DELETE /api/v1/rds/snapshots/{snap}", "rds:DeleteDBSnapshot", s.deleteSnapshot, snapRes)
 	r.Handle("POST /api/v1/rds/snapshots/{snap}/restore", "rds:RestoreDBInstanceFromDBSnapshot", s.restore, snapRes)
 }

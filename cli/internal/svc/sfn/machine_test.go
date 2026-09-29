@@ -57,7 +57,7 @@ func run(t *testing.T, def string, input any) (any, error, *fakeTasks) {
 func TestPipeline(t *testing.T) {
 	def := `{"StartAt":"Init","States":{
 	  "Init":{"Type":"Pass","Result":{"n":3},"ResultPath":"$.data","Next":"Double"},
-	  "Double":{"Type":"Task","Resource":"arn:hc:lambda:local-1:1:function:double","InputPath":"$.data","ResultPath":"$.doubled","Next":"Check"},
+	  "Double":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:double","InputPath":"$.data","ResultPath":"$.doubled","Next":"Check"},
 	  "Check":{"Type":"Choice","Choices":[{"Variable":"$.doubled.n","NumericGreaterThan":5,"Next":"Big"}],"Default":"Small"},
 	  "Big":{"Type":"Pass","Parameters":{"size":"big","value.$":"$.doubled.n","msg.$":"States.Format('n={} for {}', $.doubled.n, $$.Execution.Name)"},"End":true},
 	  "Small":{"Type":"Fail","Error":"TooSmall"}}}`
@@ -73,8 +73,8 @@ func TestPipeline(t *testing.T) {
 
 func TestRetryAndCatch(t *testing.T) {
 	def := `{"StartAt":"Flaky","States":{
-	  "Flaky":{"Type":"Task","Resource":"arn:hc:lambda:local-1:1:function:flaky","Retry":[{"ErrorEquals":["TransientError"],"IntervalSeconds":0.01,"MaxAttempts":3}],"Next":"Broken"},
-	  "Broken":{"Type":"Task","Resource":"arn:hc:lambda:local-1:1:function:broken","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.err","Next":"Handled"}],"End":true},
+	  "Flaky":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:flaky","Retry":[{"ErrorEquals":["TransientError"],"IntervalSeconds":0.01,"MaxAttempts":3}],"Next":"Broken"},
+	  "Broken":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:broken","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":"$.err","Next":"Handled"}],"End":true},
 	  "Handled":{"Type":"Pass","End":true}}}`
 	out, err, ft := run(t, def, map[string]any{})
 	if err != nil {
@@ -90,7 +90,7 @@ func TestRetryAndCatch(t *testing.T) {
 }
 
 func TestUncaughtFailure(t *testing.T) {
-	_, err, _ := run(t, `{"StartAt":"B","States":{"B":{"Type":"Task","Resource":"arn:hc:lambda:local-1:1:function:broken","End":true}}}`, map[string]any{})
+	_, err, _ := run(t, `{"StartAt":"B","States":{"B":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:broken","End":true}}}`, map[string]any{})
 	se, ok := err.(*StateError)
 	if !ok || se.Name != "ValueError" {
 		t.Fatalf("got %v", err)
@@ -100,11 +100,11 @@ func TestUncaughtFailure(t *testing.T) {
 func TestMapAndParallel(t *testing.T) {
 	def := `{"StartAt":"Each","States":{
 	  "Each":{"Type":"Map","ItemsPath":"$.items","MaxConcurrency":2,
-	    "ItemProcessor":{"StartAt":"D","States":{"D":{"Type":"Task","Resource":"arn:hc:lambda:local-1:1:function:double","End":true}}},
+	    "ItemProcessor":{"StartAt":"D","States":{"D":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:double","End":true}}},
 	    "ResultPath":"$.results","Next":"Both"},
 	  "Both":{"Type":"Parallel","Branches":[
 	    {"StartAt":"A","States":{"A":{"Type":"Pass","Result":"a","End":true}}},
-	    {"StartAt":"Q","States":{"Q":{"Type":"Task","Resource":"arn:hc:states:::sqs:sendMessage","Parameters":{"QueueName":"q","MessageBody.$":"$.results"},"End":true}}}],
+	    {"StartAt":"Q","States":{"Q":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueName":"q","MessageBody.$":"$.results"},"End":true}}}],
 	    "ResultPath":"$.parallel","End":true}}}`
 	out, err, ft := run(t, def, map[string]any{"items": []any{map[string]any{"n": 1.0}, map[string]any{"n": 2.0}, map[string]any{"n": 3.0}}})
 	if err != nil {
@@ -159,7 +159,7 @@ func TestReviewRegressions(t *testing.T) {
 	// Catch with ResultPath null passes the failing state's input through.
 	out, err, _ := run(t, `{"StartAt":"A","States":{
 	  "A":{"Type":"Pass","Result":{"x":"state-input"},"Next":"B"},
-	  "B":{"Type":"Task","Resource":"arn:hc:lambda:local-1:1:function:broken","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":null,"Next":"C"}],"End":true},
+	  "B":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:broken","Catch":[{"ErrorEquals":["States.ALL"],"ResultPath":null,"Next":"C"}],"End":true},
 	  "C":{"Type":"Pass","End":true}}}`, map[string]any{"orig": true})
 	if err != nil || out.(map[string]any)["x"] != "state-input" {
 		t.Fatalf("ResultPath null: %v %v", out, err)
@@ -173,14 +173,14 @@ func TestReviewRegressions(t *testing.T) {
 
 func TestTaskPermissions(t *testing.T) {
 	m, _ := parse(json.RawMessage(`{"StartAt":"A","States":{
-	  "A":{"Type":"Task","Resource":"arn:hc:lambda:local-1:1:function:f1","Next":"B"},
-	  "B":{"Type":"Task","Resource":"arn:hc:states:::sqs:sendMessage","Parameters":{"QueueName":"q1","MessageBody":"x"},"Next":"C"},
-	  "C":{"Type":"Task","Resource":"arn:hc:states:::lambda:invoke","Parameters":{"FunctionName.$":"$.fn"},"End":true}}}`))
+	  "A":{"Type":"Task","Resource":"arn:aws:lambda:us-east-1:1:function:f1","Next":"B"},
+	  "B":{"Type":"Task","Resource":"arn:aws:states:::sqs:sendMessage","Parameters":{"QueueName":"q1","MessageBody":"x"},"Next":"C"},
+	  "C":{"Type":"Task","Resource":"arn:aws:states:::lambda:invoke","Parameters":{"FunctionName.$":"$.fn"},"End":true}}}`))
 	got := map[string]bool{}
 	for _, p := range taskPermissions(m, "1") {
 		got[p[0]+" "+p[1]] = true
 	}
-	for _, want := range []string{"lambda:InvokeFunction arn:hc:lambda:local-1:1:function:f1", "sqs:SendMessage arn:hc:sqs:local-1:1:q1", "lambda:InvokeFunction *"} {
+	for _, want := range []string{"lambda:InvokeFunction arn:aws:lambda:us-east-1:1:function:f1", "sqs:SendMessage arn:aws:sqs:us-east-1:1:q1", "lambda:InvokeFunction *"} {
 		if !got[want] {
 			t.Errorf("missing %s in %v", want, got)
 		}

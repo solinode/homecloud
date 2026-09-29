@@ -283,7 +283,7 @@ func view(st *Stack) map[string]any {
 // ---- routes ----
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:hc:cloudformation:local-1:{account}:stack/{name}")
+	res := httpx.Res("arn:aws:cloudformation:{region}:{account}:stack/{name}")
 	r.Handle("GET /api/v1/cloudformation/stacks", "cloudformation:ListStacks", s.list)
 	r.Handle("POST /api/v1/cloudformation/stacks", "cloudformation:CreateStack", s.create)
 	r.Handle("GET /api/v1/cloudformation/stacks/{name}", "cloudformation:DescribeStacks", s.get, res)

@@ -111,7 +111,7 @@ export function PolicySimulator() {
                     </Select>
                   )}
                 </Field>
-                <Field label="Resource ARN" htmlFor="sim-resource" help="Use * for all resources, or an ARN such as arn:hc:s3:::my-bucket/*">
+                <Field label="Resource ARN" htmlFor="sim-resource" help="Use * for all resources, or an ARN such as arn:aws:s3:::my-bucket/*">
                   <Input id="sim-resource" value={resource} onChange={(e) => setResource(e.target.value)} className="font-mono text-[13px]" />
                 </Field>
               </div>
