@@ -3,6 +3,7 @@ package store
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 type doc struct {
@@ -35,5 +36,31 @@ func TestStorePersistence(t *testing.T) {
 	}
 	if _, err := Get[doc](s2, "c", "zzz"); err != ErrNotFound {
 		t.Fatal("expected ErrNotFound")
+	}
+}
+
+func TestUpdateMayReadStore(t *testing.T) {
+	s, _ := Open(filepath.Join(t.TempDir(), "s.json"))
+	_ = Put(s, "c", "a", doc{1})
+	_ = Put(s, "c", "b", doc{5})
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		_, err := Update(s, "c", "a", func(d *doc) error {
+			other, err := Get[doc](s, "c", "b") // must not deadlock
+			d.N += other.N
+			return err
+		})
+		if err != nil {
+			t.Error(err)
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(2 * time.Second):
+		t.Fatal("Update deadlocked when fn read the store")
+	}
+	if d, _ := Get[doc](s, "c", "a"); d.N != 6 {
+		t.Fatalf("got %d", d.N)
 	}
 }

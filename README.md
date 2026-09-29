@@ -29,7 +29,9 @@ No third parties. No vendor lock-in. No surprise billing.
 | Service | AWS equivalent | What you get |
 | --- | --- | --- |
 | **Compute** | EC2, EBS, AMIs | Instances with CPU/memory limits from `t3.nano` to `r5.large`, 10 base images (Ubuntu, Debian, Amazon Linux, Rocky, Fedora, Alpine, …), user-data scripts, start/stop/reboot/resize, persistent volumes, capture an instance as a new image, run-command, and a shell in the browser |
-| **Networking** | VPC | VPCs and subnets with real private IP addressing, private DNS (`ip-10-88-0-4.internal`, `mydb.rds.internal`), security groups that decide which ports are published |
+| **Shared files** | EFS | File systems that any number of instances mount at the same time |
+| **Containers** | ECS (Fargate), ECR | Versioned task definitions with secrets injected from Secrets Manager, services that keep N tasks running with rolling deployments and load-balancer registration, one-off tasks, and a private image registry you `docker push` to |
+| **Networking** | VPC, ELB | VPCs and subnets with real private IP addressing, private DNS (`ip-10-88-0-4.internal`, `mydb.rds.internal`), security groups that decide which ports are published; application load balancers with listeners, path/host routing rules, target groups and health checks |
 | **Object storage** | S3 | Buckets, folders, uploads/downloads, versioning, public-read access, lifecycle expiry, presigned URLs, static website hosting, and a fully S3-compatible endpoint for AWS SDKs and `aws` CLI |
 | **Databases** | RDS, ElastiCache, DocumentDB | PostgreSQL, MySQL, MariaDB, MongoDB, Redis, Valkey, Memcached with generated credentials in Secrets Manager, snapshots and restore, daily automated backups, resizing, password rotation and a query editor |
 | **Serverless** | Lambda, API Gateway | Python 3.11–3.13 and Node.js 20/22 functions with warm environments, env vars, timeouts, logs and metrics; public function URLs; HTTP APIs with path parameters; SQS triggers with partial-batch failures |
@@ -38,7 +40,7 @@ No third parties. No vendor lock-in. No surprise billing.
 | **Key-value** | DynamoDB | Tables with partition/sort keys, range queries, scans with filters, secondary indexes, conditional writes, atomic counters, TTL |
 | **Events** | EventBridge | Scheduled rules (`rate(...)`, `cron(...)`), event buses with pattern matching, targets in Lambda/SQS/SNS |
 | **Identity** | IAM | Users, groups, managed and custom JSON policies with allow/deny and resource ARNs, access keys, console passwords, a policy simulator |
-| **Secrets** | Secrets Manager | Versioned secrets encrypted with AES-256-GCM, recovery windows, random passwords |
+| **Secrets & keys** | Secrets Manager, KMS, SSM Parameter Store | Versioned secrets, customer keys with encrypt/decrypt, data keys, rotation and encryption context, hierarchical configuration parameters with SecureString values |
 | **Monitoring** | CloudWatch | Per-resource CPU/memory/network/disk metrics, custom metrics, alarms that notify SNS topics or webhooks, log groups for every function and container |
 | **Audit** | CloudTrail | A record of every change and every denied request, with who, what, when and from where |
 
@@ -107,6 +109,13 @@ homecloud lambda trigger resize jobs
 # Schedules and events
 homecloud events schedule nightly 'cron(0 3 ? * * *)' --target arn:hc:lambda:local-1:<account>:function:resize
 
+# Containers behind a load balancer
+docker tag myapi localhost:5500/myapi:1 && docker push localhost:5500/myapi:1
+homecloud elb create-target-group api-tg --port 8000
+homecloud elb create web --listen 80=api-tg
+homecloud ecs register api --image localhost:5500/myapi:1 --port 8000 --secret DB_PASS=prod/db:password
+homecloud ecs create-service api api --count 3 --target-group api-tg
+
 # Anything else
 homecloud api GET /api/v1/cloudwatch/alarms
 ```
@@ -129,7 +138,8 @@ aws --endpoint-url http://localhost:9500 s3 ls
 * ✅ **Phase 1:** Core cloud stack: compute, storage, networking, web console, CLI and API
 * ✅ **Phase 2:** Serverless and event-driven services: Lambda, API Gateway, SQS, SNS, EventBridge, DynamoDB
 * ✅ **Phase 3 (first cut):** Observability and governance: CloudWatch metrics/logs/alarms, CloudTrail, IAM, Secrets Manager
-* 🔄 **Next:** VM-backed instances (QEMU/KVM), load balancers with TLS (ELB/ACM), DNS (Route 53), container registry (ECR), infrastructure as code, multi-node clusters
+* ✅ **Containers:** ECS services and tasks, ECR registry, load balancers, shared file systems
+* 🔄 **Next:** VM-backed instances (QEMU/KVM), TLS certificates (ACM), DNS (Route 53), Step Functions, infrastructure as code, multi-node clusters
 * 🔄 **Phase 4:** Edge compute and hardware integrations
 
 📍 **[Explore the full roadmap](https://github.com/orgs/homecloudhq/projects/1/views/1)**

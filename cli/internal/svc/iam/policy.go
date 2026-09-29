@@ -135,4 +135,12 @@ var builtinPolicies = []struct {
 	{"SecretsManagerReadWrite", "Full access to secrets.", doc("Allow", "secretsmanager:*")},
 	{"DynamoDBFullAccess", "Full access to key-value tables.", doc("Allow", "dynamodb:*")},
 	{"EventBridgeFullAccess", "Full access to scheduled rules.", doc("Allow", "events:*")},
+	{"KMSFullAccess", "Full access to encryption keys.", doc("Allow", "kms:*")},
+	{"SSMFullAccess", "Full access to Parameter Store.", doc("Allow", "ssm:*")},
+	{"SSMReadOnlyAccess", "Read access to Parameter Store.", doc("Allow", "ssm:Get*", "ssm:Describe*")},
+	{"ECRFullAccess", "Full access to container repositories.", doc("Allow", "ecr:*")},
+	{"ECSFullAccess", "Full access to container services and tasks.", doc("Allow", "ecs:*", "elasticloadbalancing:*")},
+	{"ElasticLoadBalancingFullAccess", "Full access to load balancers and target groups.", doc("Allow", "elasticloadbalancing:*")},
+	{"EFSFullAccess", "Full access to shared file systems.", doc("Allow", "elasticfilesystem:*")},
+	{"APIGatewayFullAccess", "Full access to HTTP APIs.", doc("Allow", "apigateway:*")},
 }

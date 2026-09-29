@@ -144,6 +144,8 @@ var namespaces = map[string]struct{ ns, dim string }{
 	"rds":         {"HC/RDS", "DBInstanceIdentifier"},
 	"elasticache": {"HC/ElastiCache", "CacheClusterId"},
 	"s3":          {"HC/S3", "Service"},
+	"ecs":         {"HC/ECS", "TaskId"},
+	"elb":         {"HC/ELB", "LoadBalancer"},
 }
 
 // Run samples managed containers and evaluates alarms until ctx is done.

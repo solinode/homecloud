@@ -15,7 +15,8 @@ import (
 var ErrNotFound = errors.New("not found")
 
 type Store struct {
-	mu   sync.RWMutex
+	mu   sync.RWMutex // guards data
+	umu  sync.Mutex   // serialises Update calls
 	path string
 	data map[string]map[string]json.RawMessage
 }
@@ -116,12 +117,17 @@ func Delete(s *Store, coll, id string) error {
 	return s.flush()
 }
 
-// Update applies fn to the stored document under a write lock and persists the result.
+// Update applies fn to the stored document and persists the result. Updates
+// are serialised, and fn runs without holding the data lock, so it may read
+// the store (directly or through callbacks) without deadlocking. fn must not
+// call Update itself.
 func Update[T any](s *Store, coll, id string, fn func(*T) error) (T, error) {
 	var v T
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.umu.Lock()
+	defer s.umu.Unlock()
+	s.mu.RLock()
 	b, ok := s.data[coll][id]
+	s.mu.RUnlock()
 	if !ok {
 		return v, ErrNotFound
 	}
@@ -134,6 +140,11 @@ func Update[T any](s *Store, coll, id string, fn func(*T) error) (T, error) {
 	nb, err := json.Marshal(v)
 	if err != nil {
 		return v, err
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if _, ok := s.data[coll][id]; !ok {
+		return v, ErrNotFound // deleted while fn ran
 	}
 	s.data[coll][id] = nb
 	return v, s.flush()
