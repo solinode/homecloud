@@ -24,6 +24,8 @@ import { ApiError, api, seg } from "@/lib/api"
 import { formatDate, pluralize } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { ElbListener, ElbRule, LoadBalancer, LoadBalancerConfig } from "@/lib/types"
+import { certHref, certIdFromArn, useCertificates } from "@/components/acm/shared"
+import type { Certificate } from "@/lib/types"
 import { DeleteLoadBalancerDialog } from "./lb-list"
 import { AddListenerDialog, AddRuleDialog, ReprovisionWarning } from "./listener-dialogs"
 import {
@@ -177,7 +179,7 @@ function DetailsTab({ lb }: { lb: LoadBalancer }) {
             { label: "Scheme", value: lb.scheme === "internal" ? "Internal" : "Internet-facing" },
             { label: "DNS name", value: <CopyableText value={lb.dns_name} /> },
             { label: "Private IPv4 address", value: lb.private_ip ? <CopyableText value={lb.private_ip} /> : "" },
-            { label: "Type", value: "Application (HTTP)" },
+            { label: "Type", value: lb.listeners.some((l) => l.protocol === "HTTPS") ? "Application (HTTP/HTTPS)" : "Application (HTTP)" },
             {
               label: "VPC",
               value: (
@@ -214,7 +216,13 @@ function DetailsTab({ lb }: { lb: LoadBalancer }) {
         <ul className="flex flex-col gap-1">
           {lb.listeners.map((l) => (
             <li key={l.id}>
-              <CopyableText value={`http://${lb.dns_name}${l.port === 80 ? "" : `:${l.port}`}`} />
+              <CopyableText
+                value={
+                  l.protocol === "HTTPS"
+                    ? `https://${lb.dns_name}${l.port === 443 ? "" : `:${l.port}`}`
+                    : `http://${lb.dns_name}${l.port === 80 ? "" : `:${l.port}`}`
+                }
+              />
             </li>
           ))}
         </ul>
@@ -232,6 +240,7 @@ function ListenersTab({ lb }: { lb: LoadBalancer }) {
   const [deletingListener, setDeletingListener] = useState<ElbListener | null>(null)
   const [deletingRule, setDeletingRule] = useState<{ listener: ElbListener; rule: ElbRule } | null>(null)
   const busy = isLbTransitional(lb.state)
+  const certs = useCertificates()
 
   const listeners = [...lb.listeners].sort((a, b) => a.port - b.port)
 
@@ -260,13 +269,13 @@ function ListenersTab({ lb }: { lb: LoadBalancer }) {
                 </span>
                 {pub ? (
                   <a
-                    href={publicUrl(lb, pub)}
+                    href={publicUrl(lb, pub, l.protocol === "HTTPS")}
                     target="_blank"
                     rel="noreferrer"
                     className="text-primary inline-flex items-center gap-1 font-mono text-[13px] font-normal hover:underline"
                   >
                     <ArrowRight className="text-muted-foreground size-3.5" />
-                    {publicUrl(lb, pub).replace("http://", "")}
+                    {publicUrl(lb, pub, l.protocol === "HTTPS").replace("http://", "")}
                     <ExternalLink className="size-3" />
                   </a>
                 ) : l.public_port && lb.scheme === "internet-facing" ? (
@@ -274,10 +283,21 @@ function ListenersTab({ lb }: { lb: LoadBalancer }) {
                 ) : null}
               </span>
             }
-            description={<span className="font-mono text-xs">Listener {l.id}</span>}
+            description={
+              <span className="flex flex-wrap items-center gap-x-3 gap-y-0.5">
+                <span className="font-mono text-xs">Listener {l.id}</span>
+                {l.protocol === "HTTPS" && l.certificate_arn && <ListenerCert arn={l.certificate_arn} certs={certs.data} />}
+              </span>
+            }
             actions={
               <div className="flex flex-wrap gap-2">
-                <Button size="sm" variant="outline" onClick={() => setRuleFor(l)} disabled={busy}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setRuleFor(l)}
+                  disabled={busy || !!l.redirect_https_port}
+                  title={l.redirect_https_port ? "A redirect listener sends every request to HTTPS; rules do not apply" : undefined}
+                >
                   <Plus /> Add rule
                 </Button>
                 <Button
@@ -343,10 +363,19 @@ function ListenersTab({ lb }: { lb: LoadBalancer }) {
                   ))}
                   <tr className="bg-muted/20">
                     <td className="text-muted-foreground px-4 py-2 text-xs">Default</td>
-                    <td className="text-muted-foreground px-3 py-2 text-xs">{rules.length ? "If no other rule applies" : "All requests"}</td>
+                    <td className="text-muted-foreground px-3 py-2 text-xs">{rules.length && !l.redirect_https_port ? "If no other rule applies" : "All requests"}</td>
                     <td className="px-3 py-2 whitespace-nowrap">
-                      <span className="text-muted-foreground text-xs">Forward to </span>
-                      <TgLink name={l.default_target_group} />
+                      {l.redirect_https_port ? (
+                        <>
+                          <span className="text-muted-foreground text-xs">Redirect (301) to </span>
+                          <span className="font-mono text-[13px]">HTTPS:{l.redirect_https_port}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span className="text-muted-foreground text-xs">Forward to </span>
+                          <TgLink name={l.default_target_group} />
+                        </>
+                      )}
                     </td>
                     <td />
                   </tr>
@@ -374,7 +403,7 @@ function ListenersTab({ lb }: { lb: LoadBalancer }) {
         onConfirm={async () => {
           if (!deletingListener) return
           await api.del(`${LBS_PATH}/${seg(lb.name)}/listeners/${seg(deletingListener.id)}`)
-          toast.success(`Deleted listener HTTP:${deletingListener.port}; re-provisioning ${lb.name}`)
+          toast.success(`Deleted listener ${deletingListener.protocol}:${deletingListener.port}; re-provisioning ${lb.name}`)
           await revalidate(ELB_PREFIX)
         }}
       />
@@ -431,5 +460,20 @@ function ConfigTab({ lb }: { lb: LoadBalancer }) {
         <pre className="bg-muted/50 max-h-[70vh] overflow-auto rounded-md border p-3 font-mono text-[12.5px] leading-relaxed">{data.nginx_conf}</pre>
       )}
     </Section>
+  )
+}
+
+/** ListenerCert links an HTTPS listener's ACM certificate. */
+function ListenerCert({ arn, certs }: { arn: string; certs?: Certificate[] }) {
+  const c = certs?.find((x) => x.arn === arn)
+  const id = certIdFromArn(arn)
+  return (
+    <span className="text-xs">
+      <span className="text-muted-foreground">Certificate </span>
+      <Link href={certHref(id)} className="text-primary font-mono hover:underline">
+        {c ? c.domain_name : id.slice(0, 8)}
+      </Link>
+      {certs && !c && <span className="text-destructive"> (missing)</span>}
+    </span>
   )
 }

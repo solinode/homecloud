@@ -1,6 +1,9 @@
 import {
   Activity,
+  BadgeCheck,
   Container,
+  Globe,
+  UsersRound,
   FolderOpen,
   LockKeyhole,
   Package,
@@ -89,6 +92,10 @@ export const SERVICES: ServiceDef[] = [
       {
         title: "Images",
         items: [{ label: "AMIs", href: "/ec2/images/" }],
+      },
+      {
+        title: "Auto Scaling",
+        items: [{ label: "Auto Scaling groups", href: "/ec2/autoscaling/", match: ["/ec2/autoscaling/group/", "/ec2/autoscaling/create/"] }],
       },
       {
         title: "Elastic Block Store",
@@ -229,7 +236,10 @@ export const SERVICES: ServiceDef[] = [
     color: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
     href: "/apigateway/",
     paths: ["/apigateway"],
-    nav: [{ items: [{ label: "APIs", href: "/apigateway/", match: ["/apigateway/api/"] }] }],
+    nav: [
+      { items: [{ label: "APIs", href: "/apigateway/", match: ["/apigateway/api/"] }] },
+      { title: "Related", items: [{ label: "Cognito user pools", href: "/cognito/" }] },
+    ],
   },
   {
     id: "iam",
@@ -409,6 +419,7 @@ export const SERVICES: ServiceDef[] = [
           { label: "Target groups", href: "/elb/target-groups/", match: ["/elb/target-group/"] },
         ],
       },
+      { title: "Related", items: [{ label: "Certificates (ACM)", href: "/acm/" }, { label: "Hosted zones (Route 53)", href: "/route53/" }] },
     ],
   },
   {
@@ -470,6 +481,51 @@ export const SERVICES: ServiceDef[] = [
           { label: "Resource types", href: "/cloudformation/resource-types/" },
         ],
       },
+    ],
+  },
+  {
+    id: "route53",
+    name: "Route 53",
+    short: "Route 53",
+    description: "DNS hosted zones for your VPCs and LAN",
+    category: "Networking & Content Delivery",
+    icon: Globe,
+    color: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
+    href: "/route53/",
+    paths: ["/route53"],
+    nav: [
+      { title: "DNS management", items: [{ label: "Hosted zones", href: "/route53/", match: ["/route53/zone/"] }] },
+      { title: "Related", items: [{ label: "Load balancers", href: "/elb/" }, { label: "VPCs", href: "/vpc/" }] },
+    ],
+  },
+  {
+    id: "acm",
+    name: "Certificate Manager",
+    short: "Certificate Manager",
+    description: "TLS certificates from a private CA or imported",
+    category: "Security, Identity & Compliance",
+    icon: BadgeCheck,
+    color: "bg-red-500/10 text-red-600 dark:text-red-400",
+    href: "/acm/",
+    paths: ["/acm"],
+    nav: [
+      { items: [{ label: "Certificates", href: "/acm/", match: ["/acm/certificate/"] }] },
+      { title: "Related", items: [{ label: "Load balancers", href: "/elb/" }] },
+    ],
+  },
+  {
+    id: "cognito",
+    name: "Cognito",
+    short: "Cognito",
+    description: "User sign-up, sign-in and JWTs for your apps",
+    category: "Security, Identity & Compliance",
+    icon: UsersRound,
+    color: "bg-red-500/10 text-red-600 dark:text-red-400",
+    href: "/cognito/",
+    paths: ["/cognito"],
+    nav: [
+      { items: [{ label: "User pools", href: "/cognito/", match: ["/cognito/pool/"] }] },
+      { title: "Related", items: [{ label: "API Gateway", href: "/apigateway/" }] },
     ],
   },
 ]

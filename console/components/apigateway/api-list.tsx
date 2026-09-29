@@ -69,6 +69,20 @@ export function ApiList() {
       hideBelow: "md",
     },
     { id: "routes", header: "Routes", value: (a) => a.routes?.length ?? 0, cell: (a) => a.routes?.length ?? 0 },
+    {
+      id: "authorizer",
+      header: "Authorizer",
+      value: (a) => a.authorizer?.user_pool_id ?? "",
+      cell: (a) =>
+        a.authorizer ? (
+          <span className="whitespace-nowrap">
+            Cognito <span className="text-muted-foreground font-mono text-xs">{a.authorizer.user_pool_id}</span>
+          </span>
+        ) : (
+          <span className="text-muted-foreground">None</span>
+        ),
+      hideBelow: "lg",
+    },
     { id: "cors", header: "CORS", value: (a) => (a.cors ? "enabled" : "off"), cell: (a) => <CorsBadge cors={a.cors} />, hideBelow: "lg" },
     { id: "created", header: "Created", value: (a) => a.created_at, cell: (a) => <TimeAgo value={a.created_at} />, hideBelow: "sm" },
   ]

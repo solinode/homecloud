@@ -19,13 +19,9 @@ import { formatNumber, pluralize } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { CreateLoadBalancerInput, LoadBalancer, LoadBalancerScheme, Subnet } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { ELB_PREFIX, LBS_PATH, NAME_RE, TargetGroupSelect, lbHref, useTargetGroups, vpcHref } from "./shared"
+import { ListenerFields, draftSummary, emptyListenerDraft, listenerDraftErrors, listenerDraftInput, type ListenerDraft } from "./listener-dialogs"
+import { ELB_PREFIX, LBS_PATH, NAME_RE, lbHref, useTargetGroups, vpcHref } from "./shared"
 
-interface ListenerRow {
-  port: string
-  publicPort: string
-  tg: string
-}
 
 const SCHEMES: { value: LoadBalancerScheme; label: string; icon: typeof Globe; blurb: string }[] = [
   {
@@ -56,7 +52,7 @@ export function CreateLoadBalancer() {
   const [name, setName] = useState("")
   const [scheme, setScheme] = useState<LoadBalancerScheme>("internet-facing")
   const [subnetId, setSubnetId] = useState("")
-  const [listeners, setListeners] = useState<ListenerRow[]>([{ port: "80", publicPort: "", tg: "" }])
+  const [listeners, setListeners] = useState<ListenerDraft[]>([emptyListenerDraft()])
   const [tagRows, setTagRows] = useState<TagRow[]>([])
   const [submitted, setSubmitted] = useState(false)
   const [pending, setPending] = useState(false)
@@ -86,18 +82,14 @@ export function CreateLoadBalancer() {
     if (!NAME_RE.test(name)) e.name = "1-32 letters, digits and hyphens; must not start or end with a hyphen"
     if (!subnetId) e.subnet = "Choose a subnet"
     if (!listeners.length) e.listeners = "Add at least one listener"
-    const ports = new Set<string>()
     const pubs = new Set<string>()
     listeners.forEach((l, i) => {
-      if (!validPort(l.port)) e[`l${i}port`] = "1-65535"
-      else if (ports.has(l.port)) e[`l${i}port`] = "Ports must be unique"
-      ports.add(l.port)
-      if (scheme === "internet-facing" && l.publicPort) {
-        if (!validPort(l.publicPort)) e[`l${i}pub`] = "1-65535, or empty for any free port"
-        else if (pubs.has(l.publicPort)) e[`l${i}pub`] = "Host ports must be unique"
+      const others = listeners.filter((_, j) => j < i).map((x) => x.port)
+      for (const [k, v] of Object.entries(listenerDraftErrors(l, { scheme, usedPorts: others }))) e[`l${i}${k}`] = v
+      if (scheme === "internet-facing" && l.publicPort && !e[`l${i}pub`]) {
+        if (pubs.has(l.publicPort)) e[`l${i}pub`] = "Host ports must be unique"
         pubs.add(l.publicPort)
       }
-      if (!l.tg) e[`l${i}tg`] = "Choose a target group"
     })
     const keys = tagRows.map((r) => r.key.trim()).filter(Boolean)
     if (new Set(keys).size !== keys.length) e.tags = "Tag keys must be unique"
@@ -107,7 +99,10 @@ export function CreateLoadBalancer() {
   const err = (k: string) => (submitted ? errors[k] : undefined)
   const valid = Object.keys(errors).length === 0
 
-  const setRow = (i: number, patch: Partial<ListenerRow>) => setListeners(listeners.map((l, j) => (j === i ? { ...l, ...patch } : l)))
+  const setRow = (i: number, d: ListenerDraft) => setListeners(listeners.map((l, j) => (j === i ? d : l)))
+  const httpsPorts = listeners.filter((l) => l.protocol === "HTTPS" && l.port).map((l) => l.port)
+  const rowErrors = (i: number): Record<string, string | undefined> =>
+    Object.fromEntries(["port", "pub", "cert", "tg", "redirect"].map((k) => [k, err(`l${i}${k}`)]))
 
   const create = async () => {
     setSubmitted(true)
@@ -119,12 +114,7 @@ export function CreateLoadBalancer() {
       name,
       scheme,
       subnet_id: subnetId,
-      listeners: listeners.map((l) => ({
-        port: Number(l.port),
-        protocol: "HTTP",
-        public_port: scheme === "internet-facing" && l.publicPort ? Number(l.publicPort) : undefined,
-        default_target_group: l.tg,
-      })),
+      listeners: listeners.map((l) => listenerDraftInput(l, scheme)),
       tags: rowsToTags(tagRows),
     }
     setPending(true)
@@ -143,7 +133,7 @@ export function CreateLoadBalancer() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Create application load balancer"
-        description="An HTTP load balancer with host- and path-based routing to target groups. HomeCloud runs it as an nginx container in the chosen subnet."
+        description="An HTTP/HTTPS load balancer with host- and path-based routing to target groups. HomeCloud runs it as an nginx container in the chosen subnet."
         breadcrumbs={[{ label: "ELB", href: "/elb/" }, { label: "Load balancers", href: "/elb/" }, { label: "Create" }]}
       />
 
@@ -250,7 +240,7 @@ export function CreateLoadBalancer() {
 
           <Section
             title="Listeners and routing"
-            description="Each listener accepts HTTP on a port and forwards to its default target group. Add path or host rules after creation."
+            description="Each listener accepts HTTP or HTTPS on a port and forwards to its default target group, or redirects HTTP to HTTPS. Add path or host rules after creation."
           >
             <div className="flex flex-col gap-3">
               {tgs.data && vpcId && vpcGroups.length === 0 && (
@@ -266,38 +256,22 @@ export function CreateLoadBalancer() {
                 </p>
               )}
               {listeners.map((l, i) => (
-                <div key={i} className="grid grid-cols-2 items-start gap-3 rounded-md border p-3 sm:grid-cols-[7rem_9rem_minmax(0,1fr)_auto]">
-                  <Field label="Protocol : Port" htmlFor={`l-port-${i}`} error={err(`l${i}port`)}>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-muted-foreground font-mono text-xs">HTTP:</span>
-                      <Input id={`l-port-${i}`} inputMode="numeric" value={l.port} onChange={(e) => setRow(i, { port: e.target.value })} className="h-8" />
-                    </div>
-                  </Field>
-                  <Field label="Host port" htmlFor={`l-pub-${i}`} optional error={err(`l${i}pub`)}>
-                    <Input
-                      id={`l-pub-${i}`}
-                      inputMode="numeric"
-                      value={scheme === "internal" ? "" : l.publicPort}
-                      disabled={scheme === "internal"}
-                      onChange={(e) => setRow(i, { publicPort: e.target.value })}
-                      placeholder={scheme === "internal" ? "Not published" : "Any free port"}
-                      className="h-8"
-                    />
-                  </Field>
-                  <Field label="Default action: forward to" htmlFor={`l-tg-${i}`} error={err(`l${i}tg`)} className="col-span-2 sm:col-span-1">
-                    <TargetGroupSelect id={`l-tg-${i}`} value={l.tg} onChange={(v) => setRow(i, { tg: v })} vpcId={vpcId} invalid={!!err(`l${i}tg`)} />
-                  </Field>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="col-start-2 row-start-1 size-8 justify-self-end sm:col-start-4 sm:mt-6"
-                    onClick={() => setListeners(listeners.filter((_, j) => j !== i))}
-                    disabled={listeners.length === 1}
-                    aria-label="Remove listener"
-                  >
-                    <X />
-                  </Button>
+                <div key={i} className="flex flex-col gap-2 rounded-md border p-3">
+                  <div className="flex items-center justify-between">
+                    <span className="text-muted-foreground text-xs font-semibold">Listener {i + 1}</span>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="size-7"
+                      onClick={() => setListeners(listeners.filter((_, j) => j !== i))}
+                      disabled={listeners.length === 1}
+                      aria-label="Remove listener"
+                    >
+                      <X />
+                    </Button>
+                  </div>
+                  <ListenerFields draft={l} onChange={(d) => setRow(i, d)} idPrefix={`l-${i}`} vpcId={vpcId} scheme={scheme} errors={rowErrors(i)} httpsPorts={httpsPorts} />
                 </div>
               ))}
               {err("listeners") && <p className="text-destructive text-xs">{err("listeners")}</p>}
@@ -310,7 +284,9 @@ export function CreateLoadBalancer() {
                   onClick={() => {
                     const used = new Set(listeners.map((l) => l.port))
                     const port = ["80", "8080", "8000", "8081", "8888", "3000"].find((p) => !used.has(p)) ?? ""
-                    setListeners([...listeners, { port, publicPort: "", tg: "" }])
+                    const next = emptyListenerDraft(port)
+                    next.redirectPort = httpsPorts[0] ?? "443"
+                    setListeners([...listeners, next])
                   }}
                 >
                   <Plus /> Add listener
@@ -323,8 +299,8 @@ export function CreateLoadBalancer() {
                 <Info className="mt-px size-3.5 shrink-0" />
                 <span>
                   {scheme === "internet-facing"
-                    ? "Each listener port is published on this host: leave Host port empty to pick a free port, or set one to get a stable URL. Only HTTP is supported."
-                    : "Internal load balancers are reached inside the VPC at http://<name>.elb.internal:<port>. Only HTTP is supported."}
+                    ? "Each listener port is published on this host: leave Host port empty to pick a free port, or set one to get a stable URL. HTTPS listeners terminate TLS with an ACM certificate."
+                    : "Internal load balancers are reached inside the VPC at http(s)://<name>.elb.internal:<port>. HTTPS listeners terminate TLS with an ACM certificate."}
                 </span>
               </p>
             </div>
@@ -358,8 +334,8 @@ export function CreateLoadBalancer() {
                   <ul className="flex flex-col gap-0.5">
                     {listeners.map((l, i) => (
                       <li key={i} className="font-mono text-xs">
-                        HTTP:{l.port || "?"}
-                        {scheme === "internet-facing" && l.publicPort ? ` (host ${l.publicPort})` : ""} → {l.tg || "?"}
+                        {draftSummary(l)}
+                        {scheme === "internet-facing" && l.publicPort ? ` (host ${l.publicPort})` : ""}
                       </li>
                     ))}
                   </ul>

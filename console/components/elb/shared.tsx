@@ -92,9 +92,13 @@ export function listenerPublicPort(lb: LoadBalancer, l: Pick<ElbListener, "port"
   return lb.public_ports?.[`${l.port}/tcp`]
 }
 
-export function publicUrl(lb: LoadBalancer, port: number) {
-  return `http://${lb.public_host || "localhost"}:${port}`
+/** URL of a published listener; HTTPS listeners get an https:// URL. */
+export function publicUrl(lb: LoadBalancer, port: number, https = false) {
+  return `${https ? "https" : "http"}://${lb.public_host || "localhost"}:${port}`
 }
+
+/** Whether the listener published as "443/tcp" is HTTPS. */
+const isHttpsKey = (lb: LoadBalancer, key: string) => (lb.listeners ?? []).some((l) => `${l.port}/tcp` === key && l.protocol === "HTTPS")
 
 /** Clickable http://host:port links for every published listener. */
 export function LbPublicPorts({ lb, empty = "-", compact }: { lb: LoadBalancer; empty?: ReactNode; compact?: boolean }) {
@@ -106,13 +110,13 @@ export function LbPublicPorts({ lb, empty = "-", compact }: { lb: LoadBalancer; 
       {entries.map(([k, port]) => (
         <a
           key={k}
-          href={publicUrl(lb, port)}
+          href={publicUrl(lb, port, isHttpsKey(lb, k))}
           target="_blank"
           rel="noreferrer"
           onClick={(e) => e.stopPropagation()}
           className="text-primary font-mono text-[13px] whitespace-nowrap hover:underline"
         >
-          {compact ? `${k.split("/")[0]} → ${port}` : `${host}:${port}`}
+          {compact ? `${k.split("/")[0]} → ${port}` : `${isHttpsKey(lb, k) ? "https://" : ""}${host}:${port}`}
         </a>
       ))}
     </span>
@@ -135,7 +139,7 @@ export function useInstances() {
 export function lbTargetGroups(lb: LoadBalancer): string[] {
   const s = new Set<string>()
   for (const l of lb.listeners ?? []) {
-    s.add(l.default_target_group)
+    if (l.default_target_group) s.add(l.default_target_group)
     for (const r of l.rules ?? []) s.add(r.target_group)
   }
   return [...s]

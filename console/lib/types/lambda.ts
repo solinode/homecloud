@@ -101,6 +101,15 @@ export interface ApiRoute {
   /** e.g. /items/{id} or /files/{proxy+} */
   path: string
   function_name: string
+  /** NONE (public) or JWT (requires a token from the API's authorizer user pool) */
+  authorization?: "NONE" | "JWT" | string
+}
+
+/** Validates Cognito user pool tokens on routes whose authorization is JWT. */
+export interface ApiAuthorizer {
+  user_pool_id: string
+  /** app client ID; empty accepts any client of the pool */
+  audience?: string
 }
 
 export interface HttpApi {
@@ -109,6 +118,7 @@ export interface HttpApi {
   description: string
   routes: ApiRoute[] | null
   cors: boolean
+  authorizer?: ApiAuthorizer | null
   /** invoke URL, http://host:port/apigw/<id> */
   endpoint: string
   created_at: string

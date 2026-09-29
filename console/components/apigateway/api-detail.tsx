@@ -29,6 +29,7 @@ import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { ApiRoute, HttpApi, LambdaFunction } from "@/lib/types"
 
 import { APIGW_PATH, DeleteApiDialog, MethodBadge, apiPath } from "./common"
+import { AuthBadge, AuthorizerSection, ChangeRouteAuthDialog } from "./authorizer"
 import { AddRouteDialog } from "./route-dialog"
 import { TryIt, type TryPreset } from "./try-it"
 
@@ -40,6 +41,7 @@ export function ApiDetail() {
   const [deleting, setDeleting] = useState(false)
   const [adding, setAdding] = useState(false)
   const [deletingRoute, setDeletingRoute] = useState<ApiRoute | null>(null)
+  const [authRoute, setAuthRoute] = useState<ApiRoute | null>(null)
   const [corsPending, setCorsPending] = useState(false)
   const [preset, setPreset] = useState<TryPreset | null>(null)
 
@@ -144,6 +146,8 @@ export function ApiDetail() {
         />
       </Section>
 
+      <AuthorizerSection api={a} />
+
       <Section
         title={`Routes (${routes.length})`}
         description="The most specific route wins: literal segments beat {params}, which beat {proxy+}; a specific method beats ANY."
@@ -173,6 +177,7 @@ export function ApiDetail() {
                   <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Method</th>
                   <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Path</th>
                   <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Integration</th>
+                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Authorization</th>
                   <th className="text-muted-foreground hidden px-3 py-2 text-left text-xs font-semibold lg:table-cell">Invoke URL</th>
                   <th className="px-4 py-2" />
                 </tr>
@@ -183,9 +188,9 @@ export function ApiDetail() {
                     <td className="px-4 py-2">
                       <MethodBadge method={r.method} />
                     </td>
-                    <td className="px-3 py-2 font-mono text-[13px] break-all">{r.path}</td>
+                    <td className="px-3 py-2 font-mono text-[13px] whitespace-nowrap">{r.path}</td>
                     <td className="px-3 py-2">
-                      <span className="inline-flex items-center gap-1.5">
+                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
                         <span className="text-muted-foreground text-xs">Lambda</span>
                         <Link href={functionHref(r.function_name)} className={cellLinkClass()}>
                           {r.function_name}
@@ -199,6 +204,17 @@ export function ApiDetail() {
                           </Tooltip>
                         )}
                       </span>
+                    </td>
+                    <td className="px-3 py-2">
+                      <button
+                        type="button"
+                        onClick={() => setAuthRoute(r)}
+                        className="rounded-full focus-visible:ring-2 focus-visible:outline-none"
+                        title={r.authorization === "JWT" ? "Requires a Cognito JWT. Click to make public." : "Public. Click to require a JWT."}
+                        aria-label={`Change authorization of ${r.method} ${r.path}`}
+                      >
+                        <AuthBadge authorization={r.authorization} className="hover:ring-primary/40 cursor-pointer" />
+                      </button>
                     </td>
                     <td className="hidden px-3 py-2 lg:table-cell">
                       <CopyableText value={`${a.endpoint}${r.path}`} className="max-w-md" />
@@ -231,6 +247,7 @@ export function ApiDetail() {
 
       <EditApiDialog api={editing ? a : null} onClose={() => setEditing(false)} />
       <AddRouteDialog api={a} open={adding} onOpenChange={setAdding} />
+      <ChangeRouteAuthDialog api={a} route={authRoute} onClose={() => setAuthRoute(null)} />
       <DeleteApiDialog api={deleting ? a : null} onOpenChange={setDeleting} redirect />
       <ConfirmDialog
         open={!!deletingRoute}

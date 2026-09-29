@@ -20,6 +20,8 @@ export interface RouteDraft {
   method: string
   path: string
   function_name: string
+  /** NONE (default) or JWT */
+  authorization?: string
 }
 
 /** RouteFields edits method, path and target function of a route. */
@@ -28,11 +30,14 @@ export function RouteFields({
   onChange,
   error,
   idPrefix,
+  authorizer,
 }: {
   value: RouteDraft
   onChange: (v: RouteDraft) => void
   error?: string | null
   idPrefix: string
+  /** Show the authorization choice; undefined hides it, null means the API has no authorizer yet. */
+  authorizer?: HttpApi["authorizer"]
 }) {
   const functions = useApi<LambdaFunction[]>("/api/v1/lambda/functions")
   const pathErr = value.path ? routePathError(value.path) : null
@@ -98,21 +103,45 @@ export function RouteFields({
           </SelectContent>
         </Select>
       </Field>
+      {authorizer !== undefined && (
+        <Field
+          label="Authorization"
+          htmlFor={`${idPrefix}-auth`}
+          help={
+            (value.authorization ?? "NONE") === "JWT"
+              ? authorizer
+                ? `Requests need "Authorization: Bearer <token>" with an ID or access token from user pool ${authorizer.user_pool_id}; others get 401.`
+                : "This API has no authorizer yet: every request to a JWT route gets 401 until you set a Cognito user pool as its authorizer."
+              : "Anyone who can reach the invoke URL can call this route."
+          }
+        >
+          <Select value={value.authorization ?? "NONE"} onValueChange={(a) => onChange({ ...value, authorization: a })}>
+            <SelectTrigger id={`${idPrefix}-auth`} className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="NONE">None (public)</SelectItem>
+              <SelectItem value="JWT">JWT (Cognito user pool token)</SelectItem>
+            </SelectContent>
+          </Select>
+        </Field>
+      )}
       {error && !pathErr && <p className="text-destructive text-xs">{error}</p>}
     </div>
   )
 }
 
 export function AddRouteDialog({ api: target, open, onOpenChange }: { api: HttpApi; open: boolean; onOpenChange: (o: boolean) => void }) {
-  const [route, setRoute] = useState<RouteDraft>({ method: "GET", path: "/", function_name: "" })
+  const [route, setRoute] = useState<RouteDraft>({ method: "GET", path: "/", function_name: "", authorization: "NONE" })
   const [pending, setPending] = useState(false)
   const [touched, setTouched] = useState(false)
 
   useEffect(() => {
     if (open) {
-      setRoute({ method: "GET", path: "/", function_name: "" })
+      setRoute({ method: "GET", path: "/", function_name: "", authorization: target.authorizer ? "JWT" : "NONE" })
       setTouched(false)
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open])
 
   const err =
@@ -126,7 +155,12 @@ export function AddRouteDialog({ api: target, open, onOpenChange }: { api: HttpA
     if (err) return
     setPending(true)
     try {
-      await api.post<HttpApi>(`${apiPath(target.id)}/routes`, { method: route.method, path: route.path.trim(), function_name: route.function_name })
+      await api.post<HttpApi>(`${apiPath(target.id)}/routes`, {
+        method: route.method,
+        path: route.path.trim(),
+        function_name: route.function_name,
+        authorization: route.authorization ?? "NONE",
+      })
       toast.success(`Added route ${route.method} ${route.path.trim()}`)
       await revalidate(APIGW_PATH)
       onOpenChange(false)
@@ -145,7 +179,7 @@ export function AddRouteDialog({ api: target, open, onOpenChange }: { api: HttpA
             <DialogTitle>Add route</DialogTitle>
             <DialogDescription>Requests matching the method and path invoke the function with an API Gateway v2 event.</DialogDescription>
           </DialogHeader>
-          <RouteFields value={route} onChange={setRoute} error={touched ? err : null} idPrefix="add-route" />
+          <RouteFields value={route} onChange={setRoute} error={touched ? err : null} idPrefix="add-route" authorizer={target.authorizer ?? null} />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
               Cancel
