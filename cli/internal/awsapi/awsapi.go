@@ -376,6 +376,8 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		q.Sig, q.Secret, q.P = sig, secret, p
+		p.AddRequestContext(r)
+		p.Context["aws:requestedregion"] = []string{sig.Region}
 	} else if !public {
 		q.fail(Errorf(http.StatusForbidden, "MissingAuthenticationToken", "request is not signed"))
 		return

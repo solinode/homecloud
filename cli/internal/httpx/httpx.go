@@ -30,8 +30,26 @@ type Principal struct {
 	// RoleName and SessionName are set for temporary role credentials (STS).
 	RoleName    string `json:"role_name,omitempty"`
 	SessionName string `json:"session_name,omitempty"`
-	// Can reports whether the principal may perform action on resource.
+	// Can reports whether the principal may perform action on resource. IAM
+	// evaluates policy conditions against Context at call time.
 	Can func(action, resource string) bool `json:"-"`
+	// Context holds the IAM condition keys of the request (lower-case keys such
+	// as "aws:sourceip" or "aws:username"). IAM fills the identity keys; see
+	// AddRequestContext for the request keys.
+	Context map[string][]string `json:"-"`
+}
+
+// AddRequestContext records the IAM global condition keys that come from the
+// HTTP request (aws:SourceIp, aws:SecureTransport, aws:UserAgent) on p.
+func (p *Principal) AddRequestContext(r *http.Request) {
+	if p.Context == nil {
+		p.Context = map[string][]string{}
+	}
+	p.Context["aws:sourceip"] = []string{ClientIP(r)}
+	p.Context["aws:securetransport"] = []string{strconv.FormatBool(r.TLS != nil)}
+	if ua := r.UserAgent(); ua != "" {
+		p.Context["aws:useragent"] = []string{ua}
+	}
 }
 
 type principalKey struct{}
