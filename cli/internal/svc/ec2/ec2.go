@@ -138,6 +138,7 @@ type Volume struct {
 	Device              string    `json:"device,omitempty"`
 	AttachTime          time.Time `json:"attach_time,omitempty"`
 	DeleteOnTermination bool      `json:"delete_on_termination,omitempty"`
+	AttachState         string    `json:"attach_state,omitempty"` // attaching | attached | detaching
 }
 
 func volumeName(id string) string { return "hc-" + id }
@@ -190,7 +191,7 @@ func New(env *svc.Env, v *vpc.Service) *Service {
 
 // sync reconciles a stored instance with its container's actual state.
 func (s *Service) sync(i Instance) Instance {
-	if i.State == "terminated" || i.State == "pending" || i.ContainerID == "" {
+	if i.State == "terminated" || i.State == "pending" || i.ContainerID == "" || isBusy(i.ID) {
 		return i
 	}
 	st := s.env.Docker.State(i.ContainerID)
@@ -224,6 +225,7 @@ func (s *Service) sync(i Instance) Instance {
 		if want == "terminated" {
 			s.releaseVolumes(i)
 			s.vpc.Release(i.ID)
+			s.instanceGone(i)
 		}
 	}
 	return i
@@ -407,13 +409,32 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 	}
 	it, ok := findType(in.InstanceType)
 	if !ok {
-		return nil, core.BadRequest("unknown instance type %q", in.InstanceType)
+		return nil, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "unknown instance type %q", in.InstanceType)
 	}
 	if in.ImageID == "" {
-		return nil, core.BadRequest("image_id is required")
+		return nil, core.Errf(http.StatusBadRequest, "MissingParameter", "image_id is required")
 	}
 	img, err := s.image(in.ImageID)
 	if err != nil {
+		return nil, err
+	}
+	var key KeyPair
+	if in.KeyName != "" {
+		if key, err = s.keyPair(in.KeyName); err != nil {
+			return nil, err
+		}
+	}
+	var profileARN, profileID string
+	if in.IAMInstanceProfile != "" {
+		if s.Roles == nil {
+			return nil, core.BadRequest("instance profiles are not available")
+		}
+		if profileARN, profileID, _, err = s.Roles.InstanceProfile(in.IAMInstanceProfile); err != nil {
+			return nil, err
+		}
+	}
+	md := in.Metadata.withDefaults()
+	if err := checkMetadata(md); err != nil {
 		return nil, err
 	}
 	for _, m := range in.FileSystems {
@@ -431,6 +452,11 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 	for _, v := range in.Volumes {
 		if !strings.HasPrefix(v.MountPath, "/") {
 			return nil, core.BadRequest("volume mount_path must be absolute")
+		}
+		if v.SnapshotID != "" {
+			if _, err := s.snapshot(v.SnapshotID); err != nil {
+				return nil, err
+			}
 		}
 		if v.VolumeID != "" {
 			vol, err := store.Get[Volume](s.env.Store, cVolumes, v.VolumeID)
@@ -454,13 +480,17 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 			}
 		}
 	}
+	reservation := in.Attrs.ReservationID
+	if reservation == "" {
+		reservation = core.NewID("r")
+	}
 
 	var launched []Instance
 	for n := 0; n < in.Count; n++ {
 		id := core.NewID("i")
 		pl, err := s.vpc.Place(in.SubnetID, id)
 		if err != nil {
-			return nil, err
+			return launched, err
 		}
 		sgs := in.SecurityGroupIDs
 		if len(sgs) == 0 {
@@ -468,7 +498,7 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 		}
 		if err := s.vpc.CheckGroups(pl.VPC.ID, sgs); err != nil {
 			s.vpc.Release(id)
-			return nil, err
+			return launched, err
 		}
 		name := in.Name
 		if name != "" && in.Count > 1 {
@@ -481,6 +511,17 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 			PrivateIP: pl.IP, PrivateDNS: "ip-" + strings.ReplaceAll(pl.IP, ".", "-") + ".internal",
 			SecurityGroups: sgs, UserData: in.UserData, KeepAlive: img.KeepAlive, Volumes: []VolumeAttachment{}, FileSystems: nzFS(in.FileSystems),
 			PublicPorts: map[string]int{}, PublicHost: s.env.Cfg.PublicHost, LaunchTime: core.Now(), Tags: in.Tags,
+			KeyName: key.Name, IAMProfileARN: profileARN, IAMProfileID: profileID, Metadata: md,
+			DisableAPITermination: in.Attrs.DisableAPITermination, DisableAPIStop: in.Attrs.DisableAPIStop,
+			ShutdownBehavior: in.Attrs.ShutdownBehavior, SourceDestCheckOff: in.Attrs.SourceDestCheckOff, CPUCredits: in.Attrs.CPUCredits,
+			Monitoring: in.Attrs.Monitoring, EBSOptimized: in.Attrs.EBSOptimized, ReservationID: reservation, LaunchIndex: n,
+			ClientToken: in.Attrs.ClientToken, LaunchTemplateID: in.Attrs.LaunchTemplateID, LaunchTemplateVersion: in.Attrs.LaunchTemplateVersion,
+		}
+		if inst.ShutdownBehavior == "" {
+			inst.ShutdownBehavior = "stop"
+		}
+		if inst.CPUCredits == "" && strings.HasPrefix(it.Name, "t") {
+			inst.CPUCredits = "unlimited"
 		}
 		// undo releases what this instance claimed if a later step fails.
 		undo := func() {
@@ -498,25 +539,28 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 				if size == 0 {
 					size = 8
 				}
-				vol, err := s.createVolume("", size, pl.Subnet.AvailabilityZone, nil)
+				vol, err := s.createVolume(VolumeInput{Size: size, AZ: pl.Subnet.AvailabilityZone, Tags: in.VolumeTags, Type: v.VolumeType,
+					Iops: v.Iops, Throughput: v.Throughput, Encrypted: v.Encrypted, KMSKeyID: v.KMSKeyID, SnapshotID: v.SnapshotID, Sync: true})
 				if err != nil {
 					undo()
 					return launched, err
 				}
 				volID = vol.ID
 			}
+			now := core.Now()
 			// Claim atomically: two launches must not both attach the same volume.
 			if _, err := store.Update(s.env.Store, cVolumes, volID, func(x *Volume) error {
 				if x.State != "available" {
 					return core.Conflict("volume %s is %s", x.ID, x.State)
 				}
 				x.State, x.AttachedTo, x.MountPath = "in-use", id, v.MountPath
+				x.Device, x.AttachTime, x.DeleteOnTermination = v.Device, now, del
 				return nil
 			}); err != nil {
 				undo()
 				return launched, err
 			}
-			inst.Volumes = append(inst.Volumes, VolumeAttachment{VolumeID: volID, MountPath: v.MountPath, DeleteOnTermination: del})
+			inst.Volumes = append(inst.Volumes, VolumeAttachment{VolumeID: volID, MountPath: v.MountPath, DeleteOnTermination: del, Device: v.Device, AttachTime: now})
 		}
 		if err := store.Put(s.env.Store, cInstances, id, inst); err != nil {
 			undo()
@@ -526,6 +570,101 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 		go s.launch(inst, pl.Network)
 	}
 	return launched, nil
+}
+
+func checkMetadata(m MetadataOptions) error {
+	if m.HttpTokens != "optional" && m.HttpTokens != "required" {
+		return core.Errf(http.StatusBadRequest, "InvalidParameterValue", "HttpTokens must be optional or required")
+	}
+	if m.HttpEndpoint != "enabled" && m.HttpEndpoint != "disabled" {
+		return core.Errf(http.StatusBadRequest, "InvalidParameterValue", "HttpEndpoint must be enabled or disabled")
+	}
+	if m.InstanceMetadataTags != "enabled" && m.InstanceMetadataTags != "disabled" {
+		return core.Errf(http.StatusBadRequest, "InvalidParameterValue", "InstanceMetadataTags must be enabled or disabled")
+	}
+	if m.HopLimit < 1 || m.HopLimit > 64 {
+		return core.Errf(http.StatusBadRequest, "InvalidParameterValue", "HttpPutResponseHopLimit must be between 1 and 64")
+	}
+	return nil
+}
+
+// runSpec is the container of an instance.
+func (s *Service) runSpec(inst Instance, network string) runtime.RunSpec {
+	mounts := []runtime.Mount{}
+	for _, v := range inst.Volumes {
+		mounts = append(mounts, runtime.Mount{Volume: volumeName(v.VolumeID), Target: v.MountPath})
+	}
+	for _, m := range inst.FileSystems {
+		mounts = append(mounts, runtime.Mount{Volume: fsVolume(m.FileSystemID), Target: m.MountPath, ReadOnly: m.ReadOnly})
+	}
+	image := inst.ImageRef
+	if inst.RootImage != "" {
+		image = inst.RootImage
+	}
+	spec := runtime.RunSpec{
+		DNS:      s.dns(inst.VpcID),
+		Name:     svc.ContainerName("ec2", inst.ID),
+		Image:    image,
+		Labels:   runtime.Labels("ec2", inst.ID, map[string]string{"homecloud.name": inst.Name}),
+		NanoCPUs: int64(min(inst.VCPUs, s.hostCPU) * 1e9),
+		MemoryMB: inst.MemoryMB,
+		Ports:    s.vpc.PublishedPorts(inst.SecurityGroups),
+		Mounts:   mounts,
+		Network:  network,
+		IP:       inst.PrivateIP,
+		Aliases:  append([]string{inst.ID, inst.PrivateDNS}, nonEmpty(inst.Name)...),
+		Hostname: strings.TrimSuffix(inst.PrivateDNS, ".internal"),
+		Env: map[string]string{
+			"HC_INSTANCE_ID": inst.ID, "HC_INSTANCE_TYPE": inst.InstanceType, "HC_REGION": s.env.Cfg.Region, "HC_PRIVATE_IP": inst.PrivateIP,
+		},
+		ExtraHosts: []string{runtime.HostAlias},
+	}
+	// SDKs inside the instance talk to HomeCloud, not AWS, and find their
+	// credentials through the instance metadata service.
+	for k, v := range s.awsEnv() {
+		spec.Env[k] = v
+	}
+	if inst.KeepAlive {
+		spec.Entrypoint = []string{"/bin/sh", "-c"}
+		spec.Cmd = []string{bootScript}
+	}
+	return spec
+}
+
+func (s *Service) awsEnv() map[string]string {
+	env := map[string]string{"AWS_REGION": s.env.Cfg.Region, "AWS_DEFAULT_REGION": s.env.Cfg.Region}
+	if s.env.ContainerAPI != "" {
+		env["AWS_ENDPOINT_URL"] = s.env.ContainerAPI
+	}
+	return env
+}
+
+// bootFiles are written into a new instance's disk before it starts.
+func (s *Service) bootFiles(inst Instance) (map[string][]byte, error) {
+	meta, _ := json.MarshalIndent(map[string]any{
+		"instance-id": inst.ID, "instance-type": inst.InstanceType, "ami-id": inst.ImageID, "local-ipv4": inst.PrivateIP,
+		"local-hostname": inst.PrivateDNS, "placement": map[string]string{"availability-zone": inst.AvailabilityZone, "region": s.env.Cfg.Region},
+		"vpc-id": inst.VpcID, "subnet-id": inst.SubnetID, "security-groups": inst.SecurityGroups, "tags": inst.Tags,
+	}, "", "  ")
+	files := map[string][]byte{"var/lib/homecloud/instance.json": meta}
+	if inst.UserData != "" {
+		files["var/lib/homecloud/user-data"] = []byte(inst.UserData)
+	}
+	var profile strings.Builder
+	profile.WriteString("# Set by HomeCloud: AWS SDKs and the AWS CLI reach HomeCloud and get credentials from the instance metadata service.\n")
+	env := s.awsEnv()
+	for _, k := range []string{"AWS_ENDPOINT_URL", "AWS_REGION", "AWS_DEFAULT_REGION"} {
+		if v, ok := env[k]; ok {
+			fmt.Fprintf(&profile, "export %s=%s\n", k, v)
+		}
+	}
+	files["etc/profile.d/homecloud-aws.sh"] = []byte(profile.String())
+	if inst.KeyName != "" {
+		if k, err := s.keyPair(inst.KeyName); err == nil {
+			files["root/.ssh/authorized_keys"] = []byte(strings.TrimSpace(k.PublicKey) + "\n")
+		}
+	}
+	return files, nil
 }
 
 // launch creates and boots the instance's container in the background.
@@ -549,48 +688,12 @@ func (s *Service) launch(inst Instance, network string) {
 			s.vpc.Release(inst.ID)
 		}
 	}
-	mounts := []runtime.Mount{}
-	for _, v := range inst.Volumes {
-		mounts = append(mounts, runtime.Mount{Volume: volumeName(v.VolumeID), Target: v.MountPath})
-	}
-	for _, m := range inst.FileSystems {
-		mounts = append(mounts, runtime.Mount{Volume: fsVolume(m.FileSystemID), Target: m.MountPath, ReadOnly: m.ReadOnly})
-	}
-	meta, _ := json.MarshalIndent(map[string]any{
-		"instance-id": inst.ID, "instance-type": inst.InstanceType, "ami-id": inst.ImageID, "local-ipv4": inst.PrivateIP,
-		"local-hostname": inst.PrivateDNS, "placement": map[string]string{"availability-zone": inst.AvailabilityZone, "region": s.env.Cfg.Region},
-		"vpc-id": inst.VpcID, "subnet-id": inst.SubnetID, "security-groups": inst.SecurityGroups, "tags": inst.Tags,
-	}, "", "  ")
-	spec := runtime.RunSpec{
-		DNS:      s.dns(inst.VpcID),
-		Name:     svc.ContainerName("ec2", inst.ID),
-		Image:    inst.ImageRef,
-		Labels:   runtime.Labels("ec2", inst.ID, map[string]string{"homecloud.name": inst.Name}),
-		NanoCPUs: int64(min(inst.VCPUs, s.hostCPU) * 1e9),
-		MemoryMB: inst.MemoryMB,
-		Ports:    s.vpc.PublishedPorts(inst.SecurityGroups),
-		Mounts:   mounts,
-		Network:  network,
-		IP:       inst.PrivateIP,
-		Aliases:  append([]string{inst.ID, inst.PrivateDNS}, nonEmpty(inst.Name)...),
-		Hostname: strings.TrimSuffix(inst.PrivateDNS, ".internal"),
-		Env: map[string]string{
-			"HC_INSTANCE_ID": inst.ID, "HC_INSTANCE_TYPE": inst.InstanceType, "HC_REGION": s.env.Cfg.Region, "HC_PRIVATE_IP": inst.PrivateIP,
-		},
-	}
-	if inst.KeepAlive {
-		spec.Entrypoint = []string{"/bin/sh", "-c"}
-		spec.Cmd = []string{bootScript}
-	}
-	cid, err := s.env.Docker.Run(ctx, spec)
+	cid, err := s.env.Docker.Run(ctx, s.runSpec(inst, network))
 	if err != nil {
 		fail(err)
 		return
 	}
-	files := map[string][]byte{"var/lib/homecloud/instance.json": meta}
-	if inst.UserData != "" {
-		files["var/lib/homecloud/user-data"] = []byte(inst.UserData)
-	}
+	files, _ := s.bootFiles(inst)
 	if err := s.env.Docker.CopyIn(ctx, cid, "/", files, 0o644); err != nil {
 		_ = s.env.Docker.Remove(cid)
 		fail(fmt.Errorf("write instance metadata: %w", err))
@@ -601,6 +704,7 @@ func (s *Service) launch(inst Instance, network string) {
 		fail(err)
 		return
 	}
+	s.metadataRoute(ctx, cid, inst.VpcID)
 	_, _ = store.Update(s.env.Store, cInstances, inst.ID, func(x *Instance) error {
 		if x.State != "pending" { // terminated while launching
 			go s.env.Docker.Remove(cid)
@@ -611,7 +715,6 @@ func (s *Service) launch(inst Instance, network string) {
 		return nil
 	})
 }
-
 func nonEmpty(s string) []string {
 	if s == "" {
 		return nil
@@ -667,19 +770,52 @@ func (s *Service) transition(id string, from []string, fn func(i Instance) error
 	return cur, nil
 }
 
-func (s *Service) start(c *httpx.Ctx) (any, error) {
-	return s.transition(c.Param("id"), []string{"stopped"}, func(i Instance) error { return s.env.Docker.Start(i.ContainerID) }, "pending", "running")
+func (s *Service) start(c *httpx.Ctx) (any, error) { return s.StartInstance(c.Param("id")) }
+
+func (s *Service) stop(c *httpx.Ctx) (any, error) { return s.StopInstance(c.Param("id"), false) }
+
+func (s *Service) reboot(c *httpx.Ctx) (any, error) { return s.RebootInstance(c.Param("id")) }
+
+// StartInstance starts a stopped instance.
+func (s *Service) StartInstance(id string) (any, error) {
+	return s.transition(id, []string{"stopped"}, func(i Instance) error {
+		if err := s.env.Docker.Start(i.ContainerID); err != nil {
+			return err
+		}
+		s.metadataRoute(context.Background(), i.ContainerID, i.VpcID)
+		return nil
+	}, "pending", "running")
 }
 
-func (s *Service) stop(c *httpx.Ctx) (any, error) {
-	return s.transition(c.Param("id"), []string{"running"}, func(i Instance) error { return s.env.Docker.Stop(i.ContainerID, 10) }, "stopping", "stopped")
+// StopInstance stops a running instance; force skips the graceful shutdown.
+func (s *Service) StopInstance(id string, force bool) (any, error) {
+	if i, err := s.get(id); err == nil && i.DisableAPIStop {
+		return nil, core.Errf(http.StatusBadRequest, "OperationNotPermitted", "the instance '%s' may not be stopped; modify its 'disableApiStop' attribute and try again", id)
+	}
+	timeout := uint(10)
+	if force {
+		timeout = 0
+	}
+	return s.transition(id, []string{"running"}, func(i Instance) error { return s.env.Docker.Stop(i.ContainerID, timeout) }, "stopping", "stopped")
 }
 
-func (s *Service) reboot(c *httpx.Ctx) (any, error) {
-	return s.transition(c.Param("id"), []string{"running"}, func(i Instance) error { return s.env.Docker.Restart(i.ContainerID) }, "running", "running")
+// RebootInstance restarts a running instance.
+func (s *Service) RebootInstance(id string) (any, error) {
+	return s.transition(id, []string{"running"}, func(i Instance) error {
+		if err := s.env.Docker.Restart(i.ContainerID); err != nil {
+			return err
+		}
+		s.metadataRoute(context.Background(), i.ContainerID, i.VpcID)
+		return nil
+	}, "running", "running")
 }
 
-func (s *Service) terminate(c *httpx.Ctx) (any, error) { return s.Terminate(c.Param("id")) }
+func (s *Service) terminate(c *httpx.Ctx) (any, error) {
+	if i, err := s.get(c.Param("id")); err == nil && i.DisableAPITermination {
+		return nil, core.Errf(http.StatusBadRequest, "OperationNotPermitted", "the instance '%s' may not be terminated; modify its 'disableApiTermination' attribute and try again", i.ID)
+	}
+	return s.Terminate(c.Param("id"))
+}
 
 // CheckLaunch validates a launch's image, instance type, subnets and security
 // groups without launching anything, and returns the VPC the subnets are in.
@@ -731,6 +867,7 @@ func (s *Service) Terminate(id string) (Instance, error) {
 	}
 	s.releaseVolumes(i)
 	s.vpc.Release(id)
+	s.instanceGone(i)
 	out, err := store.Update(s.env.Store, cInstances, id, func(x *Instance) error {
 		n := core.Now()
 		x.State, x.TerminatedAt, x.PublicPorts, x.StateReason = "terminated", &n, map[string]int{}, "Client.UserInitiatedShutdown"
@@ -750,9 +887,23 @@ func (s *Service) releaseVolumes(i Instance) {
 			continue
 		}
 		_, _ = store.Update(s.env.Store, cVolumes, v.VolumeID, func(x *Volume) error {
-			x.State, x.AttachedTo, x.MountPath = "available", "", ""
+			x.State, x.AttachedTo, x.MountPath, x.Device, x.AttachTime, x.DeleteOnTermination = "available", "", "", "", time.Time{}, false
+			x.AttachState = ""
 			return nil
 		})
+	}
+}
+
+// instanceGone releases what a terminated instance held besides its
+// addresses and volumes: its disk snapshot image, Elastic IP associations
+// and cached role credentials.
+func (s *Service) instanceGone(i Instance) {
+	if i.RootImage != "" {
+		_ = s.env.Docker.C.RemoveImage(i.RootImage)
+	}
+	s.disassociateInstance(i.ID)
+	if s.imds != nil {
+		s.imds.forget(i.ID)
 	}
 }
 
@@ -903,47 +1054,151 @@ func (s *Service) createImage(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	i, err := s.get(c.Param("id"))
+	return s.CreateImage(c.Param("id"), in.Name, in.Description, nil)
+}
+
+// CreateImage captures an instance's disk as a new AMI (docker commit).
+func (s *Service) CreateImage(instanceID, name, description string, tags core.Tags) (Image, error) {
+	i, err := s.get(instanceID)
 	if err != nil {
-		return nil, err
+		return Image{}, err
 	}
 	if i.ContainerID == "" || i.State == "terminated" {
-		return nil, core.Errf(http.StatusConflict, "IncorrectInstanceState", "instance %s has no disk to capture", i.ID)
+		return Image{}, core.Errf(http.StatusConflict, "IncorrectInstanceState", "instance %s has no disk to capture", i.ID)
 	}
-	if in.Name == "" {
-		in.Name = i.ID + "-image"
+	if name == "" {
+		name = i.ID + "-image"
+	}
+	for _, im := range store.List[Image](s.env.Store, cImages) {
+		if im.Name == name {
+			return Image{}, core.Errf(http.StatusConflict, "InvalidAMIName.Duplicate", "AMI name %s is already in use by AMI %s", name, im.ID)
+		}
 	}
 	id := core.NewID("ami")
 	if _, err := s.env.Docker.C.CommitContainer(docker.CommitContainerOptions{
-		Container: i.ContainerID, Repository: "homecloud/ami", Tag: id, Message: in.Description,
+		Container: i.ContainerID, Repository: "homecloud/ami", Tag: id, Message: description,
 		Run: &docker.Config{Labels: map[string]string{core.LabelManaged: "true"}},
 	}); err != nil {
-		return nil, fmt.Errorf("capture image: %w", err)
+		return Image{}, fmt.Errorf("capture image: %w", err)
 	}
-	im := Image{ID: id, Name: in.Name, Description: in.Description, Ref: "homecloud/ami:" + id, Platform: "linux",
-		KeepAlive: i.KeepAlive, Owner: s.env.AccountID, State: "available", CreatedAt: core.Now().Format(time.RFC3339), SourceInstance: i.ID}
+	im := Image{ID: id, Name: name, Description: description, Ref: "homecloud/ami:" + id, Platform: "linux",
+		KeepAlive: i.KeepAlive, Owner: s.env.AccountID, State: "available", CreatedAt: core.Now().Format(time.RFC3339), SourceInstance: i.ID, Tags: tags}
 	return im, store.Put(s.env.Store, cImages, im.ID, im)
 }
 
-func (s *Service) deregisterImage(c *httpx.Ctx) (any, error) {
-	im, err := store.Get[Image](s.env.Store, cImages, c.Param("id"))
+func (s *Service) deregisterImage(c *httpx.Ctx) (any, error) { return nil, s.DeregisterImage(c.Param("id")) }
+
+// DeregisterImage removes an AMI of this account (and its Docker image when
+// HomeCloud captured it).
+func (s *Service) DeregisterImage(id string) error {
+	im, err := store.Get[Image](s.env.Store, cImages, id)
 	if err != nil {
-		return nil, core.NotFound("image", c.Param("id"))
+		return core.NotFound("image", id)
 	}
 	if im.SourceInstance != "" {
 		_ = s.env.Docker.C.RemoveImage(im.Ref)
 	}
-	return nil, store.Delete(s.env.Store, cImages, im.ID)
+	return store.Delete(s.env.Store, cImages, im.ID)
 }
 
 // ---- volumes ----
 
-func (s *Service) createVolume(name string, size int, az string, tags core.Tags) (Volume, error) {
-	v := Volume{ID: core.NewID("vol"), Name: name, SizeGB: size, State: "available", AvailabilityZone: az, CreatedAt: core.Now(), Tags: tags}
+// VolumeInput describes a new volume.
+type VolumeInput struct {
+	Name       string
+	Size       int
+	AZ         string
+	Tags       core.Tags
+	Type       string
+	Iops       int
+	Throughput int
+	Encrypted  bool
+	KMSKeyID   string
+	// SnapshotID fills the volume from a snapshot; the volume is "creating"
+	// until the copy finishes, unless Sync waits for it.
+	SnapshotID string
+	Sync       bool
+}
+
+func (s *Service) createVolume(in VolumeInput) (Volume, error) {
+	if in.Type == "" {
+		in.Type = "gp3"
+	}
+	if in.AZ == "" {
+		in.AZ = s.env.Cfg.Region + "a"
+	}
+	var snap Snapshot
+	if in.SnapshotID != "" {
+		var err error
+		if snap, err = s.snapshot(in.SnapshotID); err != nil {
+			return Volume{}, err
+		}
+		if snap.State != "completed" {
+			return Volume{}, core.Errf(http.StatusBadRequest, "IncorrectState", "snapshot %s is %s", snap.ID, snap.State)
+		}
+		if in.Size == 0 {
+			in.Size = snap.VolumeSize
+		}
+		if in.Size < snap.VolumeSize {
+			return Volume{}, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "volume size %d GiB is smaller than snapshot %s (%d GiB)", in.Size, snap.ID, snap.VolumeSize)
+		}
+	}
+	if in.Size == 0 {
+		in.Size = 8
+	}
+	if in.Size < 1 || in.Size > 16384 {
+		return Volume{}, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "volume size must be between 1 and 16384 GiB")
+	}
+	if in.Type == "gp3" {
+		if in.Iops == 0 {
+			in.Iops = 3000
+		}
+		if in.Throughput == 0 {
+			in.Throughput = 125
+		}
+	}
+	v := Volume{ID: core.NewID("vol"), Name: in.Name, SizeGB: in.Size, State: "available", AvailabilityZone: in.AZ, CreatedAt: core.Now(), Tags: in.Tags,
+		VolumeType: in.Type, Iops: in.Iops, Throughput: in.Throughput, Encrypted: in.Encrypted, KMSKeyID: in.KMSKeyID, SnapshotID: in.SnapshotID}
+	if v.Name == "" && in.Tags["Name"] != "" {
+		v.Name = in.Tags["Name"]
+	}
 	if err := s.env.Docker.CreateVolume(volumeName(v.ID), runtime.Labels("ebs", v.ID, nil)); err != nil {
 		return v, err
 	}
-	return v, store.Put(s.env.Store, cVolumes, v.ID, v)
+	if in.SnapshotID == "" {
+		return v, store.Put(s.env.Store, cVolumes, v.ID, v)
+	}
+	restore := func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+		defer cancel()
+		return s.copyVolume(ctx, snapVolume(snap.ID), volumeName(v.ID))
+	}
+	if in.Sync {
+		if err := restore(); err != nil {
+			_ = s.env.Docker.RemoveVolume(volumeName(v.ID))
+			return v, fmt.Errorf("restore snapshot %s: %w", snap.ID, err)
+		}
+		return v, store.Put(s.env.Store, cVolumes, v.ID, v)
+	}
+	v.State = "creating"
+	if err := store.Put(s.env.Store, cVolumes, v.ID, v); err != nil {
+		return v, err
+	}
+	go func() {
+		defer core.Recover("restore " + v.ID)
+		state := "available"
+		if err := restore(); err != nil {
+			log.Printf("ec2: restore %s from %s: %v", v.ID, snap.ID, err)
+			state = "error"
+		}
+		_, _ = store.Update(s.env.Store, cVolumes, v.ID, func(x *Volume) error {
+			if x.State == "creating" {
+				x.State = state
+			}
+			return nil
+		})
+	}()
+	return v, nil
 }
 
 func (s *Service) listVolumes(c *httpx.Ctx) (any, error) {
@@ -956,31 +1211,29 @@ func (s *Service) createVolumeRoute(c *httpx.Ctx) (any, error) {
 		SizeGB           int       `json:"size_gb"`
 		AvailabilityZone string    `json:"availability_zone"`
 		Tags             core.Tags `json:"tags"`
+		SnapshotID       string    `json:"snapshot_id"`
 	}
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	if in.SizeGB <= 0 {
-		in.SizeGB = 8
-	}
-	if in.AvailabilityZone == "" {
-		in.AvailabilityZone = s.env.Cfg.Region + "a"
-	}
-	return s.createVolume(in.Name, in.SizeGB, in.AvailabilityZone, in.Tags)
+	return s.createVolume(VolumeInput{Name: in.Name, Size: in.SizeGB, AZ: in.AvailabilityZone, Tags: in.Tags, SnapshotID: in.SnapshotID})
 }
 
-func (s *Service) deleteVolume(c *httpx.Ctx) (any, error) {
-	v, err := store.Get[Volume](s.env.Store, cVolumes, c.Param("id"))
+func (s *Service) deleteVolume(c *httpx.Ctx) (any, error) { return nil, s.DeleteVolume(c.Param("id")) }
+
+// DeleteVolume removes a volume that is not attached.
+func (s *Service) DeleteVolume(id string) error {
+	v, err := store.Get[Volume](s.env.Store, cVolumes, id)
 	if err != nil {
-		return nil, core.NotFound("volume", c.Param("id"))
+		return core.NotFound("volume", id)
 	}
 	if v.State == "in-use" {
-		return nil, core.Errf(http.StatusConflict, "VolumeInUse", "volume %s is attached to %s", v.ID, v.AttachedTo)
+		return core.Errf(http.StatusConflict, "VolumeInUse", "volume %s is attached to %s", v.ID, v.AttachedTo)
 	}
 	if err := s.env.Docker.RemoveVolume(volumeName(v.ID)); err != nil {
-		return nil, err
+		return err
 	}
-	return nil, store.Delete(s.env.Store, cVolumes, v.ID)
+	return store.Delete(s.env.Store, cVolumes, v.ID)
 }
 
 // Names returns instance display names by ID, for other services.
