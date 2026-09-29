@@ -229,7 +229,12 @@ func (s *Service) runRotation(sec Secret, token string) {
 	}
 	for _, step := range []string{"createSecret", "setSecret", "testSecret", "finishSecret"} {
 		payload, _ := json.Marshal(map[string]string{"Step": step, "SecretId": sec.ARN, "ClientRequestToken": token, "RotationToken": uuid()})
-		out, fnErr, err := s.lambda().Invoke(ctx, functionName(sec.RotationLambdaARN), payload)
+		inv := s.lambda()
+		if inv == nil {
+			fail(step + ": Lambda rotation functions are not available on this server")
+			return
+		}
+		out, fnErr, err := inv.Invoke(ctx, functionName(sec.RotationLambdaARN), payload)
 		if err != nil {
 			fail(fmt.Sprintf("%s: %s", step, errMessage(err)))
 			return
