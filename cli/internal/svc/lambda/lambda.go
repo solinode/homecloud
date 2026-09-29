@@ -1,7 +1,14 @@
-// Package lambda implements serverless functions. Each function gets a warm,
-// resource-limited container holding its code; every invocation is a fresh
-// process in that container, fed the event on stdin. Invocations are logged to
-// CloudWatch Logs and measured in CloudWatch Metrics.
+// Package lambda implements serverless functions on AWS's official Lambda base
+// images. Each function version has a pool of execution environments
+// (containers running the Runtime Interface Emulator); an environment handles
+// one invocation at a time and stays warm between invocations, and the pool
+// scales out up to the function's concurrency limit. Functions can assume an
+// execution role, have published versions and aliases, layers, asynchronous
+// invocation with retries and destinations, and container-image packages.
+// Invocations are logged to CloudWatch Logs and measured in CloudWatch Metrics.
+//
+// The same operations are served by the native API (/api/v1/lambda) and the
+// AWS Lambda REST API (aws.go).
 package lambda
 
 import (
@@ -15,21 +22,18 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
-	"math"
 	"net/http"
 	"os"
 	"path"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
 
-	docker "github.com/fsouza/go-dockerclient"
 	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
-	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cloudwatch"
@@ -38,76 +42,214 @@ import (
 
 const (
 	cFunctions   = "lambda_functions"
+	cVersions    = "lambda_versions"    // "<fn>:<n>" -> Function snapshot
+	cAliases     = "lambda_aliases"     // "<fn>:<alias>" -> Alias
+	cInvokeCfgs  = "lambda_invoke_cfgs" // "<fn>:<qualifier>" -> EventInvokeConfig
 	maxCodeBytes = 50 << 20
 	idleTimeout  = 15 * time.Minute
 	metricsNS    = "HC/Lambda"
+	latest       = "$LATEST"
 )
 
+// FunctionURL is a function's dedicated HTTP endpoint.
 type FunctionURL struct {
-	Enabled  bool   `json:"enabled"`
-	AuthType string `json:"auth_type"` // NONE | HC_IAM
-	URL      string `json:"url,omitempty"`
+	Enabled      bool       `json:"enabled"`
+	AuthType     string     `json:"auth_type"` // NONE | HC_IAM (AWS_IAM in the AWS API)
+	URL          string     `json:"url,omitempty"`
+	Qualifier    string     `json:"qualifier,omitempty"`
+	Cors         *URLCors   `json:"cors,omitempty"`
+	InvokeMode   string     `json:"invoke_mode,omitempty"`
+	CreatedAt    *time.Time `json:"created_at,omitempty"`
+	LastModified *time.Time `json:"last_modified,omitempty"`
 }
 
+// URLCors is a function URL's CORS configuration (AWS shape).
+type URLCors struct {
+	AllowCredentials bool     `json:"AllowCredentials,omitempty"`
+	AllowHeaders     []string `json:"AllowHeaders,omitempty"`
+	AllowMethods     []string `json:"AllowMethods,omitempty"`
+	AllowOrigins     []string `json:"AllowOrigins,omitempty"`
+	ExposeHeaders    []string `json:"ExposeHeaders,omitempty"`
+	MaxAge           int      `json:"MaxAge,omitempty"`
+}
+
+// ImageConfig overrides a container image's entrypoint, command and working directory.
+type ImageConfig struct {
+	EntryPoint       []string `json:"EntryPoint,omitempty"`
+	Command          []string `json:"Command,omitempty"`
+	WorkingDirectory string   `json:"WorkingDirectory,omitempty"`
+}
+
+// Function is a function's $LATEST configuration, or (in cVersions) an
+// immutable published version of it.
 type Function struct {
-	Name         string            `json:"name"`
-	ARN          string            `json:"arn"`
-	Runtime      string            `json:"runtime"`
-	Handler      string            `json:"handler"`
-	Description  string            `json:"description"`
-	MemoryMB     int64             `json:"memory_mb"`
-	TimeoutSec   int               `json:"timeout_seconds"`
-	Environment  map[string]string `json:"environment"`
-	CodeSHA256   string            `json:"code_sha256"`
-	CodeSize     int64             `json:"code_size"`
-	State        string            `json:"state"`
-	URL          FunctionURL       `json:"function_url"`
-	LogGroup     string            `json:"log_group"`
-	SubnetID     string            `json:"subnet_id,omitempty"`
-	LastModified time.Time         `json:"last_modified"`
-	CreatedAt    time.Time         `json:"created_at"`
-	Tags         core.Tags         `json:"tags,omitempty"`
+	Name                   string                       `json:"name"`
+	ARN                    string                       `json:"arn"`
+	Runtime                string                       `json:"runtime"`
+	Handler                string                       `json:"handler"`
+	Description            string                       `json:"description"`
+	MemoryMB               int64                        `json:"memory_mb"`
+	TimeoutSec             int                          `json:"timeout_seconds"`
+	Environment            map[string]string            `json:"environment"`
+	CodeSHA256             string                       `json:"code_sha256"`
+	CodeSize               int64                        `json:"code_size"`
+	State                  string                       `json:"state"` // Pending | Active | Failed
+	StateReason            string                       `json:"state_reason,omitempty"`
+	StateReasonCode        string                       `json:"state_reason_code,omitempty"`
+	LastUpdateStatus       string                       `json:"last_update_status,omitempty"` // InProgress | Successful | Failed
+	LastUpdateStatusReason string                       `json:"last_update_status_reason,omitempty"`
+	URL                    FunctionURL                  `json:"function_url"`
+	LogGroup               string                       `json:"log_group"`
+	SubnetID               string                       `json:"subnet_id,omitempty"`
+	SecurityGroupIDs       []string                     `json:"security_group_ids,omitempty"`
+	Role                   string                       `json:"role,omitempty"`         // execution role ARN
+	PackageType            string                       `json:"package_type,omitempty"` // Zip (default) | Image
+	ImageURI               string                       `json:"image_uri,omitempty"`
+	ImageConfig            *ImageConfig                 `json:"image_config,omitempty"`
+	Architectures          []string                     `json:"architectures,omitempty"`
+	Layers                 []string                     `json:"layers,omitempty"` // layer version ARNs, in order
+	DeadLetterTarget       string                       `json:"dead_letter_target,omitempty"`
+	ReservedConcurrency    *int                         `json:"reserved_concurrency,omitempty"`
+	Version                string                       `json:"version,omitempty"` // "$LATEST" or a published version number
+	VersionDescription     string                       `json:"version_description,omitempty"`
+	LastVersion            int                          `json:"last_version,omitempty"` // highest published version ($LATEST only)
+	RevisionID             string                       `json:"revision_id,omitempty"`
+	PublishedFrom          string                       `json:"published_from,omitempty"` // $LATEST revision a version was published from
+	Policy                 map[string][]PolicyStatement `json:"policy,omitempty"`         // resource policy by qualifier ("" = unqualified)
+	LastModified           time.Time                    `json:"last_modified"`
+	CreatedAt              time.Time                    `json:"created_at"`
+	Tags                   core.Tags                    `json:"tags,omitempty"`
 }
 
-type warm struct {
-	id       string
-	codeSHA  string
-	lastUsed time.Time
+func (f Function) version() string {
+	if f.Version == "" {
+		return latest
+	}
+	return f.Version
 }
 
+func (f Function) isImage() bool { return f.PackageType == "Image" }
+
+// qualifiedARN is the function's ARN with a version or alias.
+func (f Function) qualifiedARN(q string) string {
+	if q == "" {
+		return f.ARN
+	}
+	return f.ARN + ":" + q
+}
+
+// Service implements Lambda.
 type Service struct {
-	env     *svc.Env
-	cw      *cloudwatch.Service
-	vpc     *vpc.Service
-	mu      sync.Mutex
-	warm    map[string]*warm
-	fnLocks sync.Map // function name -> *sync.Mutex (serialises container creation)
+	env *svc.Env
+	cw  *cloudwatch.Service
+	vpc *vpc.Service
+
+	mu    sync.Mutex
+	pools map[string]*pool // by function name
+	// prepMu serialises image pulls per image.
+	prepMu sync.Map
+	async  chan *asyncEvent
+	urlKey []byte // signs code download links
+	// Now is the clock (tests).
+	now func() time.Time
+
 	// Auth authenticates function URL calls with auth type HC_IAM.
 	Auth httpx.Authenticator
 	// Queues is the SQS service, for event source mappings.
 	Queues QueueSource
+	// Streams reads DynamoDB streams, for event source mappings.
+	Streams StreamSource
+	// invokeHook replaces invocation in tests.
+	invokeHook func(ctx context.Context, ref string, payload []byte, o InvokeOptions) (*InvokeResult, error)
 	// VerifyJWT validates user pool tokens for API Gateway routes that require them.
 	VerifyJWT JWTVerifier
 	// CheckAuthorizer verifies that a user pool (and optional app client of it) exists.
 	CheckAuthorizer func(pool, client string) error
 	// DNSFor returns resolver addresses for containers in a VPC (Route 53).
 	DNSFor func(vpcID string) []string
+	// Roles validates execution roles and issues their credentials (IAM).
+	Roles RoleSource
+	// Deliver sends a payload to an SQS queue, SNS topic or EventBridge bus by
+	// ARN (async invocation destinations and dead-letter queues).
+	Deliver func(ctx context.Context, arn string, payload []byte) error
+	// PutEvent publishes an event to an EventBridge bus (async invocation destinations).
+	PutEvent func(ctx context.Context, bus, source, detailType string, resources []string, detail []byte) error
+	// TargetExists reports whether a destination ARN exists.
+	TargetExists func(arn string) bool
+	// GetObject reads an S3 object (function code from S3Bucket/S3Key).
+	GetObject func(ctx context.Context, bucket, key, version string) ([]byte, error)
+	// ResolveImage maps an image URI (e.g. an ECR repository URI) to one the
+	// local Docker engine can pull.
+	ResolveImage func(uri string) string
+}
+
+// Credentials are temporary credentials for a function's execution role.
+type Credentials struct {
+	AccessKeyID, SecretAccessKey, SessionToken string
+	Expiration                                 time.Time
+}
+
+// RoleSource is implemented by IAM (wired in server.go).
+type RoleSource interface {
+	// LambdaRole checks that a role (name or ARN) exists and trusts
+	// lambda.amazonaws.com, and returns its ARN.
+	LambdaRole(ref string) (string, error)
+	// LambdaCredentials issues temporary credentials for the role.
+	LambdaCredentials(ref, session string, ttl time.Duration) (Credentials, error)
 }
 
 func New(env *svc.Env, cw *cloudwatch.Service, v *vpc.Service) *Service {
-	return &Service{env: env, cw: cw, vpc: v, warm: map[string]*warm{}}
+	return &Service{env: env, cw: cw, vpc: v, pools: map[string]*pool{}, async: make(chan *asyncEvent, 10000),
+		urlKey: []byte(core.NewSecret(32)), now: time.Now}
 }
 
+// authorizer checks that the caller may perform action on resource.
+type authorizer func(action, resource string) error
+
+func allowAll(string, string) error { return nil }
+
+func (s *Service) fnARN(name string) string { return s.env.ARN("lambda", "function:"+name) }
+
 func (s *Service) codePath(name string) string { return s.env.Cfg.Path("lambda", name+".zip") }
+
+// codeFile is where a function version's code package lives.
+func (s *Service) codeFile(f Function) string {
+	if f.version() == latest {
+		return s.codePath(f.Name)
+	}
+	return s.env.Cfg.Path("lambda", "versions", f.Name, f.Version+".zip")
+}
 
 func (s *Service) urlFor(name string) string {
 	_, port, _ := strings.Cut(s.env.Cfg.APIAddr, ":")
 	return fmt.Sprintf("http://%s:%s/lambda-url/%s/", s.env.Cfg.PublicHost, port, name)
 }
 
+func fnNotFound(arn string) error {
+	return core.Errf(http.StatusNotFound, "ResourceNotFound", "Function not found: %s", arn)
+}
+
+// getLatest returns a function's $LATEST record.
+func (s *Service) getLatest(name string) (Function, error) {
+	f, err := store.Get[Function](s.env.Store, cFunctions, name)
+	if err != nil {
+		return f, fnNotFound(s.fnARN(name))
+	}
+	if f.Version == "" {
+		f.Version = latest
+	}
+	if f.PackageType == "" {
+		f.PackageType = "Zip"
+	}
+	if f.LastUpdateStatus == "" {
+		f.LastUpdateStatus = "Successful"
+	}
+	return f, nil
+}
+
 // ---- code handling ----
 
-// codeInput accepts code as a base64 zip, inline files, or an S3-less template.
+// codeInput accepts code as a base64 zip or inline files.
 type codeInput struct {
 	ZipBase64 string            `json:"zip_base64"`
 	Files     map[string]string `json:"files"`
@@ -119,18 +261,26 @@ func (ci codeInput) zip() ([]byte, error) {
 		if err != nil {
 			return nil, core.BadRequest("zip_base64 is not valid base64")
 		}
-		if _, err := zip.NewReader(bytes.NewReader(b), int64(len(b))); err != nil {
-			return nil, core.BadRequest("code is not a valid zip archive: %v", err)
-		}
-		return b, nil
+		return b, checkZip(b)
 	}
 	if len(ci.Files) == 0 {
 		return nil, nil
 	}
+	return zipFiles(ci.Files)
+}
+
+func checkZip(b []byte) error {
+	if _, err := zip.NewReader(bytes.NewReader(b), int64(len(b))); err != nil {
+		return core.BadRequest("Could not unzip uploaded file. Please check your file, then try to upload again. (%v)", err)
+	}
+	return nil
+}
+
+func zipFiles(files map[string]string) ([]byte, error) {
 	var buf bytes.Buffer
 	zw := zip.NewWriter(&buf)
-	names := make([]string, 0, len(ci.Files))
-	for n := range ci.Files {
+	names := make([]string, 0, len(files))
+	for n := range files {
 		names = append(names, n)
 	}
 	sort.Strings(names)
@@ -143,7 +293,7 @@ func (ci codeInput) zip() ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		w.Write([]byte(ci.Files[n]))
+		w.Write([]byte(files[n]))
 	}
 	if err := zw.Close(); err != nil {
 		return nil, err
@@ -170,559 +320,543 @@ func unzip(b []byte) (map[string][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		data, err := io.ReadAll(io.LimitReader(rc, maxCodeBytes))
+		data, err := io.ReadAll(io.LimitReader(rc, 4*maxCodeBytes+1))
 		rc.Close()
 		if err != nil {
 			return nil, err
 		}
 		total += int64(len(data))
-		if total > 4*maxCodeBytes {
-			return nil, core.BadRequest("unzipped code exceeds %d MB", 4*maxCodeBytes>>20)
+		if total > 5*maxCodeBytes {
+			return nil, core.BadRequest("Unzipped size must be smaller than %d bytes", 5*maxCodeBytes)
 		}
 		out[clean] = data
 	}
 	return out, nil
 }
 
+func sha256B64(b []byte) string {
+	sum := sha256.Sum256(b)
+	return base64.StdEncoding.EncodeToString(sum[:])
+}
+
+func writeFile(p string, b []byte) error {
+	if err := os.MkdirAll(path.Dir(p), 0o700); err != nil {
+		return err
+	}
+	tmp := p + ".tmp"
+	if err := os.WriteFile(tmp, b, 0o600); err != nil {
+		return err
+	}
+	return os.Rename(tmp, p)
+}
+
 func (s *Service) saveCode(name string, b []byte) (string, error) {
 	if len(b) > maxCodeBytes {
-		return "", core.BadRequest("code zip exceeds %d MB", maxCodeBytes>>20)
+		return "", core.Errf(http.StatusRequestEntityTooLarge, "RequestEntityTooLargeException", "code zip exceeds %d MB", maxCodeBytes>>20)
 	}
-	if err := os.MkdirAll(s.env.Cfg.Path("lambda"), 0o700); err != nil {
-		return "", err
-	}
-	sum := sha256.Sum256(b)
-	return base64.StdEncoding.EncodeToString(sum[:]), os.WriteFile(s.codePath(name), b, 0o600)
+	return sha256B64(b), writeFile(s.codePath(name), b)
 }
 
-// ---- warm containers ----
-
-func (s *Service) fnLock(name string) *sync.Mutex {
-	m, _ := s.fnLocks.LoadOrStore(name, &sync.Mutex{})
-	return m.(*sync.Mutex)
+// Exists reports whether a function exists (used by other services). ref may
+// be qualified (name:alias) or an ARN.
+func (s *Service) Exists(ref string) bool {
+	name, qual := parseRef(ref)
+	if !store.Has(s.env.Store, cFunctions, name) {
+		return false
+	}
+	if qual == "" {
+		return true
+	}
+	_, _, err := s.resolve(name, qual)
+	return err == nil
 }
 
-func containerName(fn string) string { return svc.ContainerName("lambda", fn) }
+var (
+	nameRe      = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+	aliasRe     = regexp.MustCompile(`^(?:[a-zA-Z_-][a-zA-Z0-9_-]{0,127})$`)
+	envKeyRe    = regexp.MustCompile(`^[a-zA-Z]([a-zA-Z0-9_])*$`)
+	reservedEnv = map[string]bool{"_HANDLER": true, "AWS_REGION": true, "AWS_DEFAULT_REGION": true, "AWS_EXECUTION_ENV": true,
+		"AWS_LAMBDA_FUNCTION_NAME": true, "AWS_LAMBDA_FUNCTION_MEMORY_SIZE": true, "AWS_LAMBDA_FUNCTION_VERSION": true,
+		"AWS_LAMBDA_INITIALIZATION_TYPE": true, "AWS_LAMBDA_LOG_GROUP_NAME": true, "AWS_LAMBDA_LOG_STREAM_NAME": true,
+		"AWS_ACCESS_KEY": true, "AWS_ACCESS_KEY_ID": true, "AWS_SECRET_ACCESS_KEY": true, "AWS_SESSION_TOKEN": true,
+		"AWS_LAMBDA_RUNTIME_API": true, "LAMBDA_TASK_ROOT": true, "LAMBDA_RUNTIME_DIR": true}
+)
 
-// container returns a running container with the function's current code.
-func (s *Service) container(ctx context.Context, f Function) (string, error) {
-	l := s.fnLock(f.Name)
-	l.Lock()
-	defer l.Unlock()
-	s.mu.Lock()
-	w := s.warm[f.Name]
-	s.mu.Unlock()
-	if w != nil && w.codeSHA == f.CodeSHA256+f.LastModified.String() && s.env.Docker.State(w.id) == "running" {
-		s.mu.Lock()
-		w.lastUsed = time.Now()
-		s.mu.Unlock()
-		return w.id, nil
+// parseRef splits a function reference: "name", "name:qualifier", a full or
+// partial ARN ("arn:aws:lambda:us-east-1:123456789012:function:name[:q]",
+// "123456789012:function:name").
+func parseRef(ref string) (name, qualifier string) {
+	ref = core.CanonicalARN(ref)
+	if i := strings.Index(ref, "function:"); i >= 0 && (strings.HasPrefix(ref, "arn:") || i > 0) {
+		ref = ref[i+len("function:"):]
 	}
-	_ = s.env.Docker.Remove(containerName(f.Name))
-	rt, ok := findRuntime(f.Runtime)
-	if !ok {
-		return "", fmt.Errorf("unknown runtime %s", f.Runtime)
-	}
-	code, err := os.ReadFile(s.codePath(f.Name))
-	if err != nil {
-		return "", fmt.Errorf("read code: %w", err)
-	}
-	files, err := unzip(code)
-	if err != nil {
-		return "", fmt.Errorf("unpack code: %w", err)
-	}
-	env := map[string]string{"HC_FUNCTION_NAME": f.Name, "HC_FUNCTION_ARN": f.ARN, "HC_FUNCTION_MEMORY": fmt.Sprint(f.MemoryMB),
-		"HC_FUNCTION_TIMEOUT": fmt.Sprint(f.TimeoutSec), "HC_HANDLER": f.Handler, "HC_REGION": s.env.Cfg.Region,
-		"AWS_REGION": "us-east-1", "PYTHONDONTWRITEBYTECODE": "1", "LAMBDA_TASK_ROOT": "/var/task"}
-	for k, v := range f.Environment {
-		env[k] = v
-	}
-	pl, err := s.vpc.Place(f.SubnetID, "lambda:"+f.Name)
-	if err != nil {
-		return "", err
-	}
-	var dns []string
-	if s.DNSFor != nil {
-		dns = s.DNSFor(pl.VPC.ID)
-	}
-	id, err := s.env.Docker.Run(ctx, runtime.RunSpec{
-		DNS:        dns,
-		Name:       containerName(f.Name),
-		Image:      rt.Image,
-		Entrypoint: []string{"/bin/sh", "-c"},
-		Cmd:        []string{"trap 'exit 0' TERM INT; while :; do sleep 3600 & wait $!; done"},
-		Env:        env,
-		Labels:     runtime.Labels("lambda", f.Name, nil),
-		MemoryMB:   f.MemoryMB,
-		NanoCPUs:   int64(max(0.25, float64(f.MemoryMB)/1769) * 1e9), // CPU scales with memory, as in AWS
-		Network:    pl.Network,
-		IP:         pl.IP,
-		WorkingDir: "/var/task",
-	})
-	if err != nil {
-		return "", err
-	}
-	task := map[string][]byte{"opt/homecloud/" + rt.bootstrapFile: []byte(rt.bootstrap)}
-	for n, b := range files {
-		task["var/task/"+n] = b
-	}
-	if err := s.env.Docker.CopyIn(ctx, id, "/", task, 0o755); err != nil {
-		_ = s.env.Docker.Remove(id)
-		return "", fmt.Errorf("copy code: %w", err)
-	}
-	if err := s.env.Docker.Start(id); err != nil {
-		_ = s.env.Docker.Remove(id)
-		return "", err
-	}
-	s.mu.Lock()
-	s.warm[f.Name] = &warm{id: id, codeSHA: f.CodeSHA256 + f.LastModified.String(), lastUsed: time.Now()}
-	s.mu.Unlock()
-	return id, nil
+	name, qualifier, _ = strings.Cut(ref, ":")
+	return name, qualifier
 }
 
-func (s *Service) retire(name string) {
-	l := s.fnLock(name)
-	l.Lock()
-	defer l.Unlock()
-	s.mu.Lock()
-	delete(s.warm, name)
-	s.mu.Unlock()
-	_ = s.env.Docker.Remove(containerName(name))
-	s.vpc.Release("lambda:" + name)
-}
-
-// Run stops containers of functions that have been idle for a while.
-func (s *Service) Run(ctx context.Context) {
-	// Containers from a previous server run are stale: the warm table is empty.
-	if cs, err := s.env.Docker.ManagedContainers(); err == nil {
-		for _, c := range cs {
-			if c.Labels["homecloud.service"] == "lambda" {
-				_ = s.env.Docker.Remove(c.ID)
-			}
-		}
-	}
-	t := time.NewTicker(time.Minute)
-	defer t.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-t.C:
-		}
-		s.mu.Lock()
-		var idle []string
-		for n, w := range s.warm {
-			if time.Since(w.lastUsed) > idleTimeout {
-				idle = append(idle, n)
-			}
-		}
-		s.mu.Unlock()
-		for _, n := range idle {
-			s.retire(n)
-		}
-	}
-}
-
-// ---- invocation ----
-
-type InvokeResult struct {
-	RequestID     string          `json:"request_id"`
-	StatusCode    int             `json:"status_code"`
-	Payload       json.RawMessage `json:"payload"`
-	FunctionError string          `json:"function_error,omitempty"`
-	Logs          string          `json:"logs"`
-	DurationMS    float64         `json:"duration_ms"`
-	BilledMS      int64           `json:"billed_duration_ms"`
-	ColdStart     bool            `json:"cold_start"`
-}
-
-var ErrTooManyRequests = errors.New("too many requests")
-
-// Invoke runs the function synchronously with payload as the event.
-func (s *Service) Invoke(ctx context.Context, name string, payload []byte) (*InvokeResult, error) {
-	f, err := store.Get[Function](s.env.Store, cFunctions, name)
-	if err != nil {
-		return nil, core.NotFound("function", name)
-	}
-	if len(payload) == 0 {
-		payload = []byte("{}")
-	}
-	if !json.Valid(payload) {
-		return nil, core.BadRequest("payload must be JSON")
-	}
-	reqID := uuid()
-	s.mu.Lock()
-	cold := s.warm[name] == nil
-	s.mu.Unlock()
-	cid, err := s.container(ctx, f)
-	if err != nil {
-		s.cw.Put(metricsNS, "Errors", map[string]string{"FunctionName": name}, "Count", 1, time.Time{})
-		return nil, fmt.Errorf("start function environment: %w", err)
-	}
-	rt, _ := findRuntime(f.Runtime)
-	stream := time.Now().UTC().Format("2006/01/02") + "/[$LATEST]" + cid[:12]
-	start := time.Now()
-	ex, err := s.env.Docker.C.CreateExec(docker.CreateExecOptions{
-		Container: cid, Cmd: rt.invoke, AttachStdin: true, AttachStdout: true, AttachStderr: true, WorkingDir: "/var/task",
-		Env: []string{"HC_REQUEST_ID=" + reqID, "HC_LOG_GROUP=" + f.LogGroup, "HC_LOG_STREAM=" + stream, "AWS_LAMBDA_REQUEST_ID=" + reqID},
-	})
-	if err != nil {
-		return nil, err
-	}
-	var stdout, stderr bytes.Buffer
-	tctx, cancel := context.WithTimeout(ctx, time.Duration(f.TimeoutSec)*time.Second)
-	defer cancel()
-	execErr := s.env.Docker.C.StartExec(ex.ID, docker.StartExecOptions{
-		InputStream: bytes.NewReader(payload), OutputStream: &stdout, ErrorStream: &stderr, Context: tctx,
-	})
-	dur := time.Since(start)
-	res := &InvokeResult{RequestID: reqID, StatusCode: 200, DurationMS: float64(dur.Microseconds()) / 1000, ColdStart: cold}
-	res.BilledMS = int64(math.Ceil(res.DurationMS))
-	timedOut := errors.Is(tctx.Err(), context.DeadlineExceeded)
-	switch {
-	case timedOut:
-		res.FunctionError = "Unhandled"
-		res.Payload, _ = json.Marshal(map[string]string{"errorMessage": fmt.Sprintf("Task timed out after %d.00 seconds", f.TimeoutSec), "errorType": "TimeoutError"})
-		go s.retire(name) // kill the runaway process
-	case execErr != nil:
-		return nil, execErr
-	default:
-		var out struct {
-			OK     bool            `json:"ok"`
-			Result json.RawMessage `json:"result"`
-			Error  json.RawMessage `json:"error"`
-		}
-		if err := json.Unmarshal(stdout.Bytes(), &out); err != nil {
-			res.FunctionError = "Unhandled"
-			res.Payload, _ = json.Marshal(map[string]string{"errorMessage": "Runtime exited without providing a reason", "errorType": "Runtime.ExitError"})
-		} else if out.OK {
-			res.Payload = out.Result
-		} else {
-			res.FunctionError = "Unhandled"
-			res.Payload = out.Error
-		}
-	}
-	if res.Payload == nil {
-		res.Payload = json.RawMessage("null")
-	}
-	logs := stderr.String()
-	res.Logs = logs
-	// CloudWatch Logs, in the familiar START/END/REPORT shape.
-	events := []cloudwatch.LogEvent{{Timestamp: start, Message: fmt.Sprintf("START RequestId: %s Version: $LATEST", reqID)}}
-	for _, line := range strings.Split(strings.TrimRight(logs, "\n"), "\n") {
-		if line != "" {
-			events = append(events, cloudwatch.LogEvent{Timestamp: time.Now(), Message: line})
-		}
-	}
-	if timedOut {
-		events = append(events, cloudwatch.LogEvent{Timestamp: time.Now(), Message: fmt.Sprintf("%s Task timed out after %d.00 seconds", time.Now().UTC().Format(time.RFC3339), f.TimeoutSec)})
-	}
-	events = append(events,
-		cloudwatch.LogEvent{Timestamp: time.Now(), Message: "END RequestId: " + reqID},
-		cloudwatch.LogEvent{Timestamp: time.Now(), Message: fmt.Sprintf("REPORT RequestId: %s\tDuration: %.2f ms\tBilled Duration: %d ms\tMemory Size: %d MB%s", reqID, res.DurationMS, res.BilledMS, f.MemoryMB, map[bool]string{true: "\tInit: cold start", false: ""}[cold])},
-	)
-	if err := s.cw.Append(f.LogGroup, stream, events...); err != nil {
-		log.Printf("lambda: write logs: %v", err)
-	}
-	dims := map[string]string{"FunctionName": name}
-	s.cw.Put(metricsNS, "Invocations", dims, "Count", 1, time.Time{})
-	s.cw.Put(metricsNS, "Duration", dims, "Milliseconds", res.DurationMS, time.Time{})
-	if res.FunctionError != "" {
-		s.cw.Put(metricsNS, "Errors", dims, "Count", 1, time.Time{})
-	} else {
-		s.cw.Put(metricsNS, "Errors", dims, "Count", 0, time.Time{})
-	}
-	if len(res.Logs) > 4096 {
-		res.Logs = res.Logs[len(res.Logs)-4096:]
-	}
-	return res, nil
-}
-
-func uuid() string {
-	h := core.RandHex(32)
-	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
-}
-
-// Exists reports whether a function exists (used by other services).
-func (s *Service) Exists(name string) bool { return store.Has(s.env.Store, cFunctions, name) }
-
-// ---- routes ----
-
-func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:aws:lambda:{region}:{account}:function:{name}")
-	r.Handle("GET /api/v1/lambda/runtimes", "lambda:ListRuntimes", s.listRuntimes)
-	r.Handle("GET /api/v1/lambda/functions", "lambda:ListFunctions", s.list)
-	r.Handle("POST /api/v1/lambda/functions", "lambda:CreateFunction", s.create)
-	r.Handle("GET /api/v1/lambda/functions/{name}", "lambda:GetFunction", s.get, res)
-	r.Handle("PATCH /api/v1/lambda/functions/{name}", "lambda:UpdateFunctionConfiguration", s.updateConfig, res)
-	r.Handle("PUT /api/v1/lambda/functions/{name}/code", "lambda:UpdateFunctionCode", s.updateCode, res)
-	r.Handle("GET /api/v1/lambda/functions/{name}/code", "lambda:GetFunction", s.getCode, res)
-	r.Handle("DELETE /api/v1/lambda/functions/{name}", "lambda:DeleteFunction", s.delete, res)
-	r.Handle("POST /api/v1/lambda/functions/{name}/invoke", "lambda:InvokeFunction", s.invoke, res)
-	r.Handle("PUT /api/v1/lambda/functions/{name}/url", "lambda:CreateFunctionUrlConfig", s.putURL, res)
-	r.Handle("/lambda-url/{name}/{path...}", "", s.serveURL, httpx.Public())
-	s.apigwRoutes(r)
-	s.esmRoutes(r)
-}
-
-func (s *Service) listRuntimes(c *httpx.Ctx) (any, error) { return runtimes, nil }
-
-func (s *Service) list(c *httpx.Ctx) (any, error) {
-	return store.List[Function](s.env.Store, cFunctions), nil
-}
-
-func (s *Service) get(c *httpx.Ctx) (any, error) {
-	f, err := store.Get[Function](s.env.Store, cFunctions, c.Param("name"))
-	if err != nil {
-		return nil, core.NotFound("function", c.Param("name"))
-	}
-	s.mu.Lock()
-	w := s.warm[f.Name]
-	s.mu.Unlock()
-	state := "Idle"
-	if w != nil {
-		state = "Warm"
-	}
-	return map[string]any{"configuration": f, "environment_state": state}, nil
-}
-
-var nameRe = regexp.MustCompile(`^[a-zA-Z0-9_-]{1,64}$`)
+// ---- configuration ----
 
 type configInput struct {
-	Runtime     string            `json:"runtime"`
-	Handler     string            `json:"handler"`
-	Description *string           `json:"description"`
-	MemoryMB    int64             `json:"memory_mb"`
-	TimeoutSec  int               `json:"timeout_seconds"`
-	Environment map[string]string `json:"environment"`
-	SubnetID    *string           `json:"subnet_id"`
-	Tags        core.Tags         `json:"tags"`
+	Runtime          string            `json:"runtime"`
+	Handler          string            `json:"handler"`
+	Description      *string           `json:"description"`
+	MemoryMB         int64             `json:"memory_mb"`
+	TimeoutSec       int               `json:"timeout_seconds"`
+	Environment      map[string]string `json:"environment"`
+	SubnetID         *string           `json:"subnet_id"`
+	SecurityGroupIDs []string          `json:"security_group_ids"`
+	Tags             core.Tags         `json:"tags"`
+	Role             *string           `json:"role"`
+	Layers           *[]string         `json:"layers"`
+	Architectures    []string          `json:"architectures"`
+	ImageConfig      *ImageConfig      `json:"image_config"`
+	DeadLetterTarget *string           `json:"dead_letter_target"`
 }
 
+// applyConfig validates and applies the parts of a configuration change that
+// need no other service; roles, layers and targets are checked by checkRefs.
 func applyConfig(f *Function, in configInput) error {
 	if in.Runtime != "" {
+		if f.isImage() {
+			return core.BadRequest("Runtime is not supported for functions with package type Image")
+		}
 		if _, ok := findRuntime(in.Runtime); !ok {
-			return core.BadRequest("unsupported runtime %q", in.Runtime)
+			return core.BadRequest("Value %s at 'runtime' failed to satisfy constraint: unsupported runtime", in.Runtime)
 		}
 		f.Runtime = in.Runtime
 	}
 	if in.Handler != "" {
-		if !strings.Contains(in.Handler, ".") {
-			return core.BadRequest("handler must look like file.function")
+		rt, _ := findRuntime(f.Runtime)
+		if !f.isImage() && !rt.validHandler(in.Handler) {
+			return core.BadRequest("handler %q must look like file.function for %s", in.Handler, f.Runtime)
 		}
 		f.Handler = in.Handler
 	}
 	if in.Description != nil {
+		if len(*in.Description) > 256 {
+			return core.BadRequest("description must be at most 256 characters")
+		}
 		f.Description = *in.Description
 	}
 	if in.MemoryMB != 0 {
 		if in.MemoryMB < 128 || in.MemoryMB > 10240 {
-			return core.BadRequest("memory_mb must be between 128 and 10240")
+			return core.BadRequest("MemorySize must be between 128 and 10240 MB")
 		}
 		f.MemoryMB = in.MemoryMB
 	}
 	if in.TimeoutSec != 0 {
 		if in.TimeoutSec < 1 || in.TimeoutSec > 900 {
-			return core.BadRequest("timeout_seconds must be between 1 and 900")
+			return core.BadRequest("Timeout must be between 1 and 900 seconds")
 		}
 		f.TimeoutSec = in.TimeoutSec
 	}
 	if in.Environment != nil {
+		size := 0
+		for k, v := range in.Environment {
+			if !envKeyRe.MatchString(k) {
+				return core.BadRequest("environment variable name %q must start with a letter and contain only letters, digits and _", k)
+			}
+			if reservedEnv[k] {
+				return core.BadRequest("Lambda was unable to configure your environment variables because the environment variables you have provided contains reserved keys that are currently not supported for modification. Reserved keys used in this request: %s", k)
+			}
+			size += len(k) + len(v)
+		}
+		if size > 4096 {
+			return core.BadRequest("environment variables exceed 4 KB")
+		}
 		f.Environment = in.Environment
 	}
 	if in.SubnetID != nil {
 		f.SubnetID = *in.SubnetID
 	}
+	if in.SecurityGroupIDs != nil {
+		f.SecurityGroupIDs = in.SecurityGroupIDs
+	}
 	if in.Tags != nil {
 		f.Tags = in.Tags
+	}
+	if in.Architectures != nil {
+		if len(in.Architectures) != 1 || (in.Architectures[0] != "x86_64" && in.Architectures[0] != "arm64") {
+			return core.BadRequest("Architectures must be [\"x86_64\"] or [\"arm64\"]")
+		}
+		f.Architectures = in.Architectures
+	}
+	if in.ImageConfig != nil {
+		if !f.isImage() {
+			return core.BadRequest("ImageConfig is only supported for functions with package type Image")
+		}
+		f.ImageConfig = in.ImageConfig
+	}
+	if in.Layers != nil {
+		if f.isImage() && len(*in.Layers) > 0 {
+			return core.BadRequest("Layers are not supported for functions with package type Image")
+		}
+		if len(*in.Layers) > 5 {
+			return core.BadRequest("Cannot reference more than 5 layers.")
+		}
 	}
 	return nil
 }
 
-func (s *Service) create(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Name string `json:"name"`
-		configInput
-		Code codeInput `json:"code"`
+// checkRefs validates references to other resources in a configuration change
+// (role, subnet, layers, dead-letter target) and resolves them in place.
+func (s *Service) checkRefs(authz authorizer, in *configInput) error {
+	if in.Role != nil && *in.Role != "" {
+		if s.Roles == nil {
+			return core.BadRequest("execution roles are not available")
+		}
+		arn, err := s.Roles.LambdaRole(*in.Role)
+		if err != nil {
+			var ce *core.Error
+			if errors.As(err, &ce) && ce.Code == "AccessDenied" {
+				return core.BadRequest("The role defined for the function cannot be assumed by Lambda.")
+			}
+			return core.BadRequest("The role defined for the function cannot be assumed by Lambda. (%v)", err)
+		}
+		if err := authz("iam:PassRole", arn); err != nil {
+			return err
+		}
+		*in.Role = arn
 	}
-	if err := c.Bind(&in); err != nil {
-		return nil, err
+	if in.SubnetID != nil && *in.SubnetID != "" && s.vpc != nil {
+		if _, err := s.vpc.SubnetVPC(*in.SubnetID); err != nil {
+			return core.BadRequest("subnet %s does not exist", *in.SubnetID)
+		}
 	}
-	if !nameRe.MatchString(in.Name) {
-		return nil, core.BadRequest("function name must be 1-64 letters, digits, hyphens or underscores")
+	if in.Layers != nil {
+		out := make([]string, 0, len(*in.Layers))
+		for _, l := range *in.Layers {
+			lv, err := s.layerByARN(l)
+			if err != nil {
+				return err
+			}
+			if err := authz("lambda:GetLayerVersion", lv.ARN); err != nil {
+				return err
+			}
+			out = append(out, lv.ARN)
+		}
+		*in.Layers = out
 	}
-	if store.Has(s.env.Store, cFunctions, in.Name) {
-		return nil, core.Conflict("function %q already exists", in.Name)
+	if in.DeadLetterTarget != nil && *in.DeadLetterTarget != "" {
+		if err := s.checkTarget(authz, *in.DeadLetterTarget, true); err != nil {
+			return err
+		}
 	}
-	if in.Runtime == "" {
-		in.Runtime = "python3.12"
-	}
-	rt, ok := findRuntime(in.Runtime)
-	if !ok {
-		return nil, core.BadRequest("unsupported runtime %q", in.Runtime)
-	}
-	f := Function{Name: in.Name, ARN: s.env.ARN("lambda", "function:"+in.Name), Runtime: rt.Name, Handler: rt.DefaultHandler,
-		MemoryMB: 128, TimeoutSec: 3, Environment: map[string]string{}, State: "Active", LogGroup: "/aws/lambda/" + in.Name,
-		URL: FunctionURL{AuthType: "NONE"}, CreatedAt: core.Now(), LastModified: core.Now()}
-	if err := applyConfig(&f, in.configInput); err != nil {
-		return nil, err
-	}
-	code, err := in.Code.zip()
-	if err != nil {
-		return nil, err
-	}
-	if code == nil {
-		code, _ = codeInput{Files: map[string]string{rt.DefaultFile: rt.Template}}.zip()
-		f.Handler = rt.DefaultHandler
-	}
-	sum, err := s.saveCode(f.Name, code)
-	if err != nil {
-		return nil, err
-	}
-	f.CodeSHA256, f.CodeSize = sum, int64(len(code))
-	return f, store.Put(s.env.Store, cFunctions, f.Name, f)
+	return nil
 }
 
-func (s *Service) update(name string, fn func(*Function) error) (Function, error) {
+func (s *Service) applyRefs(f *Function, in configInput) {
+	if in.Role != nil {
+		f.Role = *in.Role
+	}
+	if in.Layers != nil {
+		f.Layers = *in.Layers
+	}
+	if in.DeadLetterTarget != nil {
+		f.DeadLetterTarget = *in.DeadLetterTarget
+	}
+}
+
+// createSpec is a new function.
+type createSpec struct {
+	Name string
+	configInput
+	PackageType string
+	Zip         []byte // nil: the runtime's template
+	ImageURI    string
+	Publish     bool
+	VersionDesc string
+}
+
+func (s *Service) createFunction(ctx context.Context, authz authorizer, in createSpec) (Function, error) {
+	if !nameRe.MatchString(in.Name) {
+		return Function{}, core.BadRequest("function name must be 1-64 letters, digits, hyphens or underscores")
+	}
+	if in.PackageType == "" {
+		in.PackageType = "Zip"
+		if in.ImageURI != "" {
+			in.PackageType = "Image"
+		}
+	}
+	now := core.Now()
+	f := Function{Name: in.Name, ARN: s.fnARN(in.Name), MemoryMB: 128, TimeoutSec: 3, Environment: map[string]string{},
+		LogGroup: "/aws/lambda/" + in.Name, URL: FunctionURL{AuthType: "NONE"}, CreatedAt: now, LastModified: now,
+		PackageType: in.PackageType, Version: latest, RevisionID: uuid(), LastUpdateStatus: "Successful", Architectures: []string{hostArch()}}
+	var rt Runtime
+	switch in.PackageType {
+	case "Zip":
+		if in.Runtime == "" {
+			in.Runtime = "python3.12"
+		}
+		var ok bool
+		if rt, ok = findRuntime(in.Runtime); !ok {
+			return Function{}, core.BadRequest("Value %s at 'runtime' failed to satisfy constraint: unsupported runtime", in.Runtime)
+		}
+		f.Runtime, f.Handler = rt.Name, rt.DefaultHandler
+		if in.ImageURI != "" {
+			return Function{}, core.BadRequest("ImageUri is only supported for functions with package type Image")
+		}
+	case "Image":
+		if in.ImageURI == "" {
+			return Function{}, core.BadRequest("ImageUri is required for functions with package type Image")
+		}
+		if in.Runtime != "" || in.Handler != "" {
+			return Function{}, core.BadRequest("Runtime and Handler are not supported for functions with package type Image")
+		}
+		f.ImageURI = in.ImageURI
+	default:
+		return Function{}, core.BadRequest("PackageType must be Zip or Image")
+	}
+	if err := applyConfig(&f, in.configInput); err != nil {
+		return Function{}, err
+	}
+	if err := s.checkRefs(authz, &in.configInput); err != nil {
+		return Function{}, err
+	}
+	s.applyRefs(&f, in.configInput)
+	if store.Has(s.env.Store, cFunctions, in.Name) {
+		return Function{}, core.Conflict("Function already exist: %s", in.Name)
+	}
+	if f.isImage() {
+		sum := sha256.Sum256([]byte(f.ImageURI))
+		f.CodeSHA256 = hex.EncodeToString(sum[:])
+	} else {
+		code := in.Zip
+		if code == nil {
+			if rt.Template == "" {
+				return Function{}, core.BadRequest("code is required for runtime %s", rt.Name)
+			}
+			code, _ = zipFiles(map[string]string{rt.DefaultFile: rt.Template})
+			f.Handler = rt.DefaultHandler
+		}
+		sum, err := s.saveCode(f.Name, code)
+		if err != nil {
+			return Function{}, err
+		}
+		f.CodeSHA256, f.CodeSize = sum, int64(len(code))
+	}
+	f.State = "Pending"
+	// Runtime images are pulled once; container images are (re)pulled on every
+	// create and code update, since their tag may have moved.
+	if img := s.imageFor(f); s.imageReady(img) && (!f.isImage() || s.env.Docker == nil) {
+		f.State = "Active"
+	}
+	if err := store.Put(s.env.Store, cFunctions, f.Name, f); err != nil {
+		return f, err
+	}
+	if f.State == "Pending" {
+		go s.prepare(f.Name, f.RevisionID, true)
+	}
+	if in.Publish {
+		if _, err := s.publishVersion(f.Name, in.VersionDesc, "", ""); err != nil {
+			return f, err
+		}
+		f, _ = s.getLatest(f.Name)
+	}
+	return f, nil
+}
+
+// update applies fn to a function's $LATEST record, bumping its revision.
+func (s *Service) update(name, revision string, fn func(*Function) error) (Function, error) {
 	f, err := store.Update(s.env.Store, cFunctions, name, func(f *Function) error {
+		if revision != "" && f.RevisionID != "" && revision != f.RevisionID {
+			return core.Errf(http.StatusPreconditionFailed, "PreconditionFailed",
+				"The Revision Id provided does not match the latest Revision Id. Call the GetFunction/GetAlias API to retrieve the latest Revision Id")
+		}
 		if err := fn(f); err != nil {
 			return err
 		}
 		f.LastModified = time.Now().UTC()
+		f.RevisionID = uuid()
 		return nil
 	})
 	if errors.Is(err, store.ErrNotFound) {
-		return f, core.NotFound("function", name)
+		return f, fnNotFound(s.fnARN(name))
 	}
 	return f, err
 }
 
-func (s *Service) updateConfig(c *httpx.Ctx) (any, error) {
-	var in configInput
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	f, err := s.update(c.Param("name"), func(f *Function) error { return applyConfig(f, in) })
-	if err == nil {
-		go s.retire(f.Name)
+// modify changes a function's $LATEST record without touching its code or
+// configuration revision (policies, URLs, concurrency).
+func (s *Service) modify(name string, fn func(*Function) error) (Function, error) {
+	f, err := store.Update(s.env.Store, cFunctions, name, fn)
+	if errors.Is(err, store.ErrNotFound) {
+		return f, fnNotFound(s.fnARN(name))
 	}
 	return f, err
 }
 
-func (s *Service) updateCode(c *httpx.Ctx) (any, error) {
-	var in codeInput
-	if err := c.Bind(&in); err != nil {
-		return nil, err
-	}
-	code, err := in.zip()
+func (s *Service) updateConfiguration(authz authorizer, name, revision string, in configInput) (Function, error) {
+	cur, err := s.getLatest(name)
 	if err != nil {
-		return nil, err
+		return cur, err
 	}
-	if code == nil {
-		return nil, core.BadRequest("provide zip_base64 or files")
+	probe := cur
+	if err := applyConfig(&probe, in); err != nil {
+		return cur, err
 	}
-	name := c.Param("name")
-	if !store.Has(s.env.Store, cFunctions, name) {
-		return nil, core.NotFound("function", name)
+	if err := s.checkRefs(authz, &in); err != nil {
+		return cur, err
 	}
-	sum, err := s.saveCode(name, code)
-	if err != nil {
-		return nil, err
-	}
-	f, err := s.update(name, func(f *Function) error { f.CodeSHA256, f.CodeSize = sum, int64(len(code)); return nil })
-	if err == nil {
-		go s.retire(name)
-	}
-	return f, err
-}
-
-// getCode returns the function's files as text when they are small enough to edit in the console.
-func (s *Service) getCode(c *httpx.Ctx) (any, error) {
-	name := c.Param("name")
-	if !store.Has(s.env.Store, cFunctions, name) {
-		return nil, core.NotFound("function", name)
-	}
-	b, err := os.ReadFile(s.codePath(name))
-	if err != nil {
-		return nil, err
-	}
-	if c.Query("format") == "zip" {
-		c.W.Header().Set("Content-Type", "application/zip")
-		c.W.Header().Set("Content-Disposition", `attachment; filename="`+name+`.zip"`)
-		c.MarkWritten()
-		c.W.Write(b)
-		return nil, nil
-	}
-	files, err := unzip(b)
-	if err != nil {
-		return nil, err
-	}
-	out := map[string]string{}
-	editable := true
-	for n, data := range files {
-		if len(data) > 256<<10 || bytes.IndexByte(data, 0) >= 0 {
-			editable = false
-			continue
+	var pull bool
+	f, err := s.update(name, revision, func(f *Function) error {
+		oldImage := s.imageFor(*f)
+		if err := applyConfig(f, in); err != nil {
+			return err
 		}
-		out[n] = string(data)
+		s.applyRefs(f, in)
+		f.LastUpdateStatus, f.LastUpdateStatusReason = "Successful", ""
+		if img := s.imageFor(*f); img != oldImage && !s.imageReady(img) {
+			f.LastUpdateStatus, pull = "InProgress", true
+		}
+		return nil
+	})
+	if err != nil {
+		return f, err
 	}
-	if len(files) > 50 {
-		editable = false
+	s.invalidate(name, latest)
+	if pull {
+		go s.prepare(name, f.RevisionID, false)
 	}
-	sum := sha256.Sum256(b)
-	return map[string]any{"files": out, "editable": editable, "file_count": len(files), "sha256_hex": hex.EncodeToString(sum[:])}, nil
+	return s.getLatest(name)
 }
 
-func (s *Service) delete(c *httpx.Ctx) (any, error) {
-	name := c.Param("name")
-	if !store.Has(s.env.Store, cFunctions, name) {
-		return nil, core.NotFound("function", name)
+// codeSpec is new code for a function.
+type codeSpec struct {
+	Zip      []byte
+	ImageURI string
+	Publish  bool
+	Revision string
+}
+
+func (s *Service) updateCode(name string, in codeSpec) (Function, error) {
+	cur, err := s.getLatest(name)
+	if err != nil {
+		return cur, err
 	}
-	s.retire(name)
+	var sum string
+	switch {
+	case cur.isImage():
+		if in.ImageURI == "" || in.Zip != nil {
+			return cur, core.BadRequest("Please provide ImageUri when updating a function with packageType Image.")
+		}
+		h := sha256.Sum256([]byte(in.ImageURI))
+		sum = hex.EncodeToString(h[:])
+	default:
+		if in.ImageURI != "" {
+			return cur, core.BadRequest("Please don't provide ImageUri when updating a function with packageType Zip.")
+		}
+		if in.Zip == nil {
+			return cur, core.BadRequest("Please provide a source for function code (ZipFile or S3Bucket/S3Key).")
+		}
+		if sum, err = s.saveCode(name, in.Zip); err != nil {
+			return cur, err
+		}
+	}
+	var pull bool
+	f, err := s.update(name, in.Revision, func(f *Function) error {
+		f.CodeSHA256, f.LastUpdateStatus, f.LastUpdateStatusReason = sum, "Successful", ""
+		if f.isImage() {
+			f.ImageURI = in.ImageURI
+			if s.env.Docker != nil {
+				f.LastUpdateStatus, pull = "InProgress", true
+			}
+		} else {
+			f.CodeSize = int64(len(in.Zip))
+		}
+		return nil
+	})
+	if err != nil {
+		return f, err
+	}
+	s.invalidate(name, latest)
+	if pull {
+		go s.prepare(name, f.RevisionID, false)
+	}
+	if in.Publish {
+		if v, err := s.publishVersion(name, "", "", ""); err != nil {
+			return f, err
+		} else {
+			return v, nil
+		}
+	}
+	return s.getLatest(name)
+}
+
+// deleteFunction deletes a function (every version) or one published version.
+func (s *Service) deleteFunction(name, qualifier string) error {
+	f, err := s.getLatest(name)
+	if err != nil {
+		return err
+	}
+	if qualifier != "" && qualifier != latest {
+		if _, err := strconv.Atoi(qualifier); err != nil {
+			return core.BadRequest("Deletion of aliases is not supported by DeleteFunction; use DeleteAlias")
+		}
+		if !store.Has(s.env.Store, cVersions, name+":"+qualifier) {
+			return fnNotFound(f.qualifiedARN(qualifier))
+		}
+		for _, a := range s.aliases(name) {
+			if a.FunctionVersion == qualifier || a.Weights[qualifier] > 0 {
+				return core.Conflict("Unable to delete version because the following aliases reference it: [%s]", a.Name)
+			}
+		}
+		s.invalidate(name, qualifier)
+		_ = os.Remove(s.codeFile(Function{Name: name, Version: qualifier}))
+		_ = store.Delete(s.env.Store, cInvokeCfgs, name+":"+qualifier)
+		return store.Delete(s.env.Store, cVersions, name+":"+qualifier)
+	}
+	s.retireAll(name)
 	for _, m := range store.List[Mapping](s.env.Store, cMappings) {
-		if m.FunctionName == name {
+		if n, _ := parseRef(m.FunctionName); n == name {
 			_ = store.Delete(s.env.Store, cMappings, m.ID)
 		}
 	}
+	prefix := name + ":"
+	for _, coll := range []string{cVersions, cAliases, cInvokeCfgs} {
+		_ = s.env.Store.Retain(coll, func(id string, _ json.RawMessage) bool { return !strings.HasPrefix(id, prefix) })
+	}
+	_ = os.RemoveAll(s.env.Cfg.Path("lambda", "versions", name))
 	_ = os.Remove(s.codePath(name))
-	return nil, store.Delete(s.env.Store, cFunctions, name)
+	return store.Delete(s.env.Store, cFunctions, name)
 }
 
-func (s *Service) invoke(c *httpx.Ctx) (any, error) {
-	payload, err := io.ReadAll(io.LimitReader(c.R.Body, 6<<20))
-	if err != nil {
-		return nil, err
-	}
-	name := c.Param("name")
-	if c.Query("invocation_type") == "Event" {
-		if !s.Exists(name) {
-			return nil, core.NotFound("function", name)
+// reservedTotal sums the reserved concurrency of every function except one.
+func (s *Service) reservedTotal(except string) int {
+	n := 0
+	for _, f := range store.List[Function](s.env.Store, cFunctions) {
+		if f.Name != except && f.ReservedConcurrency != nil {
+			n += *f.ReservedConcurrency
 		}
-		go func() {
-			if _, err := s.Invoke(context.Background(), name, payload); err != nil {
-				log.Printf("lambda: async invoke %s: %v", name, err)
-			}
-		}()
-		return c.JSON(http.StatusAccepted, map[string]any{"status_code": 202})
 	}
-	return s.Invoke(c.R.Context(), name, payload)
+	return n
 }
 
-func (s *Service) putURL(c *httpx.Ctx) (any, error) {
-	var in FunctionURL
-	if err := c.Bind(&in); err != nil {
-		return nil, err
+func (s *Service) putConcurrency(name string, n int) (Function, error) {
+	if _, err := s.getLatest(name); err != nil {
+		return Function{}, err
 	}
-	if in.AuthType == "" {
-		in.AuthType = "NONE"
+	if n < 0 {
+		return Function{}, core.BadRequest("ReservedConcurrentExecutions must be at least 0")
 	}
-	if in.AuthType != "NONE" && in.AuthType != "HC_IAM" {
-		return nil, core.BadRequest("auth_type must be NONE or HC_IAM")
+	if s.reservedTotal(name)+n > AccountConcurrency-MinUnreserved {
+		return Function{}, core.BadRequest("Specified ReservedConcurrentExecutions for function decreases account's UnreservedConcurrentExecution below its minimum value of [%d].", MinUnreserved)
 	}
-	if in.Enabled {
-		in.URL = s.urlFor(c.Param("name"))
-	} else {
-		in.URL = ""
+	f, err := s.modify(name, func(f *Function) error { f.ReservedConcurrency = &n; return nil })
+	s.wakeAll(name)
+	return f, err
+}
+
+func (s *Service) deleteConcurrency(name string) error {
+	if _, err := s.getLatest(name); err != nil {
+		return err
 	}
-	return s.update(c.Param("name"), func(f *Function) error { f.URL = in; return nil })
+	_, err := s.modify(name, func(f *Function) error { f.ReservedConcurrency = nil; return nil })
+	s.wakeAll(name)
+	return err
+}
+
+func uuid() string {
+	h := core.RandHex(32)
+	return h[0:8] + "-" + h[8:12] + "-" + h[12:16] + "-" + h[16:20] + "-" + h[20:32]
 }
