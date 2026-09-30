@@ -183,6 +183,7 @@ func New(env *svc.Env, v *vpc.Service) *Service {
 		}
 	}
 	v.GroupChanged = s.groupChanged
+	v.RegisterMembers(s.fwMembers)
 	v.InUse = func(sg string) bool {
 		for _, i := range store.List[Instance](env.Store, cInstances) {
 			if i.State != "terminated" && slices.Contains(i.SecurityGroups, sg) {
@@ -722,6 +723,7 @@ func (s *Service) launch(inst Instance, network string) {
 		return
 	}
 	s.metadataRoute(ctx, cid, inst.VpcID)
+	s.vpc.ProtectNow(ctx, s.member(inst, cid))
 	_, _ = store.Update(s.env.Store, cInstances, inst.ID, func(x *Instance) error {
 		if x.State != "pending" { // terminated while launching
 			go s.env.Docker.Remove(cid)
@@ -892,6 +894,7 @@ func (s *Service) Terminate(id string) (Instance, error) {
 		x.State, x.TerminatedAt, x.PublicPorts, x.StateReason = "terminated", &n, map[string]int{}, "Client.UserInitiatedShutdown"
 		return nil
 	})
+	s.vpc.FirewallChanged() // its address leaves every group it was in
 	if err == nil && s.OnTerminate != nil {
 		s.OnTerminate(id)
 	}
@@ -916,6 +919,7 @@ func (s *Service) releaseVolumes(i Instance) {
 // instanceGone releases what a terminated instance held besides its
 // addresses and volumes: its disk snapshot image and cached role credentials.
 func (s *Service) instanceGone(i Instance) {
+	defer s.vpc.FirewallChanged()
 	s.dropAddress(i.ID)
 	if i.RootImage != "" {
 		_ = s.env.Docker.C.RemoveImage(i.RootImage)

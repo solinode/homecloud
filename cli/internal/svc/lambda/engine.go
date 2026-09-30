@@ -21,6 +21,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
 )
 
 // Concurrency limits. A function without reserved concurrency may run up to
@@ -48,15 +49,20 @@ type execEnv struct {
 	version  string
 	revision string // configuration the environment was built from
 	slot     int    // VPC address slot
-	port     int    // host port of the emulator (0: reach it with docker exec)
-	stream   string // CloudWatch log stream
-	busy     bool
-	used     bool // has served an invocation (the first one is a cold start)
-	dead     bool // destroy when released
-	lastUsed time.Time
-	expires  time.Time // role credentials expiry (zero without a role)
-	logs     *lineLog
-	stop     context.CancelFunc
+	// The environment's place in its VPC, for security group enforcement
+	// (only functions with a VPC configuration have groups).
+	vpcID, ip string
+	groups    []string
+	inVPC     bool
+	port      int    // host port of the emulator (0: reach it with docker exec)
+	stream    string // CloudWatch log stream
+	busy      bool
+	used      bool // has served an invocation (the first one is a cold start)
+	dead      bool // destroy when released
+	lastUsed  time.Time
+	expires   time.Time // role credentials expiry (zero without a role)
+	logs      *lineLog
+	stop      context.CancelFunc
 }
 
 // pool holds a function's environments across its versions.
@@ -230,6 +236,31 @@ func (s *Service) destroy(e *execEnv) {
 	if s.env.Docker != nil {
 		_ = s.env.Docker.Remove(e.id)
 	}
+	if e.inVPC && s.vpc != nil {
+		s.vpc.FirewallChanged() // its address leaves every group it was in
+	}
+}
+
+// member is an environment as a security group member. The emulator port is
+// published on the host for invocations and stays reachable from there; from
+// inside the VPC nothing reaches a function, as in AWS.
+func (s *Service) member(e *execEnv, cid string) vpc.Member {
+	return vpc.Member{Kind: "lambda", ID: e.fn, VpcID: e.vpcID, IP: e.ip, ContainerID: cid, Groups: e.groups, ExternalTCP: []int{riePort}}
+}
+
+// fwMembers lists the environments of functions with a VPC configuration.
+func (s *Service) fwMembers() []vpc.Member {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	var out []vpc.Member
+	for _, p := range s.pools {
+		for _, e := range p.envs {
+			if e.inVPC && !e.dead {
+				out = append(out, s.member(e, e.id))
+			}
+		}
+	}
+	return out
 }
 
 // invalidate retires the environments of a function version (after a
@@ -507,8 +538,10 @@ func (s *Service) startEnv(ctx context.Context, f Function, slot int) (*execEnv,
 	} else {
 		spec.Cmd = []string{f.Handler}
 	}
+	var pl *vpc.Placement
 	if s.vpc != nil {
-		pl, err := s.vpc.Place(f.SubnetID, slotOwner(f.Name, slot))
+		var err error
+		pl, err = s.vpc.Place(f.SubnetID, slotOwner(f.Name, slot))
 		if err != nil {
 			return nil, err
 		}
@@ -523,6 +556,9 @@ func (s *Service) startEnv(ctx context.Context, f Function, slot int) (*execEnv,
 	}
 	e := &execEnv{id: id, fn: f.Name, version: f.version(), revision: f.RevisionID, slot: slot, stream: stream, expires: expires,
 		lastUsed: time.Now(), logs: newLineLog()}
+	if pl != nil {
+		e.vpcID, e.ip, e.groups, e.inVPC = pl.VPC.ID, pl.IP, f.SecurityGroupIDs, f.SubnetID != ""
+	}
 	fail := func(err error) (*execEnv, error) {
 		s.destroy(e)
 		return nil, err
@@ -534,6 +570,9 @@ func (s *Service) startEnv(ctx context.Context, f Function, slot int) (*execEnv,
 	}
 	if err := s.env.Docker.Start(id); err != nil {
 		return fail(err)
+	}
+	if e.inVPC {
+		s.vpc.ProtectNow(ctx, s.member(e, id))
 	}
 	lctx, stop := context.WithCancel(context.Background())
 	e.stop = stop

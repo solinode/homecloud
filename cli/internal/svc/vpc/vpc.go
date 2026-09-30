@@ -2,9 +2,10 @@
 //
 // A VPC is one bridge network spanning the VPC CIDR. Subnets are ranges of it,
 // and resources launched into a subnet get a static IP from that range, so
-// everything inside a VPC can reach everything else by private IP or DNS name.
-// Security group ingress rules decide which ports are published on the host,
-// which is how resources become reachable from outside the VPC.
+// everything inside a VPC can reach everything else by private IP or DNS name
+// that its security groups allow (fwrules.go, fw.go). Security group ingress
+// rules also decide which ports are published on the host, which is how
+// resources become reachable from outside the VPC.
 package vpc
 
 import (
@@ -85,10 +86,13 @@ type SecurityGroup struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Ingress     []Rule `json:"ingress"`
-	// Egress rules are recorded, not enforced. Until EgressSet, a group has
-	// AWS's default rule allowing all outbound traffic.
-	Egress    []Rule    `json:"egress,omitempty"`
-	EgressSet bool      `json:"egress_set,omitempty"`
+	// Until EgressSet, a group has AWS's default rule allowing all outbound
+	// traffic; once egress rules were changed they are enforced (fwrules.go).
+	Egress    []Rule `json:"egress,omitempty"`
+	EgressSet bool   `json:"egress_set,omitempty"`
+	// SelfRule marks a default group that got AWS's rule allowing all
+	// inbound traffic from members of the group itself (it can be revoked).
+	SelfRule  bool      `json:"self_rule,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	Tags      core.Tags `json:"tags,omitempty"`
 }
@@ -115,6 +119,7 @@ type Service struct {
 	// NetworkChanged is called after a VPC's network was recreated (its
 	// internet access changed); containers were reconnected with their addresses.
 	NetworkChanged func(v VPC)
+	fw             firewall
 }
 
 func New(env *svc.Env) *Service { return &Service{env: env} }
@@ -126,6 +131,7 @@ const maxPublishedRange = 32
 // EnsureDefault creates the default VPC, its subnets and security group on first run,
 // and recreates the Docker network if it went missing.
 func (s *Service) EnsureDefault(ctx context.Context) error {
+	s.seedSelfRules()
 	for _, v := range store.List[VPC](s.env.Store, cVPCs) {
 		if err := s.ensureNetwork(v); err != nil {
 			return fmt.Errorf("vpc %s: %w", v.ID, err)
@@ -167,6 +173,27 @@ func (s *Service) EnsureDefault(ctx context.Context) error {
 	return nil
 }
 
+// selfRule is the rule of a default group that allows all inbound traffic
+// from resources in the group itself.
+func selfRule(groupID string) Rule {
+	return Rule{ID: core.NewID("sgr"), Protocol: "-1", FromPort: -1, ToPort: -1, SourceGroup: groupID}
+}
+
+// seedSelfRules gives default groups that predate security group filtering
+// AWS's self-referencing inbound rule (once; revoking it sticks).
+func (s *Service) seedSelfRules() {
+	for _, g := range store.List[SecurityGroup](s.env.Store, cSGs) {
+		if g.Name != "default" || g.SelfRule {
+			continue
+		}
+		_, _ = store.Update(s.env.Store, cSGs, g.ID, func(x *SecurityGroup) error {
+			x.SelfRule = true
+			x.Ingress = append(x.Ingress, selfRule(x.ID))
+			return nil
+		})
+	}
+}
+
 func (s *Service) overlapsAny(p netip.Prefix, taken map[string]string) string {
 	for c, name := range taken {
 		if q, err := netip.ParsePrefix(c); err == nil && q.Addr().Is4() && q.Overlaps(p) {
@@ -195,7 +222,8 @@ func (s *Service) createVPC(name string, cidr netip.Prefix, internet, def bool) 
 	if err := store.Put(s.env.Store, cVPCs, id, v); err != nil {
 		return v, err
 	}
-	sg := SecurityGroup{ID: core.NewID("sg"), VpcID: id, Name: "default", Description: "default VPC security group", Ingress: []Rule{}, CreatedAt: core.Now()}
+	sg := SecurityGroup{ID: core.NewID("sg"), VpcID: id, Name: "default", Description: "default VPC security group", CreatedAt: core.Now()}
+	sg.Ingress, sg.SelfRule = []Rule{selfRule(sg.ID)}, true
 	if s.AfterCreate != nil {
 		go s.AfterCreate(v)
 	}
@@ -711,7 +739,7 @@ func normalizeRule(r Rule) (Rule, error) {
 		r.Protocol = "tcp"
 	}
 	if r.Protocol != "tcp" && r.Protocol != "udp" {
-		return r, core.BadRequest("protocol must be tcp or udp")
+		return r, core.BadRequest("protocol must be tcp or udp (the EC2 API takes other protocols)")
 	}
 	if r.ToPort == 0 {
 		r.ToPort = r.FromPort
@@ -719,21 +747,24 @@ func normalizeRule(r Rule) (Rule, error) {
 	if r.FromPort < 1 || r.ToPort > 65535 || r.FromPort > r.ToPort {
 		return r, core.BadRequest("invalid port range %d-%d", r.FromPort, r.ToPort)
 	}
-	if r.ToPort-r.FromPort >= maxPublishedRange {
-		return r, core.BadRequest("port ranges are limited to %d ports", maxPublishedRange)
+	if r.SourceGroup != "" {
+		if r.CIDR != "" {
+			return r, core.BadRequest("a rule has one source: a cidr or a source_group")
+		}
+		r.ID = core.NewID("sgr")
+		return r, nil
 	}
 	if r.CIDR == "" {
 		r.CIDR = "0.0.0.0/0"
 	}
-	// Rules become published host ports, which can be bound to every interface
-	// or to loopback only; other source ranges cannot be enforced.
-	switch r.CIDR {
-	case "0.0.0.0/0", "127.0.0.1/32":
-	default:
-		if _, err := netip.ParsePrefix(r.CIDR); err != nil {
-			return r, core.BadRequest("invalid cidr %q", r.CIDR)
-		}
-		return r, core.BadRequest("cidr must be 0.0.0.0/0 (reachable from anywhere) or 127.0.0.1/32 (this host only); HomeCloud cannot filter other source ranges")
+	// 0.0.0.0/0 and 127.0.0.1/32 also become published host ports (bound to
+	// every interface or to loopback only), which limits their port range;
+	// other CIDRs only filter traffic inside the VPC.
+	if p, err := netip.ParsePrefix(r.CIDR); err != nil || !p.Addr().Is4() {
+		return r, core.BadRequest("invalid cidr %q", r.CIDR)
+	}
+	if (r.CIDR == "0.0.0.0/0" || r.CIDR == "127.0.0.1/32") && r.ToPort-r.FromPort >= maxPublishedRange {
+		return r, core.BadRequest("port ranges from %s are limited to %d ports", r.CIDR, maxPublishedRange)
 	}
 	r.ID = core.NewID("sgr")
 	return r, nil
@@ -747,6 +778,9 @@ func (s *Service) addRule(c *httpx.Ctx) (any, error) {
 	r, err := normalizeRule(in)
 	if err != nil {
 		return nil, err
+	}
+	if r.SourceGroup != "" && !store.Has(s.env.Store, cSGs, r.SourceGroup) {
+		return nil, core.NotFound("security group", r.SourceGroup)
 	}
 	g, err := store.Update(s.env.Store, cSGs, c.Param("id"), func(g *SecurityGroup) error {
 		g.Ingress = append(g.Ingress, r)

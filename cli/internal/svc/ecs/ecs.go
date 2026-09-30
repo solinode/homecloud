@@ -124,6 +124,7 @@ type Task struct {
 	VpcID          string         `json:"vpc_id"`
 	SubnetID       string         `json:"subnet_id"`
 	PrivateIP      string         `json:"private_ip"`
+	SecurityGroups []string       `json:"security_groups,omitempty"`
 	LastStatus     string         `json:"last_status"` // PROVISIONING | RUNNING | STOPPED
 	DesiredStatus  string         `json:"desired_status"`
 	StopReason     string         `json:"stop_reason,omitempty"`
@@ -188,7 +189,24 @@ func New(env *svc.Env, v *vpc.Service, lb *elb.Service, sec *secrets.Service) *E
 			e.hostCPU = float64(info.NCPU)
 		}
 	}
+	v.RegisterMembers(e.fwMembers)
 	return e
+}
+
+// member is a task as a security group member.
+func (e *ECS) member(t Task, cid string) vpc.Member {
+	return vpc.Member{Kind: "ecs", ID: t.ID, VpcID: t.VpcID, IP: t.PrivateIP, ContainerID: cid, Groups: t.SecurityGroups}
+}
+
+// fwMembers lists the running tasks, for security group enforcement.
+func (e *ECS) fwMembers() []vpc.Member {
+	var out []vpc.Member
+	for _, t := range store.List[Task](e.env.Store, cTasks) {
+		if t.ContainerID != "" && t.LastStatus == "RUNNING" && t.PrivateIP != "" {
+			out = append(out, e.member(t, t.ContainerID))
+		}
+	}
+	return out
 }
 
 func (e *ECS) taskLogFile(id string) string { return e.env.Cfg.Path("ecs-logs", id+".log") }
@@ -302,7 +320,7 @@ func (e *ECS) launch(ctx context.Context, ls launchSpec) (Task, error) {
 	}
 	t := Task{ID: id, ARN: e.env.ARN("ecs", "task/"+cluster+"/"+id), Cluster: cluster, ContainerName: td.ContainerName, Image: td.Image,
 		StartedBy: ls.StartedBy, Tags: ls.Tags, Service: service, TaskDefinition: tdKey(td.Family, td.Revision),
-		VpcID: pl.VPC.ID, SubnetID: pl.Subnet.ID, PrivateIP: pl.IP, LastStatus: "PROVISIONING", DesiredStatus: "RUNNING", CreatedAt: core.Now()}
+		VpcID: pl.VPC.ID, SubnetID: pl.Subnet.ID, PrivateIP: pl.IP, SecurityGroups: sgs, LastStatus: "PROVISIONING", DesiredStatus: "RUNNING", CreatedAt: core.Now()}
 	if err := store.Put(e.env.Store, cTasks, id, t); err != nil {
 		return t, err
 	}
@@ -369,6 +387,7 @@ func (e *ECS) launch(ctx context.Context, ls launchSpec) (Task, error) {
 	if err != nil {
 		return stop("CannotStartContainerError: " + err.Error())
 	}
+	e.vpc.ProtectNow(ctx, e.member(t, cid))
 	t, _ = store.Update(e.env.Store, cTasks, id, func(x *Task) error {
 		n := core.Now()
 		x.ContainerID, x.LastStatus, x.StartedAt, x.PublicPorts = cid, "RUNNING", &n, e.env.Docker.PublishedPorts(cid)
@@ -408,6 +427,7 @@ func (e *ECS) stopTask(t Task, reason string) {
 		x.LastStatus, x.DesiredStatus, x.StopReason, x.StoppedAt, x.ExitCode = "STOPPED", "STOPPED", reason, &n, code
 		return nil
 	})
+	e.vpc.FirewallChanged() // its address leaves every group it was in
 }
 
 // shipLogs copies new container output to CloudWatch Logs (awslogs driver).

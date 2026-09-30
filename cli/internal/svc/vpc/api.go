@@ -87,6 +87,9 @@ func (s *Service) groupChanged(id string, err error) {
 	if err == nil && s.GroupChanged != nil {
 		s.GroupChanged(id)
 	}
+	if err == nil {
+		s.FirewallChanged()
+	}
 }
 
 // EgressRules returns a group's outbound rules, including AWS's default

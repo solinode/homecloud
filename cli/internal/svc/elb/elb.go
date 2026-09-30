@@ -150,7 +150,31 @@ type Service struct {
 }
 
 func New(env *svc.Env, v *vpc.Service) *Service {
-	return &Service{env: env, vpc: v, health: map[string]*Target{}}
+	s := &Service{env: env, vpc: v, health: map[string]*Target{}}
+	v.RegisterMembers(s.fwMembers)
+	return s
+}
+
+// fwMembers lists the load balancers as security group members: targets see
+// the balancer's address as a member of the balancer's groups, so a target's
+// group must allow the balancer's group. Listener ports of internet-facing
+// balancers are published on the host and stay open to traffic from outside
+// the VPC.
+func (s *Service) fwMembers() []vpc.Member {
+	var out []vpc.Member
+	for _, lb := range store.List[LoadBalancer](s.env.Store, cLBs) {
+		if lb.ContainerID == "" || lb.PrivateIP == "" {
+			continue
+		}
+		m := vpc.Member{Kind: "elb", ID: lb.Name, VpcID: lb.VpcID, IP: lb.PrivateIP, ContainerID: lb.ContainerID, Groups: lb.SecurityGroups}
+		if lb.Scheme == "internet-facing" {
+			for _, l := range lb.Listeners {
+				m.ExternalTCP = append(m.ExternalTCP, l.Port)
+			}
+		}
+		out = append(out, m)
+	}
+	return out
 }
 
 var nameRe = regexp.MustCompile(`^[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,30}[a-zA-Z0-9])?$`)
@@ -772,7 +796,9 @@ func (s *Service) deleteLBIn(name string) error {
 		}
 	}
 	s.vpc.Release("elb:" + lb.Name)
-	return store.Delete(s.env.Store, cLBs, lb.Name)
+	err = store.Delete(s.env.Store, cLBs, lb.Name)
+	s.vpc.FirewallChanged() // its address leaves every group it was in
+	return err
 }
 
 // changeListeners edits listeners; port changes need a new container.
