@@ -36,9 +36,13 @@ const (
 var Region = DefaultRegion
 
 type Config struct {
-	DataDir       string `json:"data_dir"`
-	APIAddr       string `json:"api_addr"`
-	PublicHost    string `json:"public_host"` // host name clients use to reach published ports
+	DataDir    string `json:"data_dir"`
+	APIAddr    string `json:"api_addr"`
+	PublicHost string `json:"public_host"` // host name clients use to reach published ports
+	// ElasticIPPool is the IPv4 CIDR Elastic IPs are allocated from
+	// (default 203.0.113.0/24, a documentation range: the addresses are
+	// records, not routed).
+	ElasticIPPool string `json:"elastic_ip_pool,omitempty"`
 	S3Port        int    `json:"s3_port"`
 	S3ConsolePort int    `json:"s3_console_port"`
 	ECRPort       int    `json:"ecr_port"`

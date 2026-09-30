@@ -42,6 +42,7 @@ calls from inside them reach HomeCloud.
 | EventBridge | events | awsJson 1.1 | Buses, rules with full pattern syntax, targets with transforms |
 | EventBridge Scheduler | scheduler | restJson1 | Schedules and groups |
 | Elastic Load Balancing v2 | elasticloadbalancing | awsQuery | Application load balancers, target groups (instance and ip), listeners (HTTP/HTTPS with ACM certificates), rules (path and host conditions; forward, redirect and fixed-response actions), attributes, tags |
+| EC2 | ec2 | ec2 Query | Instances, security groups, key pairs, volumes and snapshots, VPC networking, launch templates, Elastic IPs (see notes) |
 | EC2 Auto Scaling | autoscaling | awsQuery | Groups from EC2 launch templates, target-tracking policies (average CPU), target group attachment, tags, suspend/resume, scaling activities |
 | Elastic Container Registry | ecr | awsJson 1.1 | Repositories, images (list, describe, batch get/delete), `get-login-password` for `docker login` against the HomeCloud registry, lifecycle and repository policies (stored, not enforced), tag mutability and scan settings (stored), tags |
 | Elastic Container Service | ecs | awsJson 1.1 | Clusters, task definitions (one container per task; images, ports, environment, Secrets Manager and SSM secrets, `awslogs` to CloudWatch Logs, task role credentials), services (Fargate/awsvpc, ELBv2 target group, rolling deployments with deployment status), RunTask/StopTask, capacity providers (FARGATE), tags |
@@ -49,6 +50,8 @@ calls from inside them reach HomeCloud.
 
 Notes:
 - Terraform's S3 support prefixes the endpoint host with the account ID, so use `http://localhost:PORT`, not an IP address.
+- EC2 Elastic IPs (`AllocateAddress`, `DescribeAddresses`, `AssociateAddress`, `DisassociateAddress`, `ReleaseAddress`) are records, not routed addresses. An allocation (`eipalloc-...`) reserves a stable address from the pool in the `elastic_ip_pool` config setting (default `203.0.113.0/24`, a documentation range), and an association (`eipassoc-...`) makes an instance report it as its public IP in `DescribeInstances`, network interfaces and the instance metadata service. It follows the instance across stop and start and is released from it when the instance is terminated. Only `vpc` addresses, one Elastic IP per instance (a second association replaces the first) and instance or primary-interface targets are supported, and bringing your own address is not. Traffic to an instance still arrives on the host ports published by its security groups at the HomeCloud host (`public_host`), not on the Elastic IP.
+- Security group changes (`Authorize`/`Revoke...Ingress`, `ModifyInstanceAttribute --groups`, `ModifyNetworkInterfaceAttribute --groups`) apply to running instances: HomeCloud recreates the instance's container when its published ports change (processes restart, disk, volumes and IP are kept). Egress rules are recorded but not enforced.
 - `StartSyncExecution` clients must disable host-prefix injection (`AWS_DISABLE_HOST_PREFIX_INJECTION=true`).
 
 ## Adding operations (for contributors)

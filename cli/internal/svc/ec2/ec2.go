@@ -283,6 +283,7 @@ func (s *Service) Routes(r *httpx.Router) {
 
 	s.efsRoutes(r)
 	s.networkRoutes(r)
+	s.addressRoutes(r)
 	r.Handle("GET /api/v1/ec2/volumes", "ec2:DescribeVolumes", s.listVolumes)
 	r.Handle("POST /api/v1/ec2/volumes", "ec2:CreateVolume", s.createVolumeRoute)
 	r.Handle("GET /api/v1/ec2/volumes/{id}", "ec2:DescribeVolumes", s.getVolume, volRes)
@@ -907,6 +908,7 @@ func (s *Service) releaseVolumes(i Instance) {
 // instanceGone releases what a terminated instance held besides its
 // addresses and volumes: its disk snapshot image and cached role credentials.
 func (s *Service) instanceGone(i Instance) {
+	s.dropAddress(i.ID)
 	if i.RootImage != "" {
 		_ = s.env.Docker.C.RemoveImage(i.RootImage)
 	}
@@ -979,8 +981,12 @@ func (s *Service) ChangeType(id, typ string) (Instance, error) {
 }
 
 // publicIP is the address an instance's published ports are reachable on:
-// the HomeCloud host, when it is configured as an IP address.
+// the HomeCloud host, when it is configured as an IP address, or the
+// instance's Elastic IP.
 func (s *Service) publicIP(i Instance) string {
+	if ip := s.elasticIPFor(i.ID); ip != "" {
+		return ip
+	}
 	if len(i.PublicPorts) == 0 {
 		return ""
 	}
