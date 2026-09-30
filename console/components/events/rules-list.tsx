@@ -12,16 +12,17 @@ import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { formatNumber } from "@/lib/format"
-import { useApi } from "@/lib/hooks"
+import { useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { EventRule } from "@/lib/types"
-import { RULES_PATH, describeSchedule, hasNextRun, isSchedule, patternSummary, ruleHref, useRuleActions } from "./common"
+import { BusSelect } from "./bus-select"
+import { RULES_PATH, busQuery, describeSchedule, hasNextRun, isSchedule, patternSummary, ruleHref, useRuleActions } from "./common"
 
 const columns: Column<EventRule>[] = [
   {
     id: "name",
     header: "Name",
     cell: (r) => (
-      <Link href={ruleHref(r.name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
+      <Link href={ruleHref(r.name, r.event_bus)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
         {r.name}
       </Link>
     ),
@@ -80,7 +81,9 @@ const columns: Column<EventRule>[] = [
 ]
 
 export function RulesList() {
-  const { data, error, isLoading, isValidating, mutate } = useApi<EventRule[]>(RULES_PATH, { refreshInterval: 15_000 })
+  const bus = useQueryParam("bus") || "default"
+  const setParam = useSetQueryParam()
+  const { data, error, isLoading, isValidating, mutate } = useApi<EventRule[]>(RULES_PATH, { refreshInterval: 15_000, query: busQuery(bus) })
   const [selected, setSelected] = useState<string[]>([])
   const actions = useRuleActions()
 
@@ -115,6 +118,7 @@ export function RulesList() {
         selection="multi"
         selected={selected}
         onSelectedChange={setSelected}
+        filters={<BusSelect size="sm" className="w-full md:w-56" value={bus} onChange={(b) => setParam("bus", b === "default" ? null : b)} />}
         searchPlaceholder="Find rules by name, schedule or pattern"
         defaultSort={{ id: "name" }}
         actions={
@@ -126,7 +130,7 @@ export function RulesList() {
               </Link>
             </Button>
             <Button size="sm" asChild>
-              <Link href="/events/create/">
+              <Link href={bus === "default" ? "/events/create/" : `/events/create/?bus=${encodeURIComponent(bus)}`}>
                 <Plus /> Create rule
               </Link>
             </Button>

@@ -62,11 +62,18 @@ export interface StateMachineSummary {
   executions: ExecutionCounts
 }
 
+export type StateMachineType = "STANDARD" | "EXPRESS"
+
 export interface StateMachine {
   name: string
   arn: string
   definition: AslMachine
   status: string
+  /** STANDARD (default) or EXPRESS */
+  type?: StateMachineType
+  /** execution role assumed for Task states */
+  role_arn?: string
+  description?: string
   created_at: string
   updated_at: string
   tags?: Tags
@@ -82,6 +89,8 @@ export interface CreateStateMachineInput {
   name: string
   /** A JSON object, or a string holding the JSON. */
   definition: AslMachine | string
+  type?: StateMachineType
+  role_arn?: string
   tags?: Tags
 }
 
@@ -112,6 +121,7 @@ export interface SfnExecution extends SfnExecutionSummary {
   error?: string
   cause?: string
   history?: SfnHistoryEvent[]
+  role_arn?: string
 }
 
 export interface StartExecutionInput {

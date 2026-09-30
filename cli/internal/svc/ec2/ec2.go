@@ -279,6 +279,7 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("DELETE /api/v1/ec2/images/{id}", "ec2:DeregisterImage", s.deregisterImage, imgRes)
 
 	s.efsRoutes(r)
+	s.networkRoutes(r)
 	r.Handle("GET /api/v1/ec2/volumes", "ec2:DescribeVolumes", s.listVolumes)
 	r.Handle("POST /api/v1/ec2/volumes", "ec2:CreateVolume", s.createVolumeRoute)
 	r.Handle("GET /api/v1/ec2/volumes/{id}", "ec2:DescribeVolumes", s.getVolume, volRes)

@@ -174,12 +174,34 @@ export interface TopicDetail extends Topic {
 
 // ---- EventBridge ----
 
+export interface InputTransformer {
+  /** variable name -> JSONPath into the event, e.g. {"id": "$.detail.id"} */
+  input_paths_map?: Record<string, string>
+  /** template with <variable> placeholders */
+  input_template: string
+}
+
+export interface TargetRetryPolicy {
+  /** 0-185 (default 185) */
+  maximum_retry_attempts?: number
+  /** 60-86400 seconds (default 86400) */
+  maximum_event_age_in_seconds?: number
+}
+
 export interface RuleTarget {
   id: string
-  /** Lambda function, SQS queue or SNS topic ARN */
+  /** Lambda function, SQS queue, SNS topic or state machine ARN */
   arn: string
   /** constant JSON sent instead of the event */
   input?: string
+  /** JSONPath of the part of the event to send */
+  input_path?: string
+  input_transformer?: InputTransformer
+  role_arn?: string
+  retry_policy?: TargetRetryPolicy
+  /** SQS queue ARN for events that could not be delivered */
+  dead_letter_arn?: string
+  message_group_id?: string
 }
 
 export interface EventRule {
@@ -204,7 +226,7 @@ export interface PutRuleInput {
   schedule_expression?: string
   event_pattern?: Record<string, unknown>
   state?: "ENABLED" | "DISABLED"
-  targets?: { id?: string; arn: string; input?: string }[]
+  targets?: (Omit<RuleTarget, "id"> & { id?: string })[]
 }
 
 export interface EventEntry {

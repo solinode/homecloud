@@ -193,6 +193,16 @@ func (s *Service) putSchedule(q *awsapi.Req, name string, create bool) (any, err
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
+	return s.putScheduleIn(q, name, create, in)
+}
+
+// authorizer is satisfied by *awsapi.Req and *httpx.Ctx, so the AWS and native handlers share their logic.
+type authorizer interface {
+	Authorize(action, resource string) error
+	Check(action, resource string) error
+}
+
+func (s *Service) putScheduleIn(q authorizer, name string, create bool, in ScheduleDef) (any, error) {
 	if in.GroupName == "" {
 		in.GroupName = "default"
 	}
@@ -298,7 +308,10 @@ func (s *Service) putSchedule(q *awsapi.Req, name string, create bool) (any, err
 }
 
 func (s *Service) getSchedule(q *awsapi.Req, name string) (any, error) {
-	group := q.R.URL.Query().Get("groupName")
+	return s.getScheduleIn(q, q.R.URL.Query().Get("groupName"), name)
+}
+
+func (s *Service) getScheduleIn(q authorizer, group, name string) (any, error) {
 	if group == "" {
 		group = "default"
 	}
@@ -313,7 +326,10 @@ func (s *Service) getSchedule(q *awsapi.Req, name string) (any, error) {
 }
 
 func (s *Service) deleteSchedule(q *awsapi.Req, name string) (any, error) {
-	group := q.R.URL.Query().Get("groupName")
+	return s.deleteScheduleIn(q, q.R.URL.Query().Get("groupName"), name)
+}
+
+func (s *Service) deleteScheduleIn(q authorizer, group, name string) (any, error) {
 	if group == "" {
 		group = "default"
 	}
@@ -397,6 +413,14 @@ func (s *Service) createScheduleGroup(q *awsapi.Req, name string) (any, error) {
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
+	tags := map[string]string{}
+	for _, t := range in.Tags {
+		tags[t.Key] = t.Value
+	}
+	return s.createScheduleGroupIn(q, name, tags)
+}
+
+func (s *Service) createScheduleGroupIn(q authorizer, name string, tags map[string]string) (any, error) {
 	if err := q.Authorize("scheduler:CreateScheduleGroup", s.groupARN(name)); err != nil {
 		return nil, err
 	}
@@ -408,8 +432,8 @@ func (s *Service) createScheduleGroup(q *awsapi.Req, name string) (any, error) {
 	}
 	now := awsapi.Time{Time: core.Now()}
 	g := storedGroup{ScheduleGroup: ScheduleGroup{Name: name, Arn: s.groupARN(name), State: "ACTIVE", CreationDate: now, LastModificationDate: now}, TagsStored: core.Tags{}}
-	for _, t := range in.Tags {
-		g.TagsStored[t.Key] = t.Value
+	for k, v := range tags {
+		g.TagsStored[k] = v
 	}
 	if err := store.Put(s.env.Store, cScheduleGroups, name, g); err != nil {
 		return nil, err
@@ -436,6 +460,10 @@ func (s *Service) getScheduleGroup(q *awsapi.Req, name string) (any, error) {
 }
 
 func (s *Service) deleteScheduleGroup(q *awsapi.Req, name string) (any, error) {
+	return s.deleteScheduleGroupIn(q, name)
+}
+
+func (s *Service) deleteScheduleGroupIn(q authorizer, name string) (any, error) {
 	if err := q.Authorize("scheduler:DeleteScheduleGroup", s.groupARN(name)); err != nil {
 		return nil, err
 	}

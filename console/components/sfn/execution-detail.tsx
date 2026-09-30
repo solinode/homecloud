@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from "react"
 import Link from "next/link"
+import { roleHref } from "@/components/iam/role-common"
 import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight, Loader2, Play, RefreshCw, Square } from "lucide-react"
 import { toast } from "sonner"
 
@@ -144,6 +145,16 @@ export function ExecutionDetail() {
             { label: "Started", value: formatDate(x.start_date) },
             { label: "Stopped", value: x.stop_date ? formatDate(x.stop_date) : "" },
             { label: "Duration", value: <span className="tabular-nums">{execDuration(x.start_date, x.stop_date, now)}</span> },
+            {
+              label: "Execution role",
+              value: x.role_arn ? (
+                <Link href={roleHref(x.role_arn.split("/").pop() ?? "")} className={cellLinkClass()}>
+                  {x.role_arn.split("/").pop()}
+                </Link>
+              ) : (
+                ""
+              ),
+            },
             { label: "Execution ARN", value: <CopyableText value={x.arn} />, wide: true },
           ]}
         />
@@ -233,6 +244,28 @@ function elapsed(ts: string, start: number): string {
   return `${(ms / 60_000).toFixed(1)} min`
 }
 
+/** eventResource reads the Task resource an event refers to (AWS: resourceType / resource). */
+function eventResource(e: SfnHistoryEvent): { type: string; name: string } | null {
+  const d = e.details as Record<string, unknown> | undefined
+  if (!d || typeof d !== "object") return null
+  const type = typeof d.resourceType === "string" ? d.resourceType : ""
+  const name = typeof d.resourceName === "string" ? d.resourceName : typeof d.resource === "string" ? d.resource : ""
+  return type || name ? { type: type || "resource", name } : null
+}
+
+const shortName = (n: string) => (n.startsWith("arn:") ? n.split(/[:/]/).pop() || n : n)
+
+/** resourceHref links a resource given by ARN (optimized integrations name the API action instead, e.g. "invoke"). */
+function resourceHref(type: string, name: string): string | null {
+  if (!name.startsWith("arn:")) return null
+  const n = encodeURIComponent(shortName(name))
+  if (type === "lambda") return `/lambda/function/?name=${n}`
+  if (type === "sqs") return `/sqs/queue/?name=${n}`
+  if (type === "sns") return `/sns/topic/?name=${n}`
+  if (type === "states") return `/sfn/state-machine/?name=${n}`
+  return null
+}
+
 function EventHistory({ history, start }: { history: SfnHistoryEvent[]; start: string }) {
   const [open, setOpen] = useState<Set<number>>(new Set())
   const t0 = history.length ? new Date(history[0].timestamp).getTime() : new Date(start).getTime()
@@ -265,10 +298,35 @@ function EventHistory({ history, start }: { history: SfnHistoryEvent[]; start: s
       value: (e) => e.id,
     },
     { id: "type", header: "Type", cell: (e) => <span className={cn("font-medium whitespace-nowrap", eventTone(e))}>{e.type}</span>, value: (e) => e.type },
-    { id: "state", header: "State", cell: (e) => e.state ?? <span className="text-muted-foreground">-</span>, value: (e) => e.state ?? "" },
+    { id: "state", header: "Step", cell: (e) => e.state ?? <span className="text-muted-foreground">-</span>, value: (e) => e.state ?? "" },
+    {
+      id: "resource",
+      header: "Resource",
+      cell: (e) => {
+        const r = eventResource(e)
+        if (!r) return <span className="text-muted-foreground">-</span>
+        const href = resourceHref(r.type, r.name)
+        return (
+          <span className="flex min-w-0 flex-col">
+            <span className="text-muted-foreground text-xs">{r.type}</span>
+            {href ? (
+              <Link href={href} className={cn(cellLinkClass(), "max-w-60 truncate")} onClick={(ev) => ev.stopPropagation()} title={r.name}>
+                {shortName(r.name)}
+              </Link>
+            ) : (
+              <span className="max-w-60 truncate" title={r.name}>
+                {shortName(r.name)}
+              </span>
+            )}
+          </span>
+        )
+      },
+      value: (e) => eventResource(e)?.name ?? "",
+      hideBelow: "lg",
+    },
     {
       id: "elapsed",
-      header: "Elapsed",
+      header: "Started after",
       cell: (e) => <span className="tabular-nums whitespace-nowrap">{elapsed(e.timestamp, t0)}</span>,
       value: (e) => new Date(e.timestamp).getTime(),
       hideBelow: "sm",
@@ -285,7 +343,7 @@ function EventHistory({ history, start }: { history: SfnHistoryEvent[]; start: s
   return (
     <DataTable
       title="Event history"
-      description="Click an event to see its details."
+      description="The execution's history events (as returned by GetExecutionHistory). Click an event to see its details."
       data={history}
       columns={columns}
       rowId={(e) => String(e.id)}

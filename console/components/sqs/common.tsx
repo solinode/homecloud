@@ -172,7 +172,9 @@ function RedriveDialog({ queue, onClose }: { queue: Queue | null; onClose: () =>
 
   const sources = queue?.dead_letter_source_queues ?? []
   const candidates = (queues ?? []).filter((q) => q.name !== queue?.name && q.fifo === queue?.fifo)
-  const total = queue ? queue.approximate_number_of_messages + queue.approximate_number_of_messages_not_visible + queue.approximate_number_of_messages_delayed : 0
+  // Prefer the refreshed list entry so the count updates after a redrive.
+  const live = queues?.find((q) => q.name === queue?.name) ?? queue
+  const total = live ? live.approximate_number_of_messages + live.approximate_number_of_messages_not_visible + live.approximate_number_of_messages_delayed : 0
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault()

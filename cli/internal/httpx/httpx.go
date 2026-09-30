@@ -219,6 +219,9 @@ func (c *Ctx) Authorize(action, resource string) error {
 	return core.Errf(http.StatusForbidden, "AccessDenied", "%s is not authorized to perform %s on %s", c.P.ARN, action, resource)
 }
 
+// Check is Authorize; it exists so a Ctx can stand in for an AWS request where handlers share logic.
+func (c *Ctx) Check(action, resource string) error { return c.Authorize(action, resource) }
+
 // MarkWritten tells the router the handler wrote its own response.
 func (c *Ctx) MarkWritten() { c.written = true }
 

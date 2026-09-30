@@ -18,11 +18,13 @@ import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
+import { InstanceProfilePicker } from "@/components/iam/instance-profile-picker"
 import { FILE_SYSTEMS_PATH, fileSystemHref, fsLabel } from "@/components/efs/common"
 import { api, errorMessage } from "@/lib/api"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import { formatMemoryMB, formatNumber, pluralize } from "@/lib/format"
-import type { FileSystem, Image, Instance, RunInstancesInput, SecurityGroup, SecurityGroupRule, Subnet } from "@/lib/types"
+import { CreateKeyPairDialog, KEY_PAIRS_PATH } from "./key-pairs-list"
+import type { FileSystem, Image, Instance, KeyPair, RunInstancesInput, SecurityGroup, SecurityGroupRule, Subnet } from "@/lib/types"
 import { cn } from "@/lib/utils"
 import { INSTANCES_PATH, InstanceTypeSelect, formatVcpu, instanceHref, useInstanceTypes } from "./instance-actions"
 
@@ -73,6 +75,14 @@ export function LaunchWizard() {
   const [volumes, setVolumes] = useState<VolumeRow[]>([])
   const [fsRows, setFsRows] = useState<FsRow[]>([])
   const [userData, setUserData] = useState("")
+  const [keyName, setKeyName] = useState("")
+  const [creatingKey, setCreatingKey] = useState(false)
+  const keyPairs = useApi<KeyPair[]>(KEY_PAIRS_PATH)
+  const [profile, setProfile] = useState("")
+  const [mdEndpoint, setMdEndpoint] = useState<"enabled" | "disabled">("enabled")
+  const [mdTokens, setMdTokens] = useState<"optional" | "required">("required")
+  const [mdHops, setMdHops] = useState("2")
+  const [mdTags, setMdTags] = useState<"enabled" | "disabled">("disabled")
   const [count, setCount] = useState("1")
   const [submitted, setSubmitted] = useState(false)
   const [pending, setPending] = useState(false)
@@ -153,8 +163,11 @@ export function LaunchWizard() {
       mounts.add(f.mount.replace(/\/+$/, ""))
     })
     if (userData.length > 16 * 1024) e.userData = "User data is limited to 16 KB"
+    if (keyName.trim() && !/^[\x20-\x7e]{1,255}$/.test(keyName.trim())) e.keyName = "Key pair names are 1-255 ASCII characters"
+    const hops = Number(mdHops)
+    if (!Number.isInteger(hops) || hops < 1 || hops > 64) e.mdHops = "Enter a hop limit from 1 to 64"
     return e
-  }, [name, imageId, type, subnetId, n, tagRows, volumes, fsRows, userData])
+  }, [name, imageId, type, subnetId, n, tagRows, volumes, fsRows, userData, keyName, mdHops])
   const err = (k: string) => (submitted ? errors[k] : undefined)
   const valid = Object.keys(errors).length === 0
 
@@ -171,6 +184,9 @@ export function LaunchWizard() {
       subnet_id: subnetId,
       security_group_ids: sgIds.length ? sgIds : undefined,
       user_data: userData || undefined,
+      key_name: keyName.trim() || undefined,
+      iam_instance_profile: profile || undefined,
+      metadata_options: { http_endpoint: mdEndpoint, http_tokens: mdTokens, hop_limit: Number(mdHops), instance_metadata_tags: mdTags },
       count: n,
       tags: rowsToTags(tagRows),
       volumes: volumes.length
@@ -366,6 +382,37 @@ export function LaunchWizard() {
                 </div>
               )}
             </div>
+          </Section>
+
+          {/* ---- Key pair ---- */}
+          <Section title="Key pair (login)" description="The key pair's public key is added to root's authorized_keys, for SSH to keep-alive images.">
+            <Field
+              label="Key pair name"
+              htmlFor="key-name"
+              optional
+              error={err("keyName")}
+              help="Choose a key pair, or create one. Leave as none to launch without a key pair."
+            >
+              <div className="flex max-w-md items-center gap-2">
+                <Select value={keyName || "__none"} onValueChange={(v) => setKeyName(v === "__none" ? "" : v)}>
+                  <SelectTrigger id="key-name" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none">Proceed without a key pair</SelectItem>
+                    {(keyPairs.data ?? []).map((k) => (
+                      <SelectItem key={k.id} value={k.name}>
+                        {k.name} ({k.type})
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                <Button type="button" variant="outline" size="sm" onClick={() => setCreatingKey(true)}>
+                  <Plus /> Create
+                </Button>
+              </div>
+              {creatingKey && <CreateKeyPairDialog onClose={() => setCreatingKey(false)} onCreated={(k) => setKeyName(k.name)} />}
+            </Field>
           </Section>
 
           {/* ---- Network ---- */}
@@ -596,6 +643,54 @@ export function LaunchWizard() {
           <Section title="Advanced details">
             <div className="flex flex-col gap-4">
               <Field
+                label="IAM instance profile"
+                htmlFor="inst-profile"
+                optional
+                help="The profile's role credentials are served to the instance by the metadata service (169.254.169.254)."
+              >
+                <div className="max-w-md">
+                  <InstanceProfilePicker id="inst-profile" value={profile} onChange={setProfile} />
+                </div>
+              </Field>
+              <div className="grid max-w-2xl gap-4 sm:grid-cols-2">
+                <Field label="Metadata accessible" htmlFor="md-endpoint">
+                  <Select value={mdEndpoint} onValueChange={(v) => setMdEndpoint(v as "enabled" | "disabled")}>
+                    <SelectTrigger id="md-endpoint" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="enabled">Enabled</SelectItem>
+                      <SelectItem value="disabled">Disabled</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Metadata version" htmlFor="md-tokens" help={mdTokens === "required" ? "Requests need a session token (PUT /latest/api/token)." : "Token-less IMDSv1 requests are also accepted."}>
+                  <Select value={mdTokens} onValueChange={(v) => setMdTokens(v as "optional" | "required")} disabled={mdEndpoint === "disabled"}>
+                    <SelectTrigger id="md-tokens" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="required">V2 only (token required)</SelectItem>
+                      <SelectItem value="optional">V1 and V2 (token optional)</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+                <Field label="Metadata response hop limit" htmlFor="md-hops" error={err("mdHops")}>
+                  <Input id="md-hops" type="number" min={1} max={64} value={mdHops} onChange={(e) => setMdHops(e.target.value)} className="w-28" disabled={mdEndpoint === "disabled"} />
+                </Field>
+                <Field label="Allow tags in metadata" htmlFor="md-tags">
+                  <Select value={mdTags} onValueChange={(v) => setMdTags(v as "enabled" | "disabled")} disabled={mdEndpoint === "disabled"}>
+                    <SelectTrigger id="md-tags" className="w-full">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="disabled">Disable</SelectItem>
+                      <SelectItem value="enabled">Enable</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </Field>
+              </div>
+              <Field
                 label="User data"
                 htmlFor="user-data"
                 optional
@@ -665,6 +760,8 @@ export function LaunchWizard() {
                 <SummaryItem label="Security groups">
                   {selectedGroups.length ? selectedGroups.map((g) => g.name).join(", ") : "default"}
                 </SummaryItem>
+                <SummaryItem label="Key pair">{keyName.trim() || "None"}</SummaryItem>
+                <SummaryItem label="Instance profile">{profile || "None"}</SummaryItem>
                 <SummaryItem label="Storage">
                   {volumes.length
                     ? `Root + ${pluralize(volumes.length, "volume")} (${volumes.reduce((a, v) => a + (Number(v.size) || 0), 0)} GiB)`

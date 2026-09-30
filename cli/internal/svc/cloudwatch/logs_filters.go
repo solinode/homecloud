@@ -202,16 +202,22 @@ func (s *Service) updateFilters(group string, fn func(f *groupFilters) error) er
 
 // ---- AWS operations ----
 
+type putMetricFilterIn struct {
+	LogGroupName          string                 `json:"logGroupName"`
+	FilterName            string                 `json:"filterName"`
+	FilterPattern         string                 `json:"filterPattern"`
+	MetricTransformations []MetricTransformation `json:"metricTransformations"`
+}
+
 func (s *Service) awsPutMetricFilter(q *awsapi.Req) (any, error) {
-	var in struct {
-		LogGroupName          string                 `json:"logGroupName"`
-		FilterName            string                 `json:"filterName"`
-		FilterPattern         string                 `json:"filterPattern"`
-		MetricTransformations []MetricTransformation `json:"metricTransformations"`
-	}
+	var in putMetricFilterIn
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
+	return s.putMetricFilter(q, in)
+}
+
+func (s *Service) putMetricFilter(q authorizer, in putMetricFilterIn) (any, error) {
 	if err := s.authGroup(q, "logs:PutMetricFilter", in.LogGroupName); err != nil {
 		return nil, err
 	}
@@ -309,14 +315,20 @@ func (s *Service) awsDescribeMetricFilters(q *awsapi.Req) (any, error) {
 	return map[string]any{"metricFilters": out}, nil
 }
 
+type deleteFilterIn struct {
+	LogGroupName string `json:"logGroupName"`
+	FilterName   string `json:"filterName"`
+}
+
 func (s *Service) awsDeleteMetricFilter(q *awsapi.Req) (any, error) {
-	var in struct {
-		LogGroupName string `json:"logGroupName"`
-		FilterName   string `json:"filterName"`
-	}
+	var in deleteFilterIn
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
+	return s.deleteMetricFilter(q, in)
+}
+
+func (s *Service) deleteMetricFilter(q authorizer, in deleteFilterIn) (any, error) {
 	if err := s.authGroup(q, "logs:DeleteMetricFilter", in.LogGroupName); err != nil {
 		return nil, err
 	}
@@ -358,18 +370,24 @@ func (s *Service) awsTestMetricFilter(q *awsapi.Req) (any, error) {
 	return map[string]any{"matches": matches}, nil
 }
 
+type putSubscriptionFilterIn struct {
+	LogGroupName   string `json:"logGroupName"`
+	FilterName     string `json:"filterName"`
+	FilterPattern  string `json:"filterPattern"`
+	DestinationArn string `json:"destinationArn"`
+	RoleArn        string `json:"roleArn"`
+	Distribution   string `json:"distribution"`
+}
+
 func (s *Service) awsPutSubscriptionFilter(q *awsapi.Req) (any, error) {
-	var in struct {
-		LogGroupName   string `json:"logGroupName"`
-		FilterName     string `json:"filterName"`
-		FilterPattern  string `json:"filterPattern"`
-		DestinationArn string `json:"destinationArn"`
-		RoleArn        string `json:"roleArn"`
-		Distribution   string `json:"distribution"`
-	}
+	var in putSubscriptionFilterIn
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
+	return s.putSubscriptionFilter(q, in)
+}
+
+func (s *Service) putSubscriptionFilter(q authorizer, in putSubscriptionFilterIn) (any, error) {
 	if !strings.HasPrefix(core.CanonicalARN(in.DestinationArn), "arn:"+core.Partition+":lambda:") || !strings.Contains(in.DestinationArn, ":function:") {
 		return nil, logsErr("InvalidParameterException", "HomeCloud subscription filters deliver to Lambda functions (destinationArn must be a function ARN)")
 	}
@@ -431,13 +449,14 @@ func (s *Service) awsDescribeSubscriptionFilters(q *awsapi.Req) (any, error) {
 }
 
 func (s *Service) awsDeleteSubscriptionFilter(q *awsapi.Req) (any, error) {
-	var in struct {
-		LogGroupName string `json:"logGroupName"`
-		FilterName   string `json:"filterName"`
-	}
+	var in deleteFilterIn
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
+	return s.deleteSubscriptionFilter(q, in)
+}
+
+func (s *Service) deleteSubscriptionFilter(q authorizer, in deleteFilterIn) (any, error) {
 	if err := s.authGroup(q, "logs:DeleteSubscriptionFilter", in.LogGroupName); err != nil {
 		return nil, err
 	}

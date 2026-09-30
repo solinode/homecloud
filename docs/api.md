@@ -114,6 +114,25 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 
 | Method | Path | IAM action |
 |---|---|---|
+| GET | `/api/v1/ec2/key-pairs` | `ec2:DescribeKeyPairs` |
+| POST | `/api/v1/ec2/key-pairs` | `ec2:CreateKeyPair` |
+| POST | `/api/v1/ec2/key-pairs/import` | `ec2:ImportKeyPair` |
+| DELETE | `/api/v1/ec2/key-pairs/{name}` | `ec2:DeleteKeyPair` |
+| GET | `/api/v1/ec2/snapshots` | `ec2:DescribeSnapshots` |
+| POST | `/api/v1/ec2/snapshots` | `ec2:CreateSnapshot` |
+| DELETE | `/api/v1/ec2/snapshots/{id}` | `ec2:DeleteSnapshot` |
+| GET | `/api/v1/ec2/internet-gateways` | `ec2:DescribeInternetGateways` |
+| POST | `/api/v1/ec2/internet-gateways` | `ec2:CreateInternetGateway` |
+| POST | `/api/v1/ec2/internet-gateways/{id}/attach` | `ec2:AttachInternetGateway` |
+| POST | `/api/v1/ec2/internet-gateways/{id}/detach` | `ec2:DetachInternetGateway` |
+| DELETE | `/api/v1/ec2/internet-gateways/{id}` | `ec2:DeleteInternetGateway` |
+| GET | `/api/v1/ec2/route-tables` | `ec2:DescribeRouteTables` |
+| POST | `/api/v1/ec2/route-tables` | `ec2:CreateRouteTable` |
+| DELETE | `/api/v1/ec2/route-tables/{id}` | `ec2:DeleteRouteTable` |
+| POST | `/api/v1/ec2/route-tables/{id}/routes` | `ec2:CreateRoute` |
+| DELETE | `/api/v1/ec2/route-tables/{id}/routes` | `ec2:DeleteRoute` |
+| POST | `/api/v1/ec2/route-tables/{id}/associations` | `ec2:AssociateRouteTable` |
+| DELETE | `/api/v1/ec2/route-tables/{id}/associations/{assoc}` | `ec2:DisassociateRouteTable` |
 | GET | `/api/v1/ec2/instances` | `ec2:DescribeInstances` |
 | POST | `/api/v1/ec2/instances` | `ec2:RunInstances` |
 | GET | `/api/v1/ec2/instances/{id}` | `ec2:DescribeInstances` |
@@ -402,6 +421,16 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/events/rules/{name}/run` | `events:PutEvents` |
 | POST | `/api/v1/events/events` | `events:PutEvents` |
 | POST | `/api/v1/events/test-pattern` | `events:TestEventPattern` |
+| GET | `/api/v1/events/buses` | `events:ListEventBuses` |
+| POST | `/api/v1/events/buses` | `events:CreateEventBus` |
+| DELETE | `/api/v1/events/buses/{name}` | `events:DeleteEventBus` |
+| GET | `/api/v1/scheduler/schedules` | `scheduler:ListSchedules` |
+| PUT | `/api/v1/scheduler/schedule-groups/{group}/schedules/{name}` | `scheduler:CreateSchedule` |
+| GET | `/api/v1/scheduler/schedule-groups/{group}/schedules/{name}` | `scheduler:GetSchedule` |
+| DELETE | `/api/v1/scheduler/schedule-groups/{group}/schedules/{name}` | `scheduler:DeleteSchedule` |
+| GET | `/api/v1/scheduler/schedule-groups` | `scheduler:ListScheduleGroups` |
+| POST | `/api/v1/scheduler/schedule-groups` | `scheduler:CreateScheduleGroup` |
+| DELETE | `/api/v1/scheduler/schedule-groups/{group}` | `scheduler:DeleteScheduleGroup` |
 
 ## Step Functions
 
@@ -512,6 +541,15 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | GET | `/api/v1/cloudwatch/metrics` | `cloudwatch:ListMetrics` |
 | POST | `/api/v1/cloudwatch/metrics` | `cloudwatch:PutMetricData` |
 | POST | `/api/v1/cloudwatch/metrics/query` | `cloudwatch:GetMetricStatistics` |
+| POST | `/api/v1/logs/insights/queries` | `logs:StartQuery` |
+| GET | `/api/v1/logs/insights/queries/{id}` | `logs:GetQueryResults` |
+| GET | `/api/v1/logs/groups/{group}/metric-filters` | `logs:DescribeMetricFilters` |
+| PUT | `/api/v1/logs/groups/{group}/metric-filters/{name}` | `logs:PutMetricFilter` |
+| DELETE | `/api/v1/logs/groups/{group}/metric-filters/{name}` | `logs:DeleteMetricFilter` |
+| GET | `/api/v1/logs/groups/{group}/subscription-filters` | `logs:DescribeSubscriptionFilters` |
+| PUT | `/api/v1/logs/groups/{group}/subscription-filters/{name}` | `logs:PutSubscriptionFilter` |
+| DELETE | `/api/v1/logs/groups/{group}/subscription-filters/{name}` | `logs:DeleteSubscriptionFilter` |
+| GET | `/api/v1/cloudwatch/alarms/{name}/history` | `cloudwatch:DescribeAlarmHistory` |
 
 ## CloudTrail (audit log)
 

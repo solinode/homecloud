@@ -470,6 +470,7 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("POST /api/v1/cloudwatch/metrics/query", "cloudwatch:GetMetricStatistics", s.query)
 	s.alarmRoutes(r)
 	s.logRoutes(r)
+	s.nativeLogRoutes(r)
 }
 
 func (s *Service) listMetrics(c *httpx.Ctx) (any, error) {

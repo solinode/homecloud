@@ -73,9 +73,16 @@ func (s *Service) groupARN(name string) string { return s.env.ARN("logs", "log-g
 
 // authGroup authorizes an action on a log group. Policies usually name groups
 // as "log-group:NAME:*", so that form is tried first.
-func (s *Service) authGroup(q *awsapi.Req, action, group string) error {
+// authorizer is satisfied by *awsapi.Req and *httpx.Ctx, so the AWS and native
+// handlers share their logic.
+type authorizer interface {
+	Authorize(action, resource string) error
+	Check(action, resource string) error
+}
+
+func (s *Service) authGroup(q authorizer, action, group string) error {
 	arn := s.groupARN(group)
-	if q.P != nil && q.P.Can(action, arn+":*") {
+	if q.Check(action, arn+":*") == nil {
 		return q.Authorize(action, arn+":*")
 	}
 	return q.Authorize(action, arn)
@@ -969,20 +976,26 @@ func (r *queryRegistry) get(id string) *insightsRun {
 	return r.runs[id]
 }
 
+type startQueryIn struct {
+	QueryLanguage       string   `json:"queryLanguage"`
+	LogGroupName        string   `json:"logGroupName"`
+	LogGroupNames       []string `json:"logGroupNames"`
+	LogGroupIdentifiers []string `json:"logGroupIdentifiers"`
+	StartTime           int64    `json:"startTime"`
+	EndTime             int64    `json:"endTime"`
+	QueryString         string   `json:"queryString"`
+	Limit               int      `json:"limit"`
+}
+
 func (s *Service) awsStartQuery(q *awsapi.Req) (any, error) {
-	var in struct {
-		QueryLanguage       string   `json:"queryLanguage"`
-		LogGroupName        string   `json:"logGroupName"`
-		LogGroupNames       []string `json:"logGroupNames"`
-		LogGroupIdentifiers []string `json:"logGroupIdentifiers"`
-		StartTime           int64    `json:"startTime"`
-		EndTime             int64    `json:"endTime"`
-		QueryString         string   `json:"queryString"`
-		Limit               int      `json:"limit"`
-	}
+	var in startQueryIn
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
+	return s.startQuery(q, in)
+}
+
+func (s *Service) startQuery(q authorizer, in startQueryIn) (any, error) {
 	var names []string
 	if in.LogGroupName != "" {
 		names = append(names, in.LogGroupName)
@@ -1057,9 +1070,13 @@ func (s *Service) awsGetQueryResults(q *awsapi.Req) (any, error) {
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
-	run := queries.get(in.QueryID)
+	return s.queryResults(q, in.QueryID)
+}
+
+func (s *Service) queryResults(q authorizer, id string) (any, error) {
+	run := queries.get(id)
 	if run == nil {
-		return nil, logsErr("ResourceNotFoundException", "query %s does not exist", in.QueryID)
+		return nil, logsErr("ResourceNotFoundException", "query %s does not exist", id)
 	}
 	if err := s.authGroup(q, "logs:GetQueryResults", run.Group); err != nil {
 		return nil, err

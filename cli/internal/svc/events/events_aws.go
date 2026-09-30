@@ -629,15 +629,21 @@ func toAWSBus(b Bus) awsBus {
 	return out
 }
 
+type createBusIn struct {
+	Name, EventSourceName, Description, KmsKeyIdentifier string
+	DeadLetterConfig                                     *struct{ Arn string }
+	Tags                                                 []awsTag
+}
+
 func (s *Service) awsCreateEventBus(q *awsapi.Req) (any, error) {
-	var in struct {
-		Name, EventSourceName, Description, KmsKeyIdentifier string
-		DeadLetterConfig                                     *struct{ Arn string }
-		Tags                                                 []awsTag
-	}
+	var in createBusIn
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
+	return s.createBus(q, in)
+}
+
+func (s *Service) createBus(q authorizer, in createBusIn) (any, error) {
 	if err := q.Authorize("events:CreateEventBus", s.busARN(in.Name)); err != nil {
 		return nil, err
 	}
@@ -731,7 +737,11 @@ func (s *Service) awsDeleteEventBus(q *awsapi.Req) (any, error) {
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
-	name := busName(in.Name)
+	return s.deleteBus(q, in.Name)
+}
+
+func (s *Service) deleteBus(q authorizer, bus string) (any, error) {
+	name := busName(bus)
 	if err := q.Authorize("events:DeleteEventBus", s.busARN(name)); err != nil {
 		return nil, err
 	}

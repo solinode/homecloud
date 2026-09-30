@@ -117,33 +117,56 @@ func (s *Service) busExists(name string) bool {
 }
 
 func (s *Service) Routes(r *httpx.Router) {
-	res := httpx.Res("arn:aws:events:{region}:{account}:rule/{name}")
-	r.Handle("GET /api/v1/events/rules", "events:ListRules", s.list)
+	// Rules live on a bus (?event_bus=, default "default"), so their ARN is worked out in the handler.
+	res := httpx.Deferred()
+	r.Handle("GET /api/v1/events/rules", "events:ListRules", s.list, httpx.Deferred())
 	r.Handle("PUT /api/v1/events/rules/{name}", "events:PutRule", s.put, res)
 	r.Handle("GET /api/v1/events/rules/{name}", "events:DescribeRule", s.get, res)
 	r.Handle("DELETE /api/v1/events/rules/{name}", "events:DeleteRule", s.delete, res)
 	r.Handle("POST /api/v1/events/rules/{name}/enable", "events:EnableRule", s.enable, res)
 	r.Handle("POST /api/v1/events/rules/{name}/disable", "events:DisableRule", s.disable, res)
 	r.Handle("POST /api/v1/events/rules/{name}/run", "events:PutEvents", s.runNow, res)
+	s.nativeBusRoutes(r)
+	s.nativeSchedulerRoutes(r)
 	r.Handle("POST /api/v1/events/events", "events:PutEvents", s.putEvents)
 	r.Handle("POST /api/v1/events/test-pattern", "events:TestEventPattern", s.testPattern)
 }
 
-// defaultRules lists the default bus's rules (the native API's view).
-func (s *Service) defaultRules() []Rule {
-	out := []Rule{}
-	for _, r := range store.List[Rule](s.env.Store, cRules) {
-		if r.EventBus == "" || r.EventBus == "default" {
-			out = append(out, r)
-		}
+// qbus is the event bus a native request addresses.
+func qbus(c *httpx.Ctx) string {
+	if b := c.Query("event_bus"); b != "" {
+		return b
 	}
-	return out
+	return "default"
 }
 
-func (s *Service) list(c *httpx.Ctx) (any, error) { return s.defaultRules(), nil }
+// authRule authorizes action on a rule of the request's bus and returns the bus.
+func (s *Service) authRule(c *httpx.Ctx, action, name string) (string, error) {
+	bus := qbus(c)
+	return bus, c.Authorize(action, s.ruleARN(bus, name))
+}
+
+func (s *Service) list(c *httpx.Ctx) (any, error) {
+	bus := qbus(c)
+	if err := c.Authorize("events:ListRules", s.ruleARN(bus, "*")); err != nil {
+		return nil, err
+	}
+	if !s.busExists(bus) {
+		return nil, core.NotFound("event bus", bus)
+	}
+	out := s.busRules(bus)
+	if out == nil {
+		out = []Rule{}
+	}
+	return out, nil
+}
 
 func (s *Service) get(c *httpx.Ctx) (any, error) {
-	r, err := store.Get[Rule](s.env.Store, cRules, c.Param("name"))
+	bus, err := s.authRule(c, "events:DescribeRule", c.Param("name"))
+	if err != nil {
+		return nil, err
+	}
+	r, err := store.Get[Rule](s.env.Store, cRules, ruleKey(bus, c.Param("name")))
 	if err != nil {
 		return nil, core.NotFound("rule", c.Param("name"))
 	}
@@ -312,6 +335,12 @@ func (s *Service) put(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	name := c.Param("name")
+	bus := qbus(c)
+	// The query parameter names the bus, as for every other rule route; a body
+	// value is accepted only when it agrees.
+	if in.EventBus != "" && in.EventBus != bus {
+		return nil, core.BadRequest("event_bus in the body (%s) does not match the event_bus query parameter (%s)", in.EventBus, bus)
+	}
 	if len(in.Targets) > 5 {
 		return nil, core.BadRequest("a rule has at most 5 targets")
 	}
@@ -335,21 +364,25 @@ func (s *Service) put(c *httpx.Ctx) (any, error) {
 			return nil, core.BadRequest("target %s does not exist (use a Lambda function, SQS queue, SNS topic or state machine ARN)", t.ARN)
 		}
 	}
-	if err := c.Authorize("events:PutRule", s.ruleARN("default", name)); err != nil {
+	if err := c.Authorize("events:PutRule", s.ruleARN(bus, name)); err != nil {
 		return nil, err
 	}
-	if _, err := s.PutRule(RuleInput{Name: name, Bus: "default", Description: in.Description, ScheduleExpression: in.ScheduleExpression,
+	if _, err := s.PutRule(RuleInput{Name: name, Bus: bus, Description: in.Description, ScheduleExpression: in.ScheduleExpression,
 		State: in.State, EventPattern: in.EventPattern, RoleARN: in.RoleARN}); err != nil {
 		return nil, err
 	}
 	if in.Targets == nil {
 		in.Targets = []Target{}
 	}
-	return store.Update(s.env.Store, cRules, name, func(r *Rule) error { r.Targets = in.Targets; return nil })
+	return store.Update(s.env.Store, cRules, ruleKey(bus, name), func(r *Rule) error { r.Targets = in.Targets; return nil })
 }
 
 func (s *Service) delete(c *httpx.Ctx) (any, error) {
-	if err := store.Delete(s.env.Store, cRules, c.Param("name")); err != nil {
+	bus, err := s.authRule(c, "events:DeleteRule", c.Param("name"))
+	if err != nil {
+		return nil, err
+	}
+	if err := store.Delete(s.env.Store, cRules, ruleKey(bus, c.Param("name"))); err != nil {
 		return nil, core.NotFound("rule", c.Param("name"))
 	}
 	return nil, nil
@@ -374,10 +407,18 @@ func (s *Service) SetState(bus, name, state string) (Rule, error) {
 }
 
 func (s *Service) enable(c *httpx.Ctx) (any, error) {
-	return s.SetState("default", c.Param("name"), "ENABLED")
+	bus, err := s.authRule(c, "events:EnableRule", c.Param("name"))
+	if err != nil {
+		return nil, err
+	}
+	return s.SetState(bus, c.Param("name"), "ENABLED")
 }
 func (s *Service) disable(c *httpx.Ctx) (any, error) {
-	return s.SetState("default", c.Param("name"), "DISABLED")
+	bus, err := s.authRule(c, "events:DisableRule", c.Param("name"))
+	if err != nil {
+		return nil, err
+	}
+	return s.SetState(bus, c.Param("name"), "DISABLED")
 }
 
 // event builds an EventBridge-shaped event envelope.
@@ -512,12 +553,16 @@ func (s *Service) fire(ctx context.Context, r Rule, ev map[string]any) {
 }
 
 func (s *Service) runNow(c *httpx.Ctx) (any, error) {
-	r, err := store.Get[Rule](s.env.Store, cRules, c.Param("name"))
+	bus, err := s.authRule(c, "events:PutEvents", c.Param("name"))
+	if err != nil {
+		return nil, err
+	}
+	r, err := store.Get[Rule](s.env.Store, cRules, ruleKey(bus, c.Param("name")))
 	if err != nil {
 		return nil, core.NotFound("rule", c.Param("name"))
 	}
 	s.fire(c.R.Context(), r, s.event("aws.events", "Scheduled Event", []string{r.ARN}, nil, time.Time{}))
-	return store.Get[Rule](s.env.Store, cRules, r.Name)
+	return store.Get[Rule](s.env.Store, cRules, ruleKey(bus, r.Name))
 }
 
 type entry struct {
