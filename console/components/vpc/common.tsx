@@ -132,6 +132,7 @@ export const WELL_KNOWN_PORTS: Record<number, string> = {
 }
 
 export function ruleType(r: Pick<SecurityGroupRule, "protocol" | "from_port" | "to_port">): string {
+  if (r.protocol === "-1") return "All traffic"
   if (r.from_port === r.to_port) {
     const n = WELL_KNOWN_PORTS[r.from_port]
     if (n && !(r.protocol === "udp" && r.from_port !== 53)) return n
@@ -140,13 +141,29 @@ export function ruleType(r: Pick<SecurityGroupRule, "protocol" | "from_port" | "
 }
 
 export function portRange(r: Pick<SecurityGroupRule, "from_port" | "to_port">): string {
+  if (r.from_port < 0) return "All"
   return r.from_port === r.to_port ? String(r.from_port) : `${r.from_port}-${r.to_port}`
+}
+
+/** ruleProtocol names a rule's protocol ("-1" is all traffic). */
+export function ruleProtocol(r: Pick<SecurityGroupRule, "protocol">): string {
+  return r.protocol === "-1" ? "All" : r.protocol.toUpperCase()
+}
+
+/** ruleSource is where a rule's traffic may come from: a CIDR or a security group. */
+export function ruleSource(r: Pick<SecurityGroupRule, "cidr" | "source_group">): string {
+  return r.source_group || r.cidr || "-"
+}
+
+/** ruleSummary renders "TCP 80 from 0.0.0.0/0" or "TCP 5432 from sg-0abc...". */
+export function ruleSummary(r: SecurityGroupRule): string {
+  return `${ruleProtocol(r)} ${portRange(r)} from ${ruleSource(r)}`
 }
 
 /** rulesSummary renders "tcp 80, tcp 443" (first few rules). */
 export function rulesSummary(rules: SecurityGroupRule[], max = 4): string {
   if (!rules.length) return ""
-  const parts = rules.slice(0, max).map((r) => `${r.protocol} ${portRange(r)}`)
+  const parts = rules.slice(0, max).map((r) => `${r.protocol === "-1" ? "all" : r.protocol} ${portRange(r)}`)
   if (rules.length > max) parts.push(`+${rules.length - max} more`)
   return parts.join(", ")
 }
@@ -180,7 +197,10 @@ export interface RuleDraft {
   protocol: "tcp" | "udp"
   from: string
   to: string
+  /** where the traffic comes from: an IPv4 CIDR or another security group of the VPC */
+  source: "cidr" | "group"
   cidr: string
+  sourceGroup: string
   description: string
 }
 
@@ -193,7 +213,9 @@ export function newRuleDraft(preset = "Custom TCP"): RuleDraft {
     protocol: p.protocol,
     from: p.port ? String(p.port) : "",
     to: p.port ? String(p.port) : "",
+    source: "cidr",
     cidr: "0.0.0.0/0",
+    sourceGroup: "",
     description: "",
   }
 }
@@ -202,6 +224,13 @@ export interface RuleErrors {
   from?: string
   to?: string
   cidr?: string
+  group?: string
+}
+
+/** publishes: rules from anywhere or from this host are also published as host ports, which limits their range. */
+const publishes = (cidr: string) => {
+  const c = parseCidr(cidr)
+  return !!c && (c.text === "0.0.0.0/0" || c.text === "127.0.0.1/32")
 }
 
 export function validateRule(d: RuleDraft): RuleErrors {
@@ -211,16 +240,21 @@ export function validateRule(d: RuleDraft): RuleErrors {
   if (!d.from.trim() || !Number.isInteger(from) || from < 1 || from > 65535) e.from = "Port 1-65535"
   if (!Number.isInteger(to) || to < 1 || to > 65535) e.to = "Port 1-65535"
   else if (!e.from && to < from) e.to = "Must be >= from port"
-  else if (!e.from && to - from >= MAX_PORT_RANGE) e.to = `At most ${MAX_PORT_RANGE} ports per rule`
-  const c = validateSourceCidr(d.cidr)
-  if (c) e.cidr = c
+  else if (!e.from && d.source === "cidr" && publishes(d.cidr) && to - from >= MAX_PORT_RANGE) e.to = `At most ${MAX_PORT_RANGE} ports per rule from ${parseCidr(d.cidr)?.text}`
+  if (d.source === "group") {
+    if (!d.sourceGroup) e.group = "Select a security group"
+  } else {
+    const c = validateSourceCidr(d.cidr)
+    if (c) e.cidr = c
+  }
   return e
 }
 
 export function ruleBody(d: RuleDraft) {
   const from = Number(d.from)
   const to = d.to.trim() === "" ? from : Number(d.to)
-  return { protocol: d.protocol, from_port: from, to_port: to, cidr: parseCidr(d.cidr)?.text ?? d.cidr, description: d.description.trim() || undefined }
+  const source = d.source === "group" ? { source_group: d.sourceGroup } : { cidr: parseCidr(d.cidr)?.text ?? d.cidr }
+  return { protocol: d.protocol, from_port: from, to_port: to, ...source, description: d.description.trim() || undefined }
 }
 
 // ---- shared data + UI ----

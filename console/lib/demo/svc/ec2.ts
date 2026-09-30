@@ -506,7 +506,7 @@ function fakeFingerprint(kind: string): string {
 
 const nextEip = (s: Ec2State) => {
   const used = new Set(s.addresses.map((a) => a.public_ip))
-  for (let n = 30; n < 250; n++) if (!used.has(`203.0.113.${n}`)) return `203.0.113.${n}`
+  for (let n = 1; n < 255; n++) if (!used.has(`203.0.113.${n}`)) return `203.0.113.${n}`
   throw err(400, "AddressLimitExceeded", "The elastic IP pool 203.0.113.0/24 is exhausted")
 }
 
