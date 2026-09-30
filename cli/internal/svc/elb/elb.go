@@ -346,6 +346,18 @@ func (s *Service) UsesCertificate(arn string) bool {
 	return false
 }
 
+// CertificateUsers lists the ARNs of the load balancers with a listener serving the certificate.
+func (s *Service) CertificateUsers(arn string) []string {
+	var out []string
+	for _, lb := range store.List[LoadBalancer](s.env.Store, cLBs) {
+		if slices.ContainsFunc(lb.Listeners, func(l Listener) bool { return l.CertificateARN == arn }) {
+			out = append(out, s.LoadBalancerARN(lb.Name))
+		}
+	}
+	sort.Strings(out)
+	return out
+}
+
 // CertificateRenewed pushes fresh certificate material to every balancer using it.
 func (s *Service) CertificateRenewed(arn string) {
 	for _, lb := range store.List[LoadBalancer](s.env.Store, cLBs) {

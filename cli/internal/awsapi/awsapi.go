@@ -173,7 +173,7 @@ func (q *Req) AuthorizeWith(action, resource string, acc httpx.Access) error {
 		return nil
 	}
 	code := "AccessDeniedException"
-	if q.Protocol == Query || q.Svc.Name == "s3" {
+	if q.Protocol == Query || q.Svc.Name == "s3" || q.Svc.Name == "route53" {
 		code = "AccessDenied"
 	}
 	return &Error{Status: http.StatusForbidden, Code: code,
