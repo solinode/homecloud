@@ -285,6 +285,8 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	rdsSvc.RegisterAWS()
 	ecrSvc.RegisterAWS()
 	ecsSvc.RegisterAWS()
+	trailSvc.RegisterAWS()
+	wireTrail(trailSvc, s3Svc)
 	ecsSvc.Roles, ecsSvc.Params, ecsSvc.RegistryHost = ecsRoles{iamSvc}, ssmSvc, ecrSvc.Host()
 	ecsSvc.Logs = func(group, stream string, ts []time.Time, msgs []string) error {
 		evs := make([]cloudwatch.LogEvent, len(msgs))
@@ -322,6 +324,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	go elbSvc.Run(ctx)
 	go ecsSvc.Run(ctx)
 	go asgSvc.Run(ctx)
+	go trailSvc.Run(ctx)
 	go dnsSvc.Run(ctx)
 	go ec2Svc.RunIMDS(ctx)
 	go func() {
