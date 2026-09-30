@@ -96,3 +96,6 @@ export const FS = {
   backups: stableId("fs-", "shop-backups"),
   scratch: stableId("fs-", "dev-scratch"),
 }
+
+/** Cognito user pool "shop-customers" (see svc/cognito.ts). */
+export const COGNITO_POOL_ID = "us-east-1_8F2A1C9D3"
