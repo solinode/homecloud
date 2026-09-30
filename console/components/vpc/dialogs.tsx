@@ -13,7 +13,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Field } from "@/components/console/form-field"
 import { api, errorMessage } from "@/lib/api"
-import { revalidate } from "@/lib/hooks"
+import { revalidate, useApi } from "@/lib/hooks"
 import type { SecurityGroup, Subnet, Vpc } from "@/lib/types"
 import { formatNumber } from "@/lib/format"
 
@@ -344,7 +344,7 @@ export function CreateSecurityGroupDialog({
         <form onSubmit={submit} className="flex flex-col gap-5">
           <DialogHeader>
             <DialogTitle>Create security group</DialogTitle>
-            <DialogDescription>A security group decides which ports of an instance are published on the host.</DialogDescription>
+            <DialogDescription>A security group filters the traffic that reaches your resources and decides which ports are published on the host.</DialogDescription>
           </DialogHeader>
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
             <Field label="Name" htmlFor="sg-name" error={touched ? nameErr : undefined}>
@@ -359,12 +359,12 @@ export function CreateSecurityGroupDialog({
           </Field>
           <div className="flex flex-col gap-2">
             <h3 className="text-sm font-semibold">Inbound rules</h3>
-            <RulesEditor rules={rules} onChange={setRules} showErrors={touched} />
+            <RulesEditor rules={rules} onChange={setRules} showErrors={touched} groups={groups?.filter((g) => g.vpc_id === vpcId)} />
           </div>
           <Alert>
             <Info />
             <AlertDescription>
-              Every inbound rule publishes its ports on the host; Docker assigns each a host port, shown on the instance details page. All outbound traffic is allowed.
+              Rules from 0.0.0.0/0 or 127.0.0.1/32 publish their ports on the host; Docker assigns each a host port, shown on the instance details page. Rules from other CIDRs or from a group filter traffic inside the VPC. All outbound traffic is allowed.
             </AlertDescription>
           </Alert>
           <DialogFooter>
@@ -386,6 +386,7 @@ export function AddRulesDialog({ open, onOpenChange, group }: { open: boolean; o
   const [rules, setRules] = useState<RuleDraft[]>([])
   const [touched, setTouched] = useState(false)
   const [pending, setPending] = useState(false)
+  const vpcGroups = useApi<SecurityGroup[]>(open ? `/api/v1/vpc/security-groups?vpc_id=${encodeURIComponent(group.vpc_id)}` : null)
 
   useEffect(() => {
     if (open) {
@@ -430,17 +431,17 @@ export function AddRulesDialog({ open, onOpenChange, group }: { open: boolean; o
           </DialogHeader>
           {rules.length === 1 ? (
             <div className="flex flex-col gap-3">
-              <RuleFields rule={rules[0]} showErrors={touched} onChange={(r) => setRules([r])} />
+              <RuleFields rule={rules[0]} groups={vpcGroups.data} showErrors={touched} onChange={(r) => setRules([r])} />
               <Button type="button" variant="outline" size="sm" className="self-start" onClick={() => setRules([...rules, newRuleDraft("HTTPS")])}>
                 Add another rule
               </Button>
             </div>
           ) : (
-            <RulesEditor rules={rules} onChange={setRules} showErrors={touched} />
+            <RulesEditor rules={rules} onChange={setRules} showErrors={touched} groups={vpcGroups.data} />
           )}
           <Alert>
             <Info />
-            <AlertDescription>New rules apply to instances launched from now on. Running instances keep their current published ports until relaunched.</AlertDescription>
+            <AlertDescription>A rule from any CIDR or from a security group of this VPC filters traffic to the resources that use this group as soon as it is saved. Rules from 0.0.0.0/0 or 127.0.0.1/32 also publish their ports on the host, which recreates a running instance whose published ports change.</AlertDescription>
           </Alert>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>

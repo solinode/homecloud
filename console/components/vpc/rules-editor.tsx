@@ -5,6 +5,7 @@ import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import type { SecurityGroup } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 import { MAX_PORT_RANGE, RULE_PRESETS, newRuleDraft, validateRule, type RuleDraft } from "./common"
@@ -29,7 +30,9 @@ export function RuleFields({
   showErrors,
   onRemove,
   compact,
+  groups,
 }: {
+  groups?: SecurityGroup[]
   rule: RuleDraft
   onChange: (r: RuleDraft) => void
   showErrors: boolean
@@ -114,18 +117,42 @@ export function RuleFields({
         {errs.to && <span className="text-destructive text-xs">{errs.to}</span>}
       </div>
       <div className="col-span-2 flex flex-col gap-1 sm:col-span-3">
-        <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-cidr`}>
-          Source CIDR
+        <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-source`}>
+          Source
         </label>
         <div className="flex gap-2">
-          <Input
-            id={`${id}-cidr`}
-            className="h-8 font-mono text-[13px]"
-            value={rule.cidr}
-            placeholder="0.0.0.0/0"
-            aria-invalid={!!errs.cidr}
-            onChange={(e) => onChange({ ...rule, cidr: e.target.value.trim() })}
-          />
+          <Select value={rule.source} onValueChange={(v) => onChange({ ...rule, source: v as "cidr" | "group" })}>
+            <SelectTrigger id={`${id}-source`} size="sm" className="w-24 shrink-0">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="cidr">CIDR</SelectItem>
+              <SelectItem value="group">Group</SelectItem>
+            </SelectContent>
+          </Select>
+          {rule.source === "group" ? (
+            <Select value={rule.sourceGroup} onValueChange={(v) => onChange({ ...rule, sourceGroup: v })}>
+              <SelectTrigger id={`${id}-group`} size="sm" className="min-w-0 flex-1" aria-invalid={!!errs.group}>
+                <SelectValue placeholder="Select a group" />
+              </SelectTrigger>
+              <SelectContent>
+                {(groups ?? []).map((g) => (
+                  <SelectItem key={g.id} value={g.id}>
+                    {g.name} <span className="text-muted-foreground font-mono text-xs">{g.id}</span>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          ) : (
+            <Input
+              id={`${id}-cidr`}
+              className="h-8 min-w-0 font-mono text-[13px]"
+              value={rule.cidr}
+              placeholder="0.0.0.0/0"
+              aria-invalid={!!errs.cidr}
+              onChange={(e) => onChange({ ...rule, cidr: e.target.value.trim() })}
+            />
+          )}
           {onRemove && (
             <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0" onClick={onRemove} aria-label="Remove rule">
               <Trash2 />
@@ -133,6 +160,7 @@ export function RuleFields({
           )}
         </div>
         {errs.cidr && <span className="text-destructive text-xs">{errs.cidr}</span>}
+        {errs.group && <span className="text-destructive text-xs">{errs.group}</span>}
       </div>
       <div className="col-span-2 flex flex-col gap-1 sm:col-span-12">
         <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-desc`}>
@@ -152,7 +180,7 @@ export function RuleFields({
 }
 
 /** RulesEditor edits a list of inbound rules (used when creating a group). */
-export function RulesEditor({ rules, onChange, showErrors }: { rules: RuleDraft[]; onChange: (r: RuleDraft[]) => void; showErrors: boolean }) {
+export function RulesEditor({ rules, onChange, showErrors, groups }: { rules: RuleDraft[]; onChange: (r: RuleDraft[]) => void; showErrors: boolean; groups?: SecurityGroup[] }) {
   return (
     <div className="flex flex-col gap-3">
       {rules.length === 0 && <p className="text-muted-foreground text-sm">No inbound rules. Nothing will be published on the host.</p>}
@@ -160,6 +188,7 @@ export function RulesEditor({ rules, onChange, showErrors }: { rules: RuleDraft[
         <RuleFields
           key={r.key}
           rule={r}
+          groups={groups}
           showErrors={showErrors}
           onChange={(nr) => onChange(rules.map((x, j) => (j === i ? nr : x)))}
           onRemove={() => onChange(rules.filter((_, j) => j !== i))}
@@ -169,7 +198,7 @@ export function RulesEditor({ rules, onChange, showErrors }: { rules: RuleDraft[
         <Button type="button" variant="outline" size="sm" onClick={() => onChange([...rules, newRuleDraft("HTTP")])}>
           <Plus /> Add rule
         </Button>
-        <span className="text-muted-foreground text-xs">Each rule may cover at most {MAX_PORT_RANGE} ports.</span>
+        <span className="text-muted-foreground text-xs">Rules from 0.0.0.0/0 or 127.0.0.1/32 may cover at most {MAX_PORT_RANGE} ports.</span>
       </div>
     </div>
   )
