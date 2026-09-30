@@ -51,6 +51,9 @@ type Harness struct {
 	// AuditHook, when set before the first request, also receives every audited
 	// call (CloudTrail's Record).
 	AuditHook httpx.AuditFunc
+	// Middleware, when set before the first request, wraps the endpoint (for
+	// example httpx.ProxyTrust.Wrap).
+	Middleware func(http.Handler) http.Handler
 	// barrier orders a test's setup writes (fields set on services after New)
 	// before the requests that read them; the race detector can't see that
 	// ordering through the AWS CLI subprocess.
@@ -93,13 +96,20 @@ func New(t *testing.T) *Harness {
 	h.Router = &httpx.Router{Mux: h.Mux, Auth: im, Account: env.AccountID, Audit: audit}
 	im.Routes(h.Router)
 	aws := &awsapi.Handler{Creds: im, Account: env.AccountID, Audit: audit}
-	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		h.sync()
+	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if awsapi.Match(r) && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 			aws.ServeHTTP(w, r)
 			return
 		}
 		h.Mux.ServeHTTP(w, r)
+	})
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		h.sync()
+		var next http.Handler = root
+		if h.Middleware != nil {
+			next = h.Middleware(root)
+		}
+		next.ServeHTTP(w, r)
 	}))
 	t.Cleanup(srv.Close)
 	h.URL = srv.URL
