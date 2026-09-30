@@ -1,0 +1,14 @@
+#!/bin/sh
+# Copies a VM disk volume into a standalone one, for snapshots, images and backups.
+#   hc-vm-flatten /src /dst
+# A root volume holds a qcow2 overlay on the cached cloud image (mounted at
+# /images so the backing file resolves); it is converted into a single image
+# that needs no backing file. Any other volume is copied as it is. -U reads the
+# image even though a running guest has it open (the copy is crash-consistent).
+set -eu
+src=$1; dst=$2
+if [ -f "$src/disk.qcow2" ]; then
+  qemu-img convert -U -f qcow2 -O qcow2 "$src/disk.qcow2" "$dst/disk.qcow2"
+else
+  cp -a "$src/." "$dst/"
+fi

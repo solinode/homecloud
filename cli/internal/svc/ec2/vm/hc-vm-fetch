@@ -1,0 +1,21 @@
+#!/bin/sh
+# Downloads a cloud image into the image cache and verifies its checksum.
+#   hc-vm-fetch <url> <file> <sha256|sha512 hex>
+# The file appears in /images only once it is complete and verified.
+set -eu
+url=$1; file=$2; sum=$3
+dest=/images/$file
+[ -f "$dest" ] && exit 0
+tmp=$dest.part
+curl -fSL --retry 3 --retry-delay 5 --connect-timeout 30 -o "$tmp" "$url"
+case ${#sum} in
+  64) got=$(sha256sum "$tmp" | cut -d' ' -f1) ;;
+  128) got=$(sha512sum "$tmp" | cut -d' ' -f1) ;;
+  *) echo "unsupported checksum length" >&2; rm -f "$tmp"; exit 2 ;;
+esac
+if [ "$got" != "$sum" ]; then
+  echo "checksum mismatch for $url: expected $sum, got $got" >&2
+  rm -f "$tmp"
+  exit 3
+fi
+mv "$tmp" "$dest"

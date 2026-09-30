@@ -391,6 +391,37 @@ func (s *Service) PublishedPorts(ids []string) []runtime.Port {
 	return out
 }
 
+// IngressPorts lists the TCP and UDP ports the ingress rules of the given
+// groups open, whatever their source, up to limit ports. It is for
+// listeners that must be created per port (a VM without passt); a rule for
+// more ports than remain under the limit, or for all protocols, is skipped.
+func (s *Service) IngressPorts(ids []string, limit int) []runtime.Port {
+	seen := map[string]bool{}
+	var out []runtime.Port
+	for _, id := range ids {
+		g, err := store.Get[SecurityGroup](s.env.Store, cSGs, id)
+		if err != nil {
+			continue
+		}
+		for _, r := range g.Ingress {
+			if (r.Protocol != "tcp" && r.Protocol != "udp") || r.FromPort < 1 || r.ToPort > 65535 || r.FromPort > r.ToPort {
+				continue
+			}
+			if r.ToPort-r.FromPort+1 > limit-len(out) {
+				continue
+			}
+			for p := r.FromPort; p <= r.ToPort; p++ {
+				k := fmt.Sprintf("%d/%s", p, r.Protocol)
+				if !seen[k] {
+					seen[k] = true
+					out = append(out, runtime.Port{ContainerPort: p, Protocol: r.Protocol})
+				}
+			}
+		}
+	}
+	return out
+}
+
 func (s *Service) GetVPC(id string) (VPC, error) { return store.Get[VPC](s.env.Store, cVPCs, id) }
 
 // List returns every VPC.

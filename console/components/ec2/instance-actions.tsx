@@ -15,7 +15,8 @@ import { StatusBadge } from "@/components/console/status-badge"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import { formatMemoryMB, pluralize } from "@/lib/format"
-import type { Image, Instance, InstanceState, InstanceType } from "@/lib/types"
+import { Badge } from "@/components/ui/badge"
+import type { Ec2Capabilities, Image, Instance, InstanceState, InstanceType } from "@/lib/types"
 
 export const INSTANCES_PATH = "/api/v1/ec2/instances"
 
@@ -70,6 +71,30 @@ export function PublicPorts({ instance, empty = "-", compact }: { instance: Inst
       })}
     </span>
   )
+}
+
+export const isVMInstance = (i: Pick<Instance, "virtualization">) => i.virtualization === "kvm" || i.virtualization === "emulated"
+
+export const isVMImage = (im: Pick<Image, "virtualization" | "vm_base" | "name">) => im.virtualization === "vm" || !!im.vm_base
+
+/** "Container", "VM · KVM" or "VM · emulated". */
+export function instanceKind(i: Pick<Instance, "virtualization">) {
+  if (!isVMInstance(i)) return "Container"
+  return i.virtualization === "kvm" ? "VM · KVM" : "VM · emulated"
+}
+
+/** Type badge for an instance: Container / VM · KVM / VM · emulated (slow). */
+export function InstanceKindBadge({ instance }: { instance: Pick<Instance, "virtualization"> }) {
+  const vm = isVMInstance(instance)
+  return (
+    <Badge variant={vm ? "secondary" : "outline"} title={instance.virtualization === "emulated" ? "No /dev/kvm on the host: the CPU is emulated, so this VM is slow" : undefined}>
+      {instanceKind(instance)}
+    </Badge>
+  )
+}
+
+export function useEc2Capabilities() {
+  return useApi<Ec2Capabilities>("/api/v1/ec2/capabilities", { revalidateOnFocus: false })
 }
 
 export function useInstanceTypes() {

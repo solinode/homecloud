@@ -17,6 +17,7 @@ import (
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
+	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
 )
 
@@ -110,6 +111,11 @@ type Service struct {
 	Notify Notifier
 	// Deliver sends log subscription payloads to a Lambda function ARN.
 	Deliver func(ctx context.Context, arn string, payload []byte) error
+	// GuestUsage samples the guest of a virtual-machine EC2 instance (through its
+	// guest agent), so its metrics describe the guest rather than the QEMU
+	// container. While it returns an error (agent not up yet) nothing is published.
+	GuestUsage func(ctx context.Context, instanceID string) (*runtime.Usage, error)
+	guestBusy  sync.Map // container ID -> true while a guest sample is running
 }
 
 func New(env *svc.Env) (*Service, error) {
@@ -294,6 +300,35 @@ func (s *Service) collect(ctx context.Context) {
 			continue
 		}
 		res := c.Labels[core.LabelResource]
+		publish := func(id string, u *runtime.Usage, at time.Time) {
+			dims := map[string]string{n.dim: res}
+			s.Put(n.ns, "CPUUtilization", dims, "Percent", round(u.CPUPercent), at)
+			s.Put(n.ns, "MemoryUtilization", dims, "Percent", round(u.MemoryPercent), at)
+			s.Put(n.ns, "MemoryUsed", dims, "Bytes", float64(u.MemoryBytes), at)
+			s.Put(n.ns, "NetworkIn", dims, "Bytes", s.delta(id+"rx", u.NetRxBytes), at)
+			s.Put(n.ns, "NetworkOut", dims, "Bytes", s.delta(id+"tx", u.NetTxBytes), at)
+			s.Put(n.ns, "DiskReadBytes", dims, "Bytes", s.delta(id+"br", u.BlockRead), at)
+			s.Put(n.ns, "DiskWriteBytes", dims, "Bytes", s.delta(id+"bw", u.BlockWrite), at)
+			s.Put(n.ns, "ProcessCount", dims, "Count", float64(u.Pids), at)
+		}
+		if s.GuestUsage != nil && c.Labels[core.LabelService] == "ec2" && c.Labels["homecloud.virtualization"] != "" {
+			// A guest sample takes a second or more, and much longer while the
+			// guest agent is not up yet: it runs on its own so it never holds up
+			// the tick, and one per instance at a time.
+			if _, busy := s.guestBusy.LoadOrStore(c.ID, true); busy {
+				continue
+			}
+			go func(id string) {
+				defer core.Recover("cloudwatch guest sample " + res)
+				defer s.guestBusy.Delete(id)
+				sctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				defer cancel()
+				if u, err := s.GuestUsage(sctx, res); err == nil {
+					publish(id, u, time.Now().UTC())
+				}
+			}(c.ID)
+			continue
+		}
 		wg.Add(1)
 		sem <- struct{}{}
 		go func(id string) {
@@ -305,15 +340,7 @@ func (s *Service) collect(ctx context.Context) {
 			if err != nil {
 				return
 			}
-			dims := map[string]string{n.dim: res}
-			s.Put(n.ns, "CPUUtilization", dims, "Percent", round(u.CPUPercent), now)
-			s.Put(n.ns, "MemoryUtilization", dims, "Percent", round(u.MemoryPercent), now)
-			s.Put(n.ns, "MemoryUsed", dims, "Bytes", float64(u.MemoryBytes), now)
-			s.Put(n.ns, "NetworkIn", dims, "Bytes", s.delta(id+"rx", u.NetRxBytes), now)
-			s.Put(n.ns, "NetworkOut", dims, "Bytes", s.delta(id+"tx", u.NetTxBytes), now)
-			s.Put(n.ns, "DiskReadBytes", dims, "Bytes", s.delta(id+"br", u.BlockRead), now)
-			s.Put(n.ns, "DiskWriteBytes", dims, "Bytes", s.delta(id+"bw", u.BlockWrite), now)
-			s.Put(n.ns, "ProcessCount", dims, "Count", float64(u.Pids), now)
+			publish(id, u, now)
 		}(c.ID)
 	}
 	wg.Wait()

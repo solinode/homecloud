@@ -27,7 +27,7 @@ import { formatDate, formatMemoryMB } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import { ASG_GROUP_TAG } from "@/lib/types"
 import type { Instance } from "@/lib/types"
-import { INSTANCES_PATH, PublicPorts, instanceLabel, isTransitional, pollInterval, useInstanceActions } from "./instance-actions"
+import { INSTANCES_PATH, InstanceKindBadge, PublicPorts, instanceLabel, isVMInstance, isTransitional, pollInterval, useInstanceActions } from "./instance-actions"
 import { instanceProfileHref } from "@/components/iam/common"
 import { InstanceConsoleOutput } from "./instance-console-output"
 import { InstanceMonitoring } from "./instance-monitoring"
@@ -166,7 +166,7 @@ export function InstanceDetail() {
         <TabsList>
           <TabsTrigger value="details">Details</TabsTrigger>
           <TabsTrigger value="monitoring">Monitoring</TabsTrigger>
-          <TabsTrigger value="console">Console output</TabsTrigger>
+          <TabsTrigger value="console">{isVMInstance(inst) ? "System log" : "Console output"}</TabsTrigger>
           <TabsTrigger value="command">Run command</TabsTrigger>
           <TabsTrigger value="connect">Connect</TabsTrigger>
         </TabsList>
@@ -204,6 +204,18 @@ function BackButton() {
   )
 }
 
+function VirtualizationValue({ inst }: { inst: Instance }) {
+  if (!isVMInstance(inst)) return <span className="inline-flex items-center gap-2"><InstanceKindBadge instance={inst} /><span className="text-muted-foreground text-xs">Shares the host kernel</span></span>
+  return (
+    <span className="inline-flex flex-wrap items-center gap-2">
+      <InstanceKindBadge instance={inst} />
+      <span className="text-muted-foreground text-xs">
+        {inst.virtualization === "kvm" ? "Own kernel, hardware accelerated (KVM)" : "Own kernel, CPU emulated (no /dev/kvm on the host, so it is slow)"}
+      </span>
+    </span>
+  )
+}
+
 function DetailsTab({ inst }: { inst: Instance }) {
   return (
     <div className="flex flex-col gap-4">
@@ -225,10 +237,11 @@ function DetailsTab({ inst }: { inst: Instance }) {
                 </Link>
               ),
             },
-            { label: "Image reference", value: <CopyableText value={inst.image_ref} /> },
+            { label: "Virtualization", value: <VirtualizationValue inst={inst} /> },
+            ...(inst.image_ref ? [{ label: "Image reference", value: <CopyableText value={inst.image_ref} /> }] : []),
             {
               label: "Boot mode",
-              value: inst.keep_alive ? "Keep alive (VM-like: runs user data, then idles)" : "Application (runs the image's own process)",
+              value: isVMInstance(inst) ? "Virtual machine (own kernel, boots from a cloud image)" : inst.keep_alive ? "Keep alive (VM-like: runs user data, then idles)" : "Application (runs the image's own process)",
             },
             { label: "Launch time", value: <span>{formatDate(inst.launch_time)} (<TimeAgo value={inst.launch_time} />)</span> },
             { label: "Terminated at", value: inst.terminated_at ? formatDate(inst.terminated_at) : "" },

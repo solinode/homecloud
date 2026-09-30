@@ -1,0 +1,126 @@
+#!/bin/sh
+# Entrypoint of a VM container: prepares the instance's disk, the cloud-init
+# seed and the guest's network (passt), then becomes QEMU.
+#
+#   /images   image cache volume (read-only): the base cloud images
+#   /vm       the instance's disk volume: disk.qcow2, seed.iso, efivars.fd
+#   /hc/seed  cloud-init NoCloud files, written by HomeCloud before the first start
+#
+# Environment: HC_VM_BASE (file in /images), HC_VM_DISK_GB, HC_VM_ARCH
+# (aarch64|x86_64), HC_VM_DNS (the resolver address the guest is given),
+# HC_VM_NET=user and HC_VM_HOSTFWD (user-mode networking, see below).
+# The arguments are the QEMU command line.
+set -eu
+
+disk=/vm/disk.qcow2
+if [ ! -f "$disk" ]; then
+  if [ -n "${HC_VM_AMI:-}" ]; then
+    # An image made from an instance: a standalone copy, so the instance does not
+    # depend on the image staying registered.
+    echo "[homecloud] creating disk ($HC_VM_DISK_GB GiB) from the image"
+    qemu-img convert -f qcow2 -O qcow2 /ami/disk.qcow2 "$disk.tmp"
+    qemu-img resize -q "$disk.tmp" "${HC_VM_DISK_GB}G"
+  else
+    echo "[homecloud] creating disk ($HC_VM_DISK_GB GiB) from $HC_VM_BASE"
+    qemu-img create -q -f qcow2 -b "/images/$HC_VM_BASE" -F qcow2 "$disk.tmp" "${HC_VM_DISK_GB}G"
+  fi
+  mv "$disk.tmp" "$disk"
+fi
+
+# Extra volumes are raw images, created sparse on first use and grown when the
+# volume was enlarged. HC_VM_DISKS is "<volume id>:<GiB> ..."; the QEMU command
+# line names the files (/disks/<id>/disk.img).
+for d in ${HC_VM_DISKS:-}; do
+  id=${d%%:*}; gb=${d##*:}; img=/disks/$id/disk.img
+  want=$((gb * 1073741824))
+  if [ ! -f "$img" ]; then
+    truncate -s "$want" "$img"
+  elif [ "$(stat -c %s "$img")" -lt "$want" ]; then
+    truncate -s "$want" "$img"
+  fi
+done
+
+# The seed is rebuilt on every start so changed user data applies to the next boot.
+if [ -d /hc/seed ]; then
+  rm -f /vm/seed.iso
+  genisoimage -quiet -output /vm/seed.iso -volid cidata -joliet -rock /hc/seed/* >/dev/null 2>&1
+fi
+
+if [ "$HC_VM_ARCH" = "aarch64" ] && [ ! -f /vm/efivars.fd ]; then
+  cp /usr/share/AAVMF/AAVMF_VARS.fd /vm/efivars.fd
+fi
+
+# passt gives the guest this container's address, gateway and routes, and
+# forwards every inbound TCP and UDP port to it.
+#
+# The guest resolves through HC_VM_DNS (the VPC's resolver address, base+2 as in
+# AWS); passt relays those queries to Docker's resolver in this container's
+# namespace (127.0.0.11), so names resolve as they do for container instances.
+dns=""
+if [ -n "${HC_VM_DNS:-}" ]; then dns="-D $HC_VM_DNS --dns-forward $HC_VM_DNS --dns-host 127.0.0.11"; fi
+rm -f /run/passt.dead /tmp/passt.sock /run/qmp.sock /run/serial.sock /run/qga.sock
+if [ "${HC_VM_NET:-}" != "user" ]; then
+  # -d logs each flow: it is what tells why passt exited. The log is appended
+  # to /run/passt.log and cut back to its last MiB when it passes 4 MiB.
+  : >/run/passt.log
+  # shellcheck disable=SC2086
+  passt -f -d -s /tmp/passt.sock -t all -u all $dns >>/run/passt.log 2>&1 &
+  pid=$!
+  ( while sleep 20; do
+      [ "$(stat -c %s /run/passt.log 2>/dev/null || echo 0)" -gt 4194304 ] &&
+        tail -c 1048576 /run/passt.log > /run/passt.log.tmp && cat /run/passt.log.tmp > /run/passt.log
+    done ) &
+  n=0
+  while [ ! -S /tmp/passt.sock ] && [ $n -lt 50 ]; do n=$((n+1)); sleep 0.1; done
+  # passt binds its socket (as nobody: /tmp is world-writable, /run is not) and sandboxes itself; it can still exit then.
+  sleep 0.5
+  if [ ! -S /tmp/passt.sock ] || ! kill -0 "$pid" 2>/dev/null; then
+    echo "[homecloud] passt did not start; falling back to user-mode networking:" >&2
+    tail -n 40 /run/passt.log >&2 || true
+    if grep -q "Too many open files" /run/passt.log; then
+      echo "hint: the open-file limit ($(ulimit -Hn)) is too low for passt's port forwarding" >&2
+    elif grep -q "Failed to bind" /run/passt.log; then
+      echo "hint: passt binds its socket as user nobody, so the socket directory must be world-writable" >&2
+    elif grep -qE "sandbox|user namespace|remount|pivot_root" /run/passt.log; then
+      echo "hint: the container's seccomp or AppArmor profile blocks passt's sandbox (it needs seccomp to allow unshare, mount, umount2 and pivot_root, and no AppArmor profile that denies them)" >&2
+    fi
+    HC_VM_NET=user
+  fi
+fi
+if [ "${HC_VM_NET:-}" = "user" ]; then
+  # QEMU's user-mode networking: the guest sits behind NAT at 10.0.2.15 and
+  # only the ports HC_VM_HOSTFWD lists (",hostfwd=tcp::22-:22,...", the ports
+  # the security groups allow when the container was created) reach it.
+  n=$#
+  while [ "$n" -gt 0 ]; do
+    a=$1; shift; n=$((n-1))
+    case "$a" in
+      stream,id=net0,*) a="user,id=net0${HC_VM_HOSTFWD:-}" ;;
+    esac
+    set -- "$@" "$a"
+  done
+fi
+
+echo "[homecloud] starting the virtual machine"
+# QEMU runs as a child so that this script can watch passt: if passt exits, the
+# guest has lost its network (passt also exits with QEMU, which is fine).
+"$@" &
+qemu=$!
+trap 'kill -TERM "$qemu" 2>/dev/null' TERM INT
+alive() { [ -r "/proc/$1/status" ] && ! grep -q '^State:[[:space:]]*Z' "/proc/$1/status"; }
+reported=
+while alive "$qemu"; do
+  if [ -n "${pid:-}" ] && [ -z "$reported" ] && ! alive "$pid"; then
+    reported=1
+    touch /run/passt.dead # HomeCloud looks for this and restarts the guest in user-mode networking
+    st=0; wait "$pid" || st=$?
+    echo "[homecloud] passt exited unexpectedly (status $st; 137 is SIGKILL, 159 SIGSYS); the guest has lost its network:" >&2
+    tail -n 40 /run/passt.log >&2
+    for f in /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.max; do
+      [ -r "$f" ] && echo "$f: $(tr '\n' ' ' < "$f")" >&2
+    done
+  fi
+  sleep 2 &
+  wait $!
+done
+wait "$qemu"

@@ -393,6 +393,15 @@ func (s *Service) awsDescribeAccountAttributes(q *awsapi.Req) (any, error) {
 
 // ---- images and instance types ----
 
+// hypervisor is what the EC2 API reports: instances that run as containers keep
+// the "xen" of the real service's older families; virtual machines are QEMU/KVM.
+func hypervisor(vm bool) string {
+	if vm {
+		return "kvm"
+	}
+	return "xen"
+}
+
 func (s *Service) awsName(im Image) string {
 	if im.AWSName == "" {
 		return im.Name
@@ -418,9 +427,12 @@ func (s *Service) allImages() []Image {
 	out := []Image{}
 	for _, im := range catalog {
 		im.Owner, im.State = "homecloud", "available"
-		out = append(out, im)
+		out = append(out, im.normalized())
 	}
-	return append(out, store.List[Image](s.env.Store, cImages)...)
+	for _, im := range store.List[Image](s.env.Store, cImages) {
+		out = append(out, im.normalized())
+	}
+	return out
 }
 
 func (s *Service) imageXML(im Image) map[string]any {
@@ -433,7 +445,7 @@ func (s *Service) imageXML(im Image) map[string]any {
 		"imageId": im.ID, "imageLocation": owner + "/" + s.awsName(im), "imageState": im.State, "imageOwnerId": owner,
 		"creationDate": created, "isPublic": im.Owner == "homecloud", "architecture": hostArch(s), "imageType": "machine",
 		"platformDetails": "Linux/UNIX", "usageOperation": "RunInstances", "name": s.awsName(im), "description": im.Description,
-		"rootDeviceType": "ebs", "rootDeviceName": "/dev/xvda", "virtualizationType": "hvm", "hypervisor": "xen", "enaSupport": true,
+		"rootDeviceType": "ebs", "rootDeviceName": "/dev/xvda", "virtualizationType": "hvm", "hypervisor": hypervisor(im.IsVM()), "enaSupport": true,
 		"bootMode": "uefi-preferred", "tagSet": tagSet(im.Tags), "productCodes": awsapi.Items{},
 		"blockDeviceMapping": awsapi.Items{map[string]any{"deviceName": "/dev/xvda",
 			"ebs": map[string]any{"volumeSize": 8, "deleteOnTermination": true, "volumeType": "gp3", "encrypted": false}}},
@@ -465,7 +477,7 @@ func (s *Service) awsDescribeImages(q *awsapi.Req) (any, error) {
 		a := attrs{}.set("image-id", im.ID).set("name", s.awsName(im)).set("owner-id", owner).set("owner-alias", alias).
 			set("state", im.State).set("architecture", hostArch(s)).set("virtualization-type", "hvm").set("root-device-type", "ebs").
 			set("root-device-name", "/dev/xvda").set("image-type", "machine").set("is-public", strconv.FormatBool(im.Owner == "homecloud")).
-			set("platform-details", "Linux/UNIX").set("description", im.Description).set("hypervisor", "xen").
+			set("platform-details", "Linux/UNIX").set("description", im.Description).set("hypervisor", hypervisor(im.IsVM())).
 			set("block-device-mapping.volume-type", "gp3").set("ena-support", "true").tags(im.Tags)
 		if !match(fs, a) {
 			continue
@@ -628,7 +640,7 @@ func (s *Service) instanceXML(i Instance) map[string]any {
 		"launchTime": i.LaunchTime, "placement": map[string]any{"availabilityZone": i.AvailabilityZone, "groupName": "", "tenancy": "default"},
 		"monitoring": map[string]any{"state": monitoring}, "architecture": hostArch(s), "rootDeviceType": "ebs", "rootDeviceName": "/dev/xvda",
 		"blockDeviceMapping": bdm, "virtualizationType": "hvm", "clientToken": i.ClientToken, "tagSet": tagSet(s.tagsOf(i.ID, i.Name, i.Tags)),
-		"hypervisor": "xen", "ebsOptimized": i.EBSOptimized, "enaSupport": true, "sourceDestCheck": !i.SourceDestCheckOff,
+		"hypervisor": hypervisor(i.IsVM()), "ebsOptimized": i.EBSOptimized, "enaSupport": true, "sourceDestCheck": !i.SourceDestCheckOff,
 		"groupSet": s.groupSet(i.SecurityGroups), "platformDetails": "Linux/UNIX", "usageOperation": "RunInstances",
 		"usageOperationUpdateTime": i.LaunchTime, "bootMode": "uefi", "currentInstanceBootMode": "uefi",
 		"cpuOptions":         map[string]any{"coreCount": max(1, vcpus/2), "threadsPerCore": min(2, vcpus)},
@@ -852,8 +864,20 @@ func (s *Service) awsRunInstances(q *awsapi.Req) (any, error) {
 		HopLimit: q.ParamInt("MetadataOptions.HttpPutResponseHopLimit", 0), InstanceMetadataTags: q.Param("MetadataOptions.InstanceMetadataTags")}
 	for _, m := range q.Structs("BlockDeviceMapping") {
 		dev := m["DeviceName"]
-		if dev == "" || m["NoDevice"] != "" || m["VirtualName"] != "" || dev == "/dev/xvda" || dev == "/dev/sda1" || dev == "/dev/sda" {
-			continue // the root device is the instance's own disk
+		if dev == "/dev/xvda" || dev == "/dev/sda1" || dev == "/dev/sda" {
+			// The root device is the instance's own disk. Container instances have
+			// no separate root volume; VM instances size and keep theirs by it.
+			if m["NoDevice"] == "" && m["VirtualName"] == "" {
+				root := VolumeSpec{Device: dev, VolumeType: m["Ebs.VolumeType"], Iops: atoi(m["Ebs.Iops"]), Throughput: atoi(m["Ebs.Throughput"]),
+					SizeGB: atoi(m["Ebs.VolumeSize"]), Encrypted: m["Ebs.Encrypted"] == "true", KMSKeyID: m["Ebs.KmsKeyId"]}
+				del := m["Ebs.DeleteOnTermination"] != "false"
+				root.DeleteOnTermination = &del
+				in.RootVolume = &root
+			}
+			continue
+		}
+		if dev == "" || m["NoDevice"] != "" || m["VirtualName"] != "" {
+			continue
 		}
 		if !deviceRE.MatchString(dev) {
 			return nil, invalid("Invalid device name %s", dev)
