@@ -45,6 +45,17 @@ type awsType struct {
 	// name the resource and so need CAPABILITY_NAMED_IAM.
 	IAM   bool
 	Named string
+	// Update changes an existing resource in place: old and in are the template
+	// properties it has and should get. Mutable lists the properties Update can
+	// change; a change to any other property replaces the resource. Conditional
+	// lists properties that only sometimes need a replacement (reported as such by
+	// change sets; a stack update replaces the resource).
+	Update      func(x *xctx, r *Resource, old, in map[string]any) (map[string]any, error)
+	Mutable     []string
+	Conditional []string
+	// Name is the property that names the resource. A replacement that keeps the
+	// name cannot happen: the new resource is created before the old one is removed.
+	Name string
 }
 
 var awsTypes = map[string]awsType{}

@@ -46,6 +46,7 @@ func (s *Service) RegisterAWS() {
 		"ListExports":                 s.awsListExports,
 		"ListImports":                 s.awsListImports,
 		"UpdateTerminationProtection": s.awsUpdateTerminationProtection,
+		"ContinueUpdateRollback":      s.awsContinueUpdateRollback,
 	}
 	svc := &awsapi.Service{Name: "cloudformation", XMLNS: xmlns, Ops: map[string]awsapi.Op{}}
 	for name, fn := range ops {
@@ -436,12 +437,31 @@ func (s *Service) awsUpdateStack(q *awsapi.Req) (any, error) {
 		return nil, err
 	}
 	out, err := s.UpdateStack(q.R.Context(), q.P, st.ARN, StackReq{Template: body, Params: paramsIn(q, st.Parameters), Tags: tagsIn(q), KeepTags: true,
-		Capabilities: caps, RoleARN: q.Param("RoleARN"), NotificationARNs: q.List("NotificationARNs"), ErrIfNoChanges: true, Endpoint: endpoint(q)})
+		Capabilities: caps, RoleARN: q.Param("RoleARN"), NotificationARNs: q.List("NotificationARNs"), ErrIfNoChanges: true, Endpoint: endpoint(q),
+		DisableRollback: q.ParamBool("DisableRollback", false)})
 	if err != nil {
 		return nil, err
 	}
 	settle(out)
 	return map[string]any{"StackId": out.ARN}, nil
+}
+
+func (s *Service) awsContinueUpdateRollback(q *awsapi.Req) (any, error) {
+	st, err := s.authStack(q, "cloudformation:ContinueUpdateRollback", "StackName")
+	if err != nil {
+		return nil, err
+	}
+	if role := q.Param("RoleARN"); role != "" {
+		if err := q.Authorize("iam:PassRole", role); err != nil {
+			return nil, err
+		}
+	}
+	out, err := s.ContinueUpdateRollback(q.P, st.ARN, q.Param("RoleARN"), q.List("ResourcesToSkip"))
+	if err != nil {
+		return nil, err
+	}
+	settle(out)
+	return map[string]any{}, nil
 }
 
 func (s *Service) awsDeleteStack(q *awsapi.Req) (any, error) {
@@ -818,8 +838,16 @@ func (s *Service) awsDescribeChangeSet(q *awsapi.Req) (any, error) {
 	}
 	changes := awsapi.Members{}
 	for _, c := range cs.Changes {
+		scope, details := awsapi.Members{}, awsapi.Members{}
+		for _, d := range c.Details {
+			details = append(details, map[string]any{"Target": map[string]any{"Attribute": "Properties", "Name": d.Name, "RequiresRecreation": d.Recreation},
+				"Evaluation": "Static", "ChangeSource": "DirectModification"})
+		}
+		if len(details) > 0 {
+			scope = append(scope, "Properties")
+		}
 		rc := map[string]any{"Action": c.Action, "LogicalResourceId": c.LogicalID, "PhysicalResourceId": nz(c.PhysicalID), "ResourceType": c.Type,
-			"Replacement": nz(c.Replacement), "Scope": awsapi.Members{}, "Details": awsapi.Members{}}
+			"Replacement": nz(c.Replacement), "Scope": scope, "Details": details}
 		changes = append(changes, map[string]any{"Type": "Resource", "ResourceChange": rc})
 	}
 	tmpl := cs.Template
@@ -840,7 +868,7 @@ func (s *Service) awsExecuteChangeSet(q *awsapi.Req) (any, error) {
 			return nil, err
 		}
 	}
-	out, err := s.ExecuteChangeSet(q.P, cs.ID, "")
+	out, err := s.ExecuteChangeSet(q.P, cs.ID, "", q.ParamBool("DisableRollback", false))
 	if err == nil {
 		settle(out)
 	}

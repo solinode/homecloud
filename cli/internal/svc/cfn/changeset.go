@@ -21,7 +21,15 @@ type Change struct {
 	LogicalID   string `json:"logical_id"`
 	PhysicalID  string `json:"physical_id,omitempty"`
 	Type        string `json:"type"`
-	Replacement string `json:"replacement,omitempty"` // True | False
+	Replacement string `json:"replacement,omitempty"` // True | False | Conditional
+	// Details lists the changed properties and whether each recreates the resource.
+	Details []ChangeDetail `json:"details,omitempty"`
+}
+
+// ChangeDetail is one changed property of a resource.
+type ChangeDetail struct {
+	Name       string `json:"name"`
+	Recreation string `json:"recreation"` // Never | Always | Conditionally
 }
 
 // ChangeSet is a preview of a stack change that can be executed.
@@ -225,7 +233,7 @@ func (s *Service) diff(prev *Template, st *Stack, t *Template, ps map[string]any
 		newT = t
 	}
 	ord, _ := order(newT)
-	changed := map[string]bool{}
+	changed, reps := map[string]bool{}, map[string]string{}
 	for _, id := range ord {
 		nd := newT.Resources[id]
 		od, existed := oldT.Resources[id]
@@ -240,20 +248,53 @@ func (s *Service) diff(prev *Template, st *Stack, t *Template, ps map[string]any
 			changed[id] = true
 			continue
 		}
-		modified := od.Type != nd.Type || !reflect.DeepEqual(normalize(od.Properties), normalize(nd.Properties))
-		for _, pn := range paramRefs(nd, t.Parameters) {
-			if !reflect.DeepEqual(normalize(st.Parameters[pn]), normalize(ps[pn])) {
-				modified = true
+		// What changes each property: its own value, a parameter it reads, or a
+		// resource it refers to that is being replaced.
+		keys := map[string]string{}
+		ids := idset(newT)
+		names := map[string]bool{}
+		for k := range od.Properties {
+			names[k] = true
+		}
+		for k := range nd.Properties {
+			names[k] = true
+		}
+		for k := range names {
+			one := ResourceDef{Properties: map[string]any{k: nd.Properties[k]}}
+			direct := !reflect.DeepEqual(normalize(od.Properties[k]), normalize(nd.Properties[k]))
+			for _, pn := range paramRefs(one, t.Parameters) {
+				if !reflect.DeepEqual(normalize(st.Parameters[pn]), normalize(ps[pn])) {
+					direct = true
+				}
+			}
+			if direct {
+				keys[k] = keyReplacement(od.Type, nd.Type, k)
+				continue
+			}
+			for _, d := range deps(one, ids) {
+				if reps[d] == repTrue || reps[d] == repConditional {
+					r := keyReplacement(od.Type, nd.Type, k)
+					if r == repTrue {
+						r = repConditional
+					}
+					keys[k] = r
+				}
 			}
 		}
-		for _, d := range deps(nd, idset(newT)) {
-			if changed[d] {
-				modified = true
+		if od.Type != nd.Type || len(keys) > 0 {
+			rep := repFalse
+			if od.Type != nd.Type {
+				rep = repTrue
 			}
-		}
-		if modified {
-			out = append(out, Change{Action: "Modify", LogicalID: id, PhysicalID: physical, Type: nd.Type, Replacement: "True"})
+			var details []ChangeDetail
+			for _, k := range sortedKeys(keys) {
+				rep = worse(rep, keys[k])
+				recreate := map[string]string{repFalse: "Never", repTrue: "Always", repConditional: "Conditionally"}[keys[k]]
+				details = append(details, ChangeDetail{Name: k, Recreation: recreate})
+			}
+			out = append(out, Change{Action: "Modify", LogicalID: id, PhysicalID: physical, Type: nd.Type, Replacement: rep, Details: details})
 			changed[id] = true
+			reps[id] = rep
 		}
 	}
 	for _, id := range sortedKeys(oldT.Resources) {
@@ -277,7 +318,7 @@ func idset(t *Template) map[string]bool {
 }
 
 // ExecuteChangeSet applies a change set: it creates the stack (CREATE) or updates it.
-func (s *Service) ExecuteChangeSet(p *httpx.Principal, ref, stack string) (Stack, error) {
+func (s *Service) ExecuteChangeSet(p *httpx.Principal, ref, stack string, disableRollback ...bool) (Stack, error) {
 	cs, err := s.findChangeSet(ref, stack)
 	if err != nil {
 		return Stack{}, err
@@ -317,7 +358,8 @@ func (s *Service) ExecuteChangeSet(p *httpx.Principal, ref, stack string) (Stack
 	if err := s.markExecuting(cs); err != nil {
 		return Stack{}, err
 	}
-	req := StackReq{Name: st.Name, Template: cs.Template, Params: cs.ParamsIn, Tags: cs.Tags, Capabilities: cs.Capabilities, RoleARN: cs.RoleARN, KeepTags: true}
+	req := StackReq{Name: st.Name, Template: cs.Template, Params: cs.ParamsIn, Tags: cs.Tags, Capabilities: cs.Capabilities, RoleARN: cs.RoleARN, KeepTags: true,
+		DisableRollback: len(disableRollback) > 0 && disableRollback[0]}
 	switch {
 	case cs.Type == "CREATE" && st.Status == "REVIEW_IN_PROGRESS":
 		st.Template, st.Parameters, st.Description = cs.Template, cs.Params, t.Description
@@ -325,7 +367,7 @@ func (s *Service) ExecuteChangeSet(p *httpx.Principal, ref, stack string) (Stack
 		st.Status, st.StatusReason = "CREATE_IN_PROGRESS", ""
 		st.CreatedAt = core.Now()
 		st.Events = append([]Event{{ID: newUUID(), Time: core.Now(), LogicalID: st.Name, PhysicalID: st.ARN, Type: stackType, Status: "CREATE_IN_PROGRESS", Reason: "User Initiated"}}, st.Events...)
-		return s.launchCreate(p, st, t, "", false, finish), nil
+		return s.launchCreate(p, st, t, "", req.DisableRollback, finish), nil
 	case slicesContains(updatable, st.Status):
 		return s.launchUpdate(p, st, req, t, cs.Params, finish), nil
 	}
