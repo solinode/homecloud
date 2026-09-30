@@ -131,6 +131,7 @@ type Stack struct {
 	DisableRollback       bool                  `json:"disable_rollback,omitempty"`
 	TerminationProtection bool                  `json:"termination_protection,omitempty"`
 	Imports               []string              `json:"imports,omitempty"` // export names this stack uses
+	Rollback              *UpdateState          `json:"update_state,omitempty"` // the way back while an update runs or a rollback is unfinished
 	CreatedAt             time.Time             `json:"created_at"`
 	UpdatedAt             time.Time             `json:"updated_at"`
 	DeletedAt             *time.Time            `json:"deleted_at,omitempty"`

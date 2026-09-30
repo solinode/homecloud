@@ -298,10 +298,11 @@ func (s *Service) importers(st *Stack) map[string][]string {
 
 // ---- deploy ----
 
-// resErr is a failure while creating or updating one resource.
+// resErr is a failure while creating, updating or deleting one resource.
 type resErr struct {
-	id  string
-	err error
+	id   string
+	err  error
+	verb string // create, update or delete; empty means the operation's own verb
 }
 
 func (e *resErr) Error() string { return fmt.Sprintf("%s: %v", e.id, e.err) }
@@ -309,16 +310,18 @@ func (e *resErr) Unwrap() error { return e.err }
 
 func failedReason(err error, verb string) string {
 	if re, ok := err.(*resErr); ok {
+		if re.verb != "" {
+			verb = re.verb
+		}
 		return fmt.Sprintf("The following resource(s) failed to %s: [%s]. ", verb, re.id)
 	}
 	return err.Error()
 }
 
-// deploy brings the stack's resources in line with template t (create or
-// update). prev is the template being replaced (nil on create). On failure
-// during create with rollback, everything created is removed again; the
-// returned bool reports whether that rollback fully succeeded.
-func (s *Service) deploy(ctx context.Context, p *httpx.Principal, st *Stack, full, prev *Template, rollback bool) (error, bool) {
+// deploy creates the stack's resources from template full. On failure with
+// rollback, everything created is removed again; the returned bool reports
+// whether that rollback fully succeeded.
+func (s *Service) deploy(ctx context.Context, p *httpx.Principal, st *Stack, full *Template, rollback bool) (error, bool) {
 	t, err := s.prune(full, st)
 	if err != nil {
 		return err, true
@@ -327,14 +330,7 @@ func (s *Service) deploy(ctx context.Context, p *httpx.Principal, st *Stack, ful
 	if err != nil {
 		return err, true
 	}
-	r := &resolver{stack: st, params: st.Parameters, tmpl: full}
-	r.imports = func(name string) (any, error) {
-		v, err := s.importValue(name)
-		if err == nil && !slices.Contains(st.Imports, name) {
-			st.Imports = append(st.Imports, name)
-		}
-		return v, err
-	}
+	r := s.newResolver(st, full)
 	var created []string
 	fail := func(err error) (error, bool) {
 		if rollback {
@@ -344,116 +340,41 @@ func (s *Service) deploy(ctx context.Context, p *httpx.Principal, st *Stack, ful
 		}
 		return err, true
 	}
-	ids := map[string]bool{}
-	for id := range t.Resources {
-		ids[id] = true
-	}
-	// Remove resources that are no longer in the template (reverse order),
-	// keeping those the previous template marked DeletionPolicy: Retain.
-	for i := len(st.Order) - 1; i >= 0; i-- {
-		id := st.Order[i]
-		if _, keep := t.Resources[id]; keep {
-			continue
-		}
-		res := st.Resources[id]
-		if res == nil {
-			continue
-		}
-		if prev != nil && prev.Resources[id].DeletionPolicy == "Retain" {
-			s.event(st, id, res.Type, "DELETE_SKIPPED", "DeletionPolicy: Retain")
-			delete(st.Resources, id)
-			continue
-		}
-		s.event(st, id, res.Type, "DELETE_IN_PROGRESS", "")
-		pid := res.PhysicalID
-		if err := s.deleteResource(ctx, p, res); err != nil {
-			s.event(st, id, res.Type, "DELETE_FAILED", err.Error())
-			return &resErr{id, err}, true
-		}
-		delete(st.Resources, id)
-		s.event(st, id, res.Type, "DELETE_COMPLETE", "", pid)
-	}
-	st.Order = slices.DeleteFunc(st.Order, func(id string) bool { return st.Resources[id] == nil })
-	// Resources that were (re)created in this deployment; anything depending on
-	// them is replaced as well, since deleting a resource can cascade (e.g. a
-	// function's event source mappings go with it).
-	fresh := map[string]bool{}
 	for _, id := range ord {
 		def := t.Resources[id]
 		props, err := r.resolve(def.Properties)
 		if err != nil {
 			s.event(st, id, def.Type, "CREATE_FAILED", err.Error(), "")
-			return fail(&resErr{id, err})
+			return fail(&resErr{id: id, err: err})
 		}
 		pm, _ := props.(map[string]any)
 		if pm == nil {
 			pm = map[string]any{}
-		}
-		old := st.Resources[id]
-		dependsOnFresh := slices.ContainsFunc(deps(def, ids), func(d string) bool { return fresh[d] })
-		if old != nil && old.native() != "" && old.Type == def.Type && !dependsOnFresh && reflect.DeepEqual(normalize(old.Properties), normalize(pm)) {
-			continue // unchanged
-		}
-		fresh[id] = true
-		if old != nil && old.native() != "" {
-			// Replacement: remove the old resource first (names are unique in HomeCloud).
-			s.event(st, id, old.Type, "UPDATE_IN_PROGRESS", "Requested update requires the creation of a new physical resource; replacing.")
-			if def.UpdateReplacePolicy == "Retain" {
-				s.event(st, id, old.Type, "DELETE_SKIPPED", "UpdateReplacePolicy: Retain")
-			} else if err := s.deleteResource(ctx, p, old); err != nil {
-				s.event(st, id, old.Type, "UPDATE_FAILED", err.Error())
-				return &resErr{id, err}, true
-			}
-			old.PhysicalID, old.NativeID = "", ""
 		}
 		st.Resources[id] = &Resource{LogicalID: id, Type: def.Type, Status: "CREATE_IN_PROGRESS", Properties: pm, UpdatedAt: core.Now()}
 		if !slices.Contains(st.Order, id) {
 			st.Order = append(st.Order, id)
 		}
 		s.event(st, id, def.Type, "CREATE_IN_PROGRESS", "", "")
-		x := &xctx{s: s, ctx: ctx, p: p, Stack: st.Name, Logical: id, Account: accountOf(st.ARN), Endpoint: st.Endpoint}
-		c, err := s.createResource(x, def.Type, pm)
-		res := st.Resources[id]
-		res.HCType, res.NativeID, res.Attributes, res.UpdatedAt = c.HC, c.Native, c.Attrs, core.Now()
-		res.PhysicalID = physicalID(x, def.Type, c, pm)
+		res, err := s.build(s.xctxFor(ctx, p, st, id), def, pm)
+		st.Resources[id] = res
 		if err != nil {
-			res.Status, res.Reason = "CREATE_FAILED", err.Error()
 			s.event(st, id, def.Type, "CREATE_FAILED", err.Error())
-			if c.Native == "" {
+			if res.NativeID == "" {
 				delete(st.Resources, id)
 				st.Order = slices.DeleteFunc(st.Order, func(x string) bool { return x == id })
 			} else {
 				created = append(created, id)
 			}
-			return fail(&resErr{id, err})
+			return fail(&resErr{id: id, err: err})
 		}
 		res.Status = "CREATE_COMPLETE"
 		created = append(created, id)
 		s.event(st, id, def.Type, "CREATE_COMPLETE", "")
 	}
 	st.Order = ord
-	st.Outputs, st.OutputMeta = map[string]any{}, map[string]OutputMeta{}
-	for name, o := range t.Outputs {
-		v, err := r.resolve(o["Value"])
-		if err != nil {
-			return fail(fmt.Errorf("output %s: %w", name, err))
-		}
-		st.Outputs[name] = v
-		meta := OutputMeta{}
-		meta.Description, _ = o["Description"].(string)
-		if ex, ok := o["Export"].(map[string]any); ok {
-			n, err := r.resolve(ex["Name"])
-			if err != nil {
-				return fail(fmt.Errorf("output %s export: %w", name, err))
-			}
-			meta.Export = toStr(n)
-			for _, e := range s.exports() {
-				if e.Name == meta.Export && e.StackName != st.Name {
-					return fail(fmt.Errorf("Export with name %s is already exported by stack %s", meta.Export, e.StackName))
-				}
-			}
-		}
-		st.OutputMeta[name] = meta
+	if err := s.resolveOutputs(r, t, st); err != nil {
+		return fail(err)
 	}
 	return nil, true
 }
@@ -507,7 +428,7 @@ func (s *Service) destroy(ctx context.Context, p *httpx.Principal, st *Stack) er
 		pid := res.PhysicalID
 		if err := s.deleteResource(ctx, p, res); err != nil {
 			s.event(st, id, res.Type, "DELETE_FAILED", err.Error())
-			return &resErr{id, err}
+			return &resErr{id: id, err: err}
 		}
 		delete(st.Resources, id)
 		st.Order = slices.Delete(st.Order, i, i+1)
@@ -522,7 +443,16 @@ func (s *Service) Recover() {
 		if !strings.HasSuffix(st.Status, "_IN_PROGRESS") || st.Status == "REVIEW_IN_PROGRESS" {
 			continue
 		}
-		st.Status = strings.TrimSuffix(st.Status, "_IN_PROGRESS") + "_FAILED"
+		switch st.Status {
+		case "UPDATE_COMPLETE_CLEANUP_IN_PROGRESS":
+			// the update itself finished; leftovers of the cleanup stay for the next update
+			st.Status = "UPDATE_COMPLETE"
+			st.Rollback = nil
+		case "UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS":
+			st.Status = "UPDATE_ROLLBACK_FAILED"
+		default:
+			st.Status = strings.TrimSuffix(st.Status, "_IN_PROGRESS") + "_FAILED"
+		}
 		st.StatusReason = "HomeCloud restarted while the operation was running"
 		s.event(&st, st.Name, stackType, st.Status, st.StatusReason)
 	}
@@ -534,6 +464,7 @@ func view(st *Stack) map[string]any {
 	b, _ := json.Marshal(st)
 	var m map[string]any
 	_ = json.Unmarshal(b, &m)
+	delete(m, "update_state") // holds resolved properties
 	if t, err := Parse(st.Template); err == nil {
 		if ps, ok := m["parameters"].(map[string]any); ok {
 			for name, def := range t.Parameters {
@@ -697,7 +628,7 @@ func (s *Service) start(st Stack, p *httpx.Principal, op func(ctx context.Contex
 			s.archive(cur)
 			_ = store.Delete(s.env.Store, cStacks, cur.Name)
 		} else {
-			if status == "UPDATE_COMPLETE" {
+			if status == "UPDATE_COMPLETE" || status == "UPDATE_ROLLBACK_COMPLETE" {
 				now := core.Now()
 				cur.LastUpdated = &now
 			}
@@ -778,7 +709,7 @@ func (s *Service) newStack(req StackReq, t *Template, ps map[string]any) Stack {
 func (s *Service) launchCreate(p *httpx.Principal, st Stack, t *Template, onFailure string, disable bool, after func(string)) Stack {
 	disable = disable || onFailure == "DO_NOTHING"
 	return s.start(st, p, func(ctx context.Context, cur *Stack) (string, string) {
-		err, rolledBack := s.deploy(ctx, p, cur, t, nil, !disable)
+		err, rolledBack := s.deploy(ctx, p, cur, t, !disable)
 		switch {
 		case err == nil:
 			return "CREATE_COMPLETE", ""
@@ -851,6 +782,8 @@ func (s *Service) UpdateStack(ctx context.Context, p *httpx.Principal, ref strin
 // launchUpdate applies req to the stored stack st (which the caller holds s.mu for).
 func (s *Service) launchUpdate(p *httpx.Principal, st Stack, req StackReq, t *Template, ps map[string]any, after func(string)) Stack {
 	prev, _ := Parse(st.Template)
+	st.Rollback = snapshot(&st)
+	st.DisableRollback = req.DisableRollback
 	st.Template, st.Parameters, st.Description = req.Template, ps, t.Description
 	if req.Tags != nil || !req.KeepTags {
 		st.Tags = req.Tags
@@ -868,10 +801,7 @@ func (s *Service) launchUpdate(p *httpx.Principal, st Stack, req StackReq, t *Te
 	st.Status, st.StatusReason = "UPDATE_IN_PROGRESS", ""
 	st.Events = append([]Event{{ID: newUUID(), Time: core.Now(), LogicalID: st.Name, PhysicalID: st.ARN, Type: stackType, Status: "UPDATE_IN_PROGRESS", Reason: "User Initiated"}}, st.Events...)
 	return s.start(st, p, func(ctx context.Context, cur *Stack) (string, string) {
-		if err, _ := s.deploy(ctx, p, cur, t, prev, false); err != nil {
-			return "UPDATE_FAILED", failedReason(err, "update")
-		}
-		return "UPDATE_COMPLETE", ""
+		return s.runUpdate(ctx, p, cur, t, prev, req.DisableRollback)
 	}, after)
 }
 
@@ -1018,7 +948,7 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 	for k, v := range in.Parameters {
 		merged[k] = v
 	}
-	out, err := s.UpdateStack(c.R.Context(), c.P, st.Name, StackReq{Template: in.Template, Params: merged, KeepTags: true})
+	out, err := s.UpdateStack(c.R.Context(), c.P, st.Name, StackReq{Template: in.Template, Params: merged, KeepTags: true, DisableRollback: in.DisableRollback})
 	if err != nil {
 		if ce, ok := err.(*core.Error); ok && ce.Code == "ValidationError" && strings.Contains(ce.Message, "can not be updated") {
 			return nil, core.Errf(http.StatusConflict, "ValidationError", "a stack in %s cannot be updated", st.Status)
