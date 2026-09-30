@@ -132,8 +132,9 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		scheme = "https"
 	}
 	endpoint := scheme + "://" + cfg.APIAddr
+	fixWildcardEndpoint(cfg)
 	if boot != nil {
-		creds := Credentials{Endpoint: endpoint, AccessKeyID: boot.AccessKeyID, SecretAccessKey: boot.SecretKey, Region: cfg.Region}
+		creds := Credentials{Endpoint: ClientEndpoint(cfg), AccessKeyID: boot.AccessKeyID, SecretAccessKey: boot.SecretKey, Region: cfg.Region}
 		if cfg.TLSCert == cfg.Path("tls", "cert.pem") {
 			creds.CAFile = cfg.TLSCert // self-signed: let the CLI trust it
 		}
