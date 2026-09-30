@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
@@ -90,6 +91,12 @@ func (t *targets) exists(arn string) bool {
 	return false
 }
 
+// denied is the error for a delivery the target's resource policy refuses; it is
+// a 403, so EventBridge does not retry it.
+func denied(src core.Source, target string) error {
+	return core.Errf(http.StatusForbidden, "AccessDenied", "the resource policy of %s does not allow %s to deliver from %s", target, src.Service, src.ARN)
+}
+
 func (t *targets) deliver(ctx context.Context, arn string, payload []byte) error {
 	svc, res, ok := parse(arn)
 	if !ok {
@@ -110,9 +117,15 @@ func (t *targets) deliver(ctx context.Context, arn string, payload []byte) error
 		if strings.HasSuffix(res, ".fifo") {
 			in.GroupID, in.DedupID = "events", core.RandHex(32)
 		}
+		if src, ok := core.SourceFrom(ctx); ok && !t.sqs.AllowDelivery(res, src) {
+			return denied(src, arn)
+		}
 		_, err := t.sqs.Send(res, in)
 		return err
 	case "sns":
+		if src, ok := core.SourceFrom(ctx); ok && !t.sns.AllowDelivery(res, src) {
+			return denied(src, arn)
+		}
 		_, err := t.sns.Publish(res, "", string(payload), nil)
 		return err
 	case "states":

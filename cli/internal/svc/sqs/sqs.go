@@ -147,6 +147,7 @@ func New(env *svc.Env) *Service {
 	for _, q := range store.List[Queue](env.Store, cQueues) {
 		s.queues[q.Name] = s.load(q.Name)
 	}
+	httpx.RegisterPolicyProvider("sqs", s.policyProvider)
 	return s
 }
 

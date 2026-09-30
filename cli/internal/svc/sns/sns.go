@@ -143,6 +143,7 @@ func New(env *svc.Env, q *sqs.Service, l Invoker) *Service {
 			s.lambda = l
 		}
 	}
+	httpx.RegisterPolicyProvider("sns", s.policyProvider)
 	return s
 }
 
@@ -939,7 +940,11 @@ func (s *Service) deliver(sub Subscription, m *message) {
 				in.DedupID = m.id
 			}
 		}
-		_, err = s.sqs.Send(queue, in)
+		if s.sqs.AllowDelivery(queue, core.Source{Service: "sns.amazonaws.com", ARN: sub.TopicARN}) {
+			_, err = s.sqs.Send(queue, in)
+		} else {
+			err = fmt.Errorf("the queue policy of %s does not allow sns.amazonaws.com to send messages from %s", sub.Endpoint, sub.TopicARN)
+		}
 	case "lambda":
 		if s.lambda == nil {
 			err = errors.New("lambda is not available")
@@ -996,6 +1001,10 @@ func (s *Service) deadLetter(sub Subscription, m *message, cause error) {
 	}}
 	if strings.HasSuffix(queue, ".fifo") {
 		in.GroupID, in.DedupID = orDefault(m.groupID, "default"), orDefault(m.dedupID, m.id)
+	}
+	if !s.sqs.AllowDelivery(queue, core.Source{Service: "sns.amazonaws.com", ARN: sub.TopicARN}) {
+		log.Printf("sns: dead-letter %s: the queue policy does not allow sns.amazonaws.com", rp.DeadLetterTargetArn)
+		return
 	}
 	if _, err := s.sqs.Send(queue, in); err != nil {
 		log.Printf("sns: dead-letter %s: %v", rp.DeadLetterTargetArn, err)

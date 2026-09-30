@@ -158,8 +158,8 @@ func evalResourcePolicy(text string, who httpx.Who, action, resource string, key
 			continue
 		}
 		deny := st.Effect == "Deny"
-		if !matched && !(deny && delegated) {
-			continue // naming the account in a Deny covers everyone in it
+		if !matched && !delegated {
+			continue // naming the account covers everyone in it: a Deny denies them, an Allow delegates
 		}
 		if !st.applies(doc.Version, action, resource, ctx) {
 			continue
