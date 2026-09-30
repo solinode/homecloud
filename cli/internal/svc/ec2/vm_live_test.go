@@ -269,7 +269,7 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	if out := h.AWSJSON(t, "ec2", "get-console-output", "--instance-id", id)["Output"].(string); !strings.Contains(out, "Cloud-init v.") || !strings.Contains(out, "finished at") {
 		t.Errorf("console output lacks cloud-init lines: %.300s", out)
 	}
-	// Commands inside a VM are not available yet, with a clear error.
+	f.vmAccessChecks(t, id) // run-command, guest metrics and the serial terminal
 	if msg, err := h.AWSErr(t, "ec2", "create-image", "--instance-id", id, "--name", "vm-img"); err == nil || !strings.Contains(msg, "not supported yet") {
 		t.Errorf("create-image of a VM: %v %s", err, msg)
 	}

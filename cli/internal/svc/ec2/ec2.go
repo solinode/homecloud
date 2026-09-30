@@ -1123,11 +1123,11 @@ func (s *Service) runCommand(c *httpx.Ctx) (any, error) {
 	if i.State != "running" {
 		return nil, core.Errf(http.StatusConflict, "InvalidInstanceState", "instance %s is %s", i.ID, i.State)
 	}
-	if i.IsVM() {
-		return nil, errVMUnsupported("running commands inside")
-	}
 	if in.Timeout <= 0 || in.Timeout > 600 {
 		in.Timeout = 60
+	}
+	if i.IsVM() {
+		return s.vmRunCommand(c.R.Context(), i, in.Command, in.Timeout)
 	}
 	ctx, cancel := context.WithTimeout(c.R.Context(), time.Duration(in.Timeout)*time.Second)
 	defer cancel()

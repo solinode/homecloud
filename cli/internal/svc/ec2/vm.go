@@ -36,8 +36,9 @@ import (
 // is otherwise emulated.
 //
 // Stage 1 covers the instance lifecycle. Extra volumes, snapshots and images
-// of VM disks, a browser terminal, run-command, CloudWatch metrics and backup
-// are not available for VM instances yet.
+// of VM disks and backup are not available for VM instances yet. The browser
+// terminal (serial console), run-command and CloudWatch metrics are in
+// vm_access.go.
 
 const defaultVMImageVolume = "hc-vm-images"
 
