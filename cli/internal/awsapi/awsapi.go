@@ -158,11 +158,18 @@ func (q *Req) Bind(v any) error {
 // Authorize checks the caller may perform action on resource. The last call is
 // what CloudTrail records for the request.
 func (q *Req) Authorize(action, resource string) error {
+	return q.AuthorizeWith(action, resource, httpx.Access{})
+}
+
+// AuthorizeWith is Authorize with the resource's policy and request condition
+// keys (s3:prefix, ...). The resource's own service supplies its policy when
+// acc has none (see httpx.RegisterPolicyProvider).
+func (q *Req) AuthorizeWith(action, resource string, acc httpx.Access) error {
 	q.action, q.resource = action, resource
 	if q.P == nil {
 		return Errorf(http.StatusForbidden, "AccessDenied", "anonymous callers cannot perform %s", action)
 	}
-	if strings.HasPrefix(action, "sts:") || q.P.Can(action, resource) {
+	if strings.HasPrefix(action, "sts:") || q.P.Permits(action, resource, acc) {
 		return nil
 	}
 	code := "AccessDeniedException"

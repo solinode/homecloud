@@ -146,6 +146,8 @@ func (s *Service) rolePrincipal(r Role, t tempCred) *httpx.Principal {
 	p.Can = func(action, resource string) bool {
 		return decide(docs, boundary, action, resource, CondContext(p.Context)) == allow
 	}
+	p.Identity = identityFunc(p, docs, boundary)
+	p.Mentions = mentionsFunc(docs, boundary)
 	return p
 }
 

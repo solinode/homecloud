@@ -7,191 +7,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
 )
 
 // Bucket policies are stored in MinIO (so the MinIO endpoint applies them to
-// its own anonymous access too) and evaluated by HomeCloud for requests to the
-// AWS endpoint: an Allow grants access to principals the identity policies do
-// not (including anonymous callers for Principal "*"), an explicit Deny
-// overrides identity policies (except for the account root).
-//
-// Conditions are not evaluated: an Allow with a Condition is ignored and a
-// Deny with a Condition applies unconditionally, erring on the side of denial.
+// its own anonymous access too) and evaluated by HomeCloud's policy engine
+// (see iam.evalResourcePolicy) for requests to the AWS and native APIs: an
+// Allow grants access to principals the identity policies do not (including
+// anonymous callers for Principal "*"), an explicit Deny overrides identity
+// policies (except for the account root), and Conditions are evaluated against
+// the request (aws:SourceIp, aws:SecureTransport, s3:prefix, ...).
 
-type policyDecision int
-
-const (
-	noDecision policyDecision = iota
-	policyAllow
-	policyDeny
-)
-
-type strList []string
-
-func (s *strList) UnmarshalJSON(b []byte) error {
-	var one string
-	if json.Unmarshal(b, &one) == nil {
-		*s = strList{one}
-		return nil
-	}
-	var many []string
-	if err := json.Unmarshal(b, &many); err != nil {
-		return err
-	}
-	*s = many
-	return nil
-}
-
-type bpPrincipal struct {
-	any bool
-	aws []string
-}
-
-func (p *bpPrincipal) UnmarshalJSON(b []byte) error {
-	var star string
-	if json.Unmarshal(b, &star) == nil {
-		p.any = star == "*"
-		return nil
-	}
-	var m map[string]strList
-	if err := json.Unmarshal(b, &m); err != nil {
-		return err
-	}
-	for _, a := range m["AWS"] {
-		if a == "*" {
-			p.any = true
-		}
-		p.aws = append(p.aws, a)
-	}
-	return nil
-}
-
-type bpStatement struct {
-	Effect       string          `json:"Effect"`
-	Principal    *bpPrincipal    `json:"Principal"`
-	NotPrincipal *bpPrincipal    `json:"NotPrincipal"`
-	Action       strList         `json:"Action"`
-	NotAction    strList         `json:"NotAction"`
-	Resource     strList         `json:"Resource"`
-	NotResource  strList         `json:"NotResource"`
-	Condition    json.RawMessage `json:"Condition"`
-}
-
-type bucketPolicy struct {
-	Statement []bpStatement `json:"Statement"`
-}
-
-// principalMatches reports whether the policy principal names p (nil = anonymous).
-// Naming the account (ID or root ARN) matches every principal in it, but only
-// counts for Deny: as in AWS, it delegates the grant to identity policies.
-func (bp *bpPrincipal) matches(p *httpx.Principal, allowAccount bool) bool {
-	if bp == nil {
-		return false
-	}
-	if bp.any {
-		return true
-	}
-	if p == nil {
-		return false
-	}
-	ids := []string{p.ARN}
-	if p.RoleName != "" {
-		ids = append(ids, core.ARN(p.AccountID, "iam", "role/"+p.RoleName))
-	}
-	for _, a := range bp.aws {
-		a = core.CanonicalARN(a)
-		if allowAccount && (a == p.AccountID || a == core.ARN(p.AccountID, "iam", "root")) {
-			return true
-		}
-		for _, id := range ids {
-			if a == id {
-				return true
-			}
-		}
-	}
-	return false
-}
-
-func anyGlob(patterns []string, v string, fold bool) bool {
-	for _, p := range patterns {
-		if fold {
-			if glob(strings.ToLower(p), strings.ToLower(v)) {
-				return true
-			}
-		} else if glob(p, v) {
-			return true
-		}
-	}
-	return false
-}
-
-// glob matches * and ? wildcards.
-func glob(p, s string) bool {
-	px, sx, starP, starS := 0, 0, -1, 0
-	for sx < len(s) {
-		switch {
-		case px < len(p) && (p[px] == '?' || p[px] == s[sx]):
-			px++
-			sx++
-		case px < len(p) && p[px] == '*':
-			starP, starS = px, sx
-			px++
-		case starP >= 0:
-			px = starP + 1
-			starS++
-			sx = starS
-		default:
-			return false
-		}
-	}
-	for px < len(p) && p[px] == '*' {
-		px++
-	}
-	return px == len(p)
-}
-
-func (d *bucketPolicy) evaluate(p *httpx.Principal, action, resource string) policyDecision {
-	result := noDecision
-	for _, st := range d.Statement {
-		deny := st.Effect == "Deny"
-		if !deny && (len(st.Condition) > 0 && string(st.Condition) != "null" || st.NotPrincipal != nil) {
-			continue
-		}
-		switch {
-		case st.Principal != nil:
-			if !st.Principal.matches(p, deny) {
-				continue
-			}
-		case st.NotPrincipal != nil:
-			if st.NotPrincipal.matches(p, true) {
-				continue
-			}
-		default:
-			continue
-		}
-		if len(st.Action) > 0 && !anyGlob(st.Action, action, true) || len(st.NotAction) > 0 && anyGlob(st.NotAction, action, true) {
-			continue
-		}
-		if len(st.Action) == 0 && len(st.NotAction) == 0 {
-			continue
-		}
-		if len(st.Resource) > 0 && !anyGlob(st.Resource, resource, false) || len(st.NotResource) > 0 && anyGlob(st.NotResource, resource, false) {
-			continue
-		}
-		if len(st.Resource) == 0 && len(st.NotResource) == 0 {
-			continue
-		}
-		if deny {
-			return policyDeny
-		}
-		result = policyAllow
-	}
-	return result
-}
-
-// policyCache holds parsed bucket policies for a few seconds; writes through
+// policyCache holds bucket policies for a few seconds; writes through
 // HomeCloud invalidate it.
 type policyCache struct {
 	mu sync.Mutex
@@ -199,46 +26,109 @@ type policyCache struct {
 }
 
 type cachedPolicy struct {
-	doc *bucketPolicy // nil: no policy
-	at  time.Time
+	text string // "": no policy
+	at   time.Time
 }
 
 const policyTTL = 5 * time.Second
 
-func (s *Service) bucketPolicy(ctx context.Context, bucket string) (*bucketPolicy, error) {
+// bucketPolicy returns the bucket's policy document ("" for none).
+func (s *Service) bucketPolicy(ctx context.Context, bucket string) (string, error) {
 	s.policies.mu.Lock()
 	if c, ok := s.policies.m[bucket]; ok && time.Since(c.at) < policyTTL {
 		s.policies.mu.Unlock()
-		return c.doc, nil
+		return c.text, nil
 	}
 	s.policies.mu.Unlock()
 	cl, err := s.cl()
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	raw, err := cl.GetBucketPolicy(ctx, bucket)
 	if err != nil {
-		return nil, s3err(err)
+		return "", s3err(err)
 	}
-	var doc *bucketPolicy
-	if strings.TrimSpace(raw) != "" {
-		doc = &bucketPolicy{}
-		if err := json.Unmarshal([]byte(raw), doc); err != nil {
-			// Unparseable: grant nothing, deny nothing.
-			doc = &bucketPolicy{}
-		}
-	}
+	raw = strings.TrimSpace(raw)
 	s.policies.mu.Lock()
 	if s.policies.m == nil {
 		s.policies.m = map[string]cachedPolicy{}
 	}
-	s.policies.m[bucket] = cachedPolicy{doc: doc, at: time.Now()}
+	s.policies.m[bucket] = cachedPolicy{text: raw, at: time.Now()}
 	s.policies.mu.Unlock()
-	return doc, nil
+	return raw, nil
 }
 
 func (s *Service) forgetPolicy(bucket string) {
 	s.policies.mu.Lock()
 	delete(s.policies.m, bucket)
 	s.policies.mu.Unlock()
+}
+
+// policyProvider makes bucket policies part of authorization on the native API.
+func (s *Service) policyProvider(arn string) (httpx.Access, bool) {
+	rest, ok := strings.CutPrefix(arn, "arn:aws:s3:::")
+	if !ok {
+		return httpx.Access{}, false
+	}
+	bucket, _, _ := strings.Cut(rest, "/")
+	if bucket == "" || bucket == "*" || !s.knownBucket(bucket) {
+		return httpx.Access{}, false
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	text, err := s.bucketPolicy(ctx, bucket)
+	return httpx.Access{Policy: text}, err == nil && text != ""
+}
+
+// publicPolicy reports whether a policy grants everyone access unconditionally
+// (GetBucketPolicyStatus IsPublic).
+func publicPolicy(text string) bool {
+	var d struct {
+		Statement json.RawMessage
+	}
+	if json.Unmarshal([]byte(text), &d) != nil {
+		return false
+	}
+	var stmts []struct {
+		Effect    string
+		Principal json.RawMessage
+		Condition json.RawMessage
+	}
+	if raw := strings.TrimSpace(string(d.Statement)); strings.HasPrefix(raw, "{") {
+		var one struct {
+			Effect    string
+			Principal json.RawMessage
+			Condition json.RawMessage
+		}
+		if json.Unmarshal(d.Statement, &one) == nil {
+			stmts = append(stmts, one)
+		}
+	} else if json.Unmarshal(d.Statement, &stmts) != nil {
+		return false
+	}
+	for _, st := range stmts {
+		if st.Effect != "Allow" || len(st.Condition) != 0 && string(st.Condition) != "null" {
+			continue
+		}
+		var star string
+		var m map[string]json.RawMessage
+		switch {
+		case json.Unmarshal(st.Principal, &star) == nil && star == "*":
+			return true
+		case json.Unmarshal(st.Principal, &m) == nil:
+			var one string
+			var many []string
+			if json.Unmarshal(m["AWS"], &one) == nil && one == "*" {
+				return true
+			}
+			if json.Unmarshal(m["AWS"], &many) == nil {
+				for _, a := range many {
+					if a == "*" {
+						return true
+					}
+				}
+			}
+		}
+	}
+	return false
 }

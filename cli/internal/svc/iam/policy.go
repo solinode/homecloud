@@ -34,14 +34,17 @@ func (s *StringList) UnmarshalJSON(b []byte) error {
 }
 
 type Statement struct {
-	Sid         string          `json:"Sid,omitempty"`
-	Effect      string          `json:"Effect"`
-	Principal   *Principals     `json:"Principal,omitempty"`
-	Action      StringList      `json:"Action,omitempty"`
-	NotAction   StringList      `json:"NotAction,omitempty"`
-	Resource    StringList      `json:"Resource,omitempty"`
-	NotResource StringList      `json:"NotResource,omitempty"`
-	Condition   json.RawMessage `json:"Condition,omitempty"`
+	Sid       string      `json:"Sid,omitempty"`
+	Effect    string      `json:"Effect"`
+	Principal *Principals `json:"Principal,omitempty"`
+	// NotPrincipal only appears in resource-based policies (bucket, queue, topic
+	// and key policies); role trust and identity policies reject it.
+	NotPrincipal *Principals     `json:"NotPrincipal,omitempty"`
+	Action       StringList      `json:"Action,omitempty"`
+	NotAction    StringList      `json:"NotAction,omitempty"`
+	Resource     StringList      `json:"Resource,omitempty"`
+	NotResource  StringList      `json:"NotResource,omitempty"`
+	Condition    json.RawMessage `json:"Condition,omitempty"`
 }
 
 // Principals is a trust policy's Principal element: "*" or

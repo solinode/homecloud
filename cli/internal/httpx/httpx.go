@@ -33,6 +33,14 @@ type Principal struct {
 	// Can reports whether the principal may perform action on resource. IAM
 	// evaluates policy conditions against Context at call time.
 	Can func(action, resource string) bool `json:"-"`
+	// Identity evaluates the principal's identity policies with extra request
+	// condition keys (s3:prefix, ...) and tells an explicit Deny from an
+	// implicit one. When nil, Can decides.
+	Identity func(action, resource string, keys map[string][]string) Decision `json:"-"`
+	// Mentions reports whether any of the principal's identity policies contains
+	// the (lower-case) text; it lets costly condition keys be looked up only
+	// when some policy uses them.
+	Mentions func(text string) bool `json:"-"`
 	// Context holds the IAM condition keys of the request (lower-case keys such
 	// as "aws:sourceip" or "aws:username"). IAM fills the identity keys; see
 	// AddRequestContext for the request keys.
@@ -40,15 +48,13 @@ type Principal struct {
 }
 
 // AddRequestContext records the IAM global condition keys that come from the
-// HTTP request (aws:SourceIp, aws:SecureTransport, aws:UserAgent) on p.
+// HTTP request (see RequestContext) on p.
 func (p *Principal) AddRequestContext(r *http.Request) {
 	if p.Context == nil {
 		p.Context = map[string][]string{}
 	}
-	p.Context["aws:sourceip"] = []string{ClientIP(r)}
-	p.Context["aws:securetransport"] = []string{strconv.FormatBool(r.TLS != nil)}
-	if ua := r.UserAgent(); ua != "" {
-		p.Context["aws:useragent"] = []string{ua}
+	for k, v := range RequestContext(r) {
+		p.Context[k] = v
 	}
 }
 
@@ -133,7 +139,7 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 			}
 			c.P = p
 			// Identity calls (sts:*) are always allowed, as in AWS.
-			if !o.deferred && !strings.HasPrefix(action, "sts:") && !p.Can(action, resource) {
+			if !o.deferred && !strings.HasPrefix(action, "sts:") && !p.Permits(action, resource, Access{}) {
 				WriteError(sw, core.Errf(http.StatusForbidden, "AccessDenied", "%s is not authorized to perform %s on %s", p.ARN, action, resource))
 				rt.audit(p, action, resource, r, sw.status, time.Since(start))
 				return
@@ -213,7 +219,12 @@ func (c *Ctx) Bind(v any) error {
 
 // Authorize performs an additional IAM check inside a handler.
 func (c *Ctx) Authorize(action, resource string) error {
-	if c.P == nil || c.P.Can(action, resource) {
+	return c.AuthorizeWith(action, resource, Access{})
+}
+
+// AuthorizeWith is Authorize with a resource policy and request condition keys.
+func (c *Ctx) AuthorizeWith(action, resource string, acc Access) error {
+	if c.P == nil || c.P.Permits(action, resource, acc) {
 		return nil
 	}
 	return core.Errf(http.StatusForbidden, "AccessDenied", "%s is not authorized to perform %s on %s", c.P.ARN, action, resource)
@@ -229,14 +240,6 @@ func (c *Ctx) JSON(status int, v any) (any, error) {
 	c.written = true
 	WriteJSON(c.W, status, v)
 	return nil, nil
-}
-
-func ClientIP(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err != nil {
-		return r.RemoteAddr
-	}
-	return host
 }
 
 func WriteJSON(w http.ResponseWriter, status int, v any) {
