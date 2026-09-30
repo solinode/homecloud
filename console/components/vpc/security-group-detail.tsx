@@ -23,7 +23,7 @@ import { formatDate } from "@/lib/format"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { Instance, SecurityGroup, SecurityGroupRule } from "@/lib/types"
 
-import { deleteErrorMessage, portRange, ruleType, useVpcs, VpcLink } from "./common"
+import { deleteErrorMessage, portRange, ruleProtocol, ruleSource, ruleType, sgHref, useVpcs, VpcLink } from "./common"
 import { AddRulesDialog } from "./dialogs"
 
 export function SecurityGroupDetail() {
@@ -119,11 +119,12 @@ export function SecurityGroupDetail() {
         <AlertTitle>How inbound rules work in HomeCloud</AlertTitle>
         <AlertDescription className="text-blue-900/80 dark:text-blue-100/80">
           <p>
-            Inbound rules decide which ports of an instance are published on the host. Docker assigns each published port a host port, shown on the
-            instance&apos;s details page. Traffic between resources in the same VPC is always allowed.
+            Inbound rules are enforced between the resources of a VPC: a rule allows traffic from an IPv4 CIDR or from every resource that has another security
+            group. Changes apply to running resources within seconds.
           </p>
           <p>
-            Rules apply when an instance is launched: changes here do not affect running instances. Relaunch an instance to apply the new rules.
+            Rules from 0.0.0.0/0 (or 127.0.0.1/32) also publish their TCP/UDP ports on the host; Docker assigns each a host port, shown on the instance&apos;s
+            details page.
           </p>
         </AlertDescription>
       </Alert>
@@ -167,9 +168,17 @@ export function SecurityGroupDetail() {
                   <tr key={r.id} className="hover:bg-muted/40 border-b last:border-0">
                     <td className="px-4 py-2 font-mono text-[13px]">{r.id}</td>
                     <td className="px-3 py-2">{ruleType(r)}</td>
-                    <td className="px-3 py-2 uppercase">{r.protocol}</td>
+                    <td className="px-3 py-2">{ruleProtocol(r)}</td>
                     <td className="px-3 py-2 font-mono text-[13px]">{portRange(r)}</td>
-                    <td className="px-3 py-2 font-mono text-[13px]">{r.cidr}</td>
+                    <td className="px-3 py-2 font-mono text-[13px]">
+                      {r.source_group ? (
+                        <Link href={sgHref(r.source_group)} className={cellLinkClass()}>
+                          {r.source_group === g.id ? `${r.source_group} (this group)` : r.source_group}
+                        </Link>
+                      ) : (
+                        r.cidr
+                      )}
+                    </td>
                     <td className="text-muted-foreground hidden px-3 py-2 md:table-cell">{r.description || "-"}</td>
                     <td className="px-4 py-2 text-right">
                       <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => setRemoveRule(r)}>
@@ -258,8 +267,8 @@ export function SecurityGroupDetail() {
         description={
           removeRule && (
             <>
-              {ruleType(removeRule)} ({removeRule.protocol} {portRange(removeRule)}) from <span className="font-mono">{removeRule.cidr}</span> will be removed.
-              Running instances keep their published ports until they are relaunched.
+              {ruleType(removeRule)} ({ruleProtocol(removeRule)} {portRange(removeRule)}) from <span className="font-mono">{ruleSource(removeRule)}</span> will be removed.
+              Traffic it allowed stops for new connections; a published port is closed when the instance is next recreated.
             </>
           )
         }

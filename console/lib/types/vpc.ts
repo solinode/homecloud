@@ -28,10 +28,14 @@ export interface Vpc {
 
 export interface SecurityGroupRule {
   id: string
-  protocol: "tcp" | "udp"
+  /** tcp or udp from the native API; the EC2 API also records icmp, icmpv6 and "-1" (all traffic) */
+  protocol: string
   from_port: number
   to_port: number
-  cidr: string
+  /** an IPv4 CIDR; empty when the rule's source is a group */
+  cidr?: string
+  /** the ID of a security group of the same VPC: "from every resource that has this group" */
+  source_group?: string
   description?: string
 }
 
@@ -41,5 +45,7 @@ export interface SecurityGroup {
   name: string
   description: string
   ingress: SecurityGroupRule[]
+  /** the default group's rule allowing all inbound traffic from its own members is present */
+  self_rule?: boolean
   created_at: string
 }

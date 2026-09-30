@@ -107,6 +107,14 @@ type User struct {
 	// ConfirmCode is the hash of the pending sign-up confirmation code.
 	ConfirmCode        string    `json:"confirm_code,omitempty"`
 	ConfirmCodeExpires time.Time `json:"confirm_code_expires,omitempty"`
+	// ResetCode is the hash of the pending password-reset code (ForgotPassword).
+	ResetCode        string    `json:"reset_code,omitempty"`
+	ResetCodeExpires time.Time `json:"reset_code_expires,omitempty"`
+	// SRPSalt and SRPVerifier (hex) let USER_SRP_AUTH verify the password
+	// without HomeCloud holding it. Users created before SRP support have none
+	// until their password is set again or they sign in with USER_PASSWORD_AUTH.
+	SRPSalt     string `json:"srp_salt,omitempty"`
+	SRPVerifier string `json:"srp_verifier,omitempty"`
 	// TokenVersion is embedded in every token; global sign-out increments it.
 	TokenVersion int `json:"token_version"`
 }
@@ -139,13 +147,16 @@ type Service struct {
 	createMu sync.Mutex
 	keys     map[string]*rsa.PrivateKey
 	fails    map[string][]time.Time
+	srp      map[string]*srpPending // pending PASSWORD_VERIFIER challenges by hash of SECRET_BLOCK
+	srpKey   []byte                 // derives stable fake salts for unknown users
 }
 
 // dummyHash equalises sign-in timing for unknown users.
 var dummyHash, _ = bcrypt.GenerateFromPassword([]byte("homecloud-timing-equaliser"), bcrypt.DefaultCost)
 
 func New(env *svc.Env, sec *secrets.Service) *Service {
-	return &Service{env: env, secrets: sec, keys: map[string]*rsa.PrivateKey{}, fails: map[string][]time.Time{}}
+	return &Service{env: env, secrets: sec, keys: map[string]*rsa.PrivateKey{}, fails: map[string][]time.Time{},
+		srp: map[string]*srpPending{}, srpKey: []byte(core.RandHex(32))}
 }
 
 func userKey(pool, username string) string { return pool + "/" + strings.ToLower(username) }
@@ -647,9 +658,10 @@ func (s *Service) newUser(p Pool, username, password string, attrs map[string]st
 	if err := checkAttrs(attrs); err != nil {
 		return User{}, err
 	}
+	salt, ver := newVerifier(p.ID, username, password)
 	h2 := core.RandHex(32)
 	u := User{PoolID: p.ID, Username: username, Sub: h2[0:8] + "-" + h2[8:12] + "-" + h2[12:16] + "-" + h2[16:20] + "-" + h2[20:32],
-		Attributes: attrs, PasswordHash: string(h), Status: status, Enabled: true, Groups: []string{}, CreatedAt: core.Now(), ModifiedAt: core.Now()}
+		Attributes: attrs, PasswordHash: string(h), SRPSalt: salt, SRPVerifier: ver, Status: status, Enabled: true, Groups: []string{}, CreatedAt: core.Now(), ModifiedAt: core.Now()}
 	return u, store.Put(s.env.Store, cUsers, userKey(p.ID, username), u)
 }
 
@@ -847,8 +859,14 @@ func (s *Service) setPassword(pool, name, password string, permanent bool) (User
 	if err != nil {
 		return User{}, err
 	}
+	cur, err := s.getUser(pool, name)
+	if err != nil {
+		return User{}, err
+	}
+	salt, ver := newVerifier(pool, cur.Username, password)
 	return s.modUser(pool, name, func(u *User) error {
-		u.PasswordHash = string(h)
+		u.PasswordHash, u.SRPSalt, u.SRPVerifier = string(h), salt, ver
+		u.ResetCode = ""
 		if permanent {
 			u.Status = "CONFIRMED"
 		} else {
@@ -1129,20 +1147,16 @@ func (s *Service) authenticate(poolID string, in authInput, ip string) (any, err
 			return nil, deny
 		}
 		s.succeeded(tk)
-		if !u.Enabled {
-			return nil, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "user is disabled")
+		if u.SRPVerifier == "" { // a user from before SRP support: derive the verifier now that the password is known
+			salt, ver := newVerifier(p.ID, u.Username, in.Password)
+			_, _ = store.Update(s.env.Store, cUsers, userKey(p.ID, u.Username), func(x *User) error {
+				if x.SRPVerifier == "" && x.PasswordHash == u.PasswordHash {
+					x.SRPSalt, x.SRPVerifier = salt, ver
+				}
+				return nil
+			})
 		}
-		switch u.Status {
-		case "UNCONFIRMED":
-			return nil, core.Errf(http.StatusBadRequest, "UserNotConfirmedException", "user is not confirmed")
-		case "FORCE_CHANGE_PASSWORD":
-			session := core.NewSecret(48)
-			if err := store.Put(s.env.Store, cSessions, hashToken(session), challenge{PoolID: p.ID, ClientID: cl.ID, Username: u.Username, Expires: time.Now().Add(5 * time.Minute)}); err != nil {
-				return nil, err
-			}
-			return map[string]any{"challenge": "NEW_PASSWORD_REQUIRED", "session": session, "username": u.Username}, nil
-		}
-		return s.issue(p, cl, u, true)
+		return s.signedIn(p, cl, u)
 	case "REFRESH_TOKEN_AUTH":
 		rt, err := store.Get[refresh](s.env.Store, cRefresh, hashToken(in.RefreshToken))
 		if err != nil || rt.PoolID != p.ID || rt.ClientID != cl.ID || time.Now().After(rt.Expires) {
@@ -1155,6 +1169,27 @@ func (s *Service) authenticate(poolID string, in authInput, ip string) (any, err
 		return s.issue(p, cl, u, false)
 	}
 	return nil, core.BadRequest("flow must be USER_PASSWORD_AUTH or REFRESH_TOKEN_AUTH")
+}
+
+// signedIn finishes a sign-in whose password is proven: the user's status
+// decides between tokens and a challenge or error.
+func (s *Service) signedIn(p Pool, cl Client, u User) (any, error) {
+	if !u.Enabled {
+		return nil, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "user is disabled")
+	}
+	switch u.Status {
+	case "UNCONFIRMED":
+		return nil, core.Errf(http.StatusBadRequest, "UserNotConfirmedException", "user is not confirmed")
+	case "RESET_REQUIRED":
+		return nil, core.Errf(http.StatusBadRequest, "PasswordResetRequiredException", "Password reset required for the user")
+	case "FORCE_CHANGE_PASSWORD":
+		session := core.NewSecret(48)
+		if err := store.Put(s.env.Store, cSessions, hashToken(session), challenge{PoolID: p.ID, ClientID: cl.ID, Username: u.Username, Expires: time.Now().Add(5 * time.Minute)}); err != nil {
+			return nil, err
+		}
+		return map[string]any{"challenge": "NEW_PASSWORD_REQUIRED", "session": session, "username": u.Username}, nil
+	}
+	return s.issue(p, cl, u, true)
 }
 
 func (s *Service) respond(c *httpx.Ctx) (any, error) {
@@ -1184,11 +1219,13 @@ func (s *Service) respondChallenge(poolID string, in authInput) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	salt, ver := newVerifier(p.ID, ch.Username, in.NewPassword)
 	u, err := store.Update(s.env.Store, cUsers, userKey(p.ID, ch.Username), func(u *User) error {
 		if !u.Enabled {
 			return core.Errf(http.StatusBadRequest, "NotAuthorizedException", "user is disabled")
 		}
 		u.PasswordHash, u.Status = string(h), "CONFIRMED"
+		u.SRPSalt, u.SRPVerifier = salt, ver
 		return nil
 	})
 	if err != nil {
@@ -1295,7 +1332,11 @@ func (s *Service) changePasswordOf(p Pool, u User, oldPw, newPw string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.modUser(p.ID, u.Username, func(x *User) error { x.PasswordHash = string(h); return nil })
+	salt, ver := newVerifier(p.ID, u.Username, newPw)
+	_, err = s.modUser(p.ID, u.Username, func(x *User) error {
+		x.PasswordHash, x.SRPSalt, x.SRPVerifier = string(h), salt, ver
+		return nil
+	})
 	return err
 }
 

@@ -127,6 +127,8 @@ curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh
 irm https://homecloud.pages.dev/scripts/install.ps1 | iex
 ```
 
+Running it on a VPS or home server? See **[Install on a server](docs/install-server.md)** (system service, TLS, firewall, backups).
+
 Or build from source with Go 1.25+ and Node.js 22+: `make` (the binary lands in `bin/homecloud`).
 
 ### Run

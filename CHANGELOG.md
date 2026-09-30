@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Cognito user pools support `USER_SRP_AUTH` (Amplify, amazon-cognito-identity-js, pycognito), `ForgotPassword`/`ConfirmForgotPassword` and `AdminResetUserPassword`. Existing users need their password set again (or one `USER_PASSWORD_AUTH` sign-in) before SRP works.
+- CloudFormation updates behave like AWS: queues, topics, parameters, functions, roles, tables, alarms and other resources change in place, replacements create the new resource before deleting the old one, and a failed update rolls back to the previous template (`UPDATE_ROLLBACK_COMPLETE`, `ContinueUpdateRollback`, `DisableRollback`). A replacement that keeps a custom resource name now fails, as in AWS.
+
 ### EC2
 - VM instances: `ami-ubuntu-24-04-vm` and `ami-debian-12-vm` boot the official cloud image as a QEMU virtual machine with its own kernel, systemd and cloud-init. The VM runs inside a container attached to the instance's VPC network with its private IP, so DNS, the metadata service, security groups and published ports work as for container instances; passt gives the guest the container's address and forwards inbound ports. Key pairs, user data (scripts and `#cloud-config`), the root block device size, stop/start/reboot, console output and terminate work through the same EC2 API, CLI, console and Terraform.
 - Guests use KVM when the Docker host has `/dev/kvm` and are emulated (slower) otherwise; instances report `virtualization: "kvm"` or `"emulated"`. `DescribeImages` and `DescribeInstances` report `Hypervisor: kvm` for VM images and instances. Cloud images are pinned to a release, verified by checksum and downloaded once into a Docker volume; the runner image is built locally on first use.

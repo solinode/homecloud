@@ -113,17 +113,33 @@ function rule(protocol: "tcp" | "udp", from: number, to: number, cidr: string, d
   return { id: sgrId(), protocol, from_port: from, to_port: to, cidr, description }
 }
 
+/** fromGroup is a rule whose source is another security group of the VPC (cidr stays empty, as in the API). */
+function fromGroup(protocol: "tcp" | "udp", from: number, to: number, group: string, description?: string): SecurityGroupRule {
+  return { id: sgrId(), protocol, from_port: from, to_port: to, source_group: group, description }
+}
+
+/** selfRule is the rule every default group starts with: all inbound traffic from the group's own members. */
+const selfRule = (groupId: string): SecurityGroupRule => ({ id: stableId("sgr-", `${groupId}-self`), protocol: "-1", from_port: -1, to_port: -1, source_group: groupId })
+
+// A rule from 0.0.0.0/0 or 127.0.0.1/32 is also published as host ports, which limits its range (the API's maxPublishedRange).
+const MAX_PUBLISHED_RANGE = 32
+
+/** normalizeRule mirrors POST /api/v1/vpc/security-groups/:id/ingress: any IPv4 CIDR, or a source_group, but not both. */
 function normalizeRule(r: Partial<SecurityGroupRule>): SecurityGroupRule {
   const protocol = String(r.protocol || "tcp").toLowerCase()
-  if (protocol !== "tcp" && protocol !== "udp") throw badRequest("protocol must be tcp or udp")
+  if (protocol !== "tcp" && protocol !== "udp") throw badRequest("protocol must be tcp or udp (the EC2 API takes other protocols)")
   const from = Number(r.from_port)
   const to = Number(r.to_port || r.from_port)
   if (!Number.isInteger(from) || !Number.isInteger(to) || from < 1 || to > 65535 || from > to) throw badRequest(`invalid port range ${from}-${to}`)
-  if (to - from >= 32) throw badRequest("port ranges are limited to 32 ports")
+  const description = r.description || undefined
+  if (r.source_group) {
+    if (r.cidr) throw badRequest("a rule has one source: a cidr or a source_group")
+    return { id: sgrId(), protocol, from_port: from, to_port: to, source_group: r.source_group, description }
+  }
   const cidr = r.cidr || "0.0.0.0/0"
-  const c = parseCidr(cidr)
-  if (!c) throw badRequest(`invalid cidr "${cidr}"`)
-  return { id: sgrId(), protocol, from_port: from, to_port: to, cidr: c.text, description: r.description || undefined }
+  if (!parseCidr(cidr)) throw badRequest(`invalid cidr "${cidr}"`)
+  if ((cidr === "0.0.0.0/0" || cidr === "127.0.0.1/32") && to - from >= MAX_PUBLISHED_RANGE) throw badRequest(`port ranges from ${cidr} are limited to ${MAX_PUBLISHED_RANGE} ports`)
+  return { id: sgrId(), protocol, from_port: from, to_port: to, cidr, description }
 }
 
 // ---- seed ----
@@ -155,18 +171,18 @@ function seed(): VpcState {
       sn(SUBNET_DEV, VPC_DEV, "dev-a", "10.20.0.0/24", AZ_A, false, 23 * DAY),
     ],
     sgs: [
-      { id: SG.defaultVpc, vpc_id: VPC_DEFAULT, name: "default", description: "default VPC security group", ingress: [], created_at: ago(140 * DAY) },
-      { id: SG.shopDefault, vpc_id: VPC_SHOP, name: "default", description: "default VPC security group", ingress: [], created_at: ago(96 * DAY) },
-      { id: SG_DEV, vpc_id: VPC_DEV, name: "default", description: "default VPC security group", ingress: [], created_at: ago(23 * DAY) },
+      { id: SG.defaultVpc, vpc_id: VPC_DEFAULT, name: "default", description: "default VPC security group", ingress: [selfRule(SG.defaultVpc)], self_rule: true, created_at: ago(140 * DAY) },
+      { id: SG.shopDefault, vpc_id: VPC_SHOP, name: "default", description: "default VPC security group", ingress: [selfRule(SG.shopDefault)], self_rule: true, created_at: ago(96 * DAY) },
+      { id: SG_DEV, vpc_id: VPC_DEV, name: "default", description: "default VPC security group", ingress: [selfRule(SG_DEV)], self_rule: true, created_at: ago(23 * DAY) },
       {
         id: SG.alb, vpc_id: VPC_SHOP, name: "shop-alb", description: "Public HTTP/HTTPS to the application load balancer", created_at: ago(95 * DAY),
         ingress: [rule("tcp", 80, 80, "0.0.0.0/0", "HTTP from anywhere"), rule("tcp", 443, 443, "0.0.0.0/0", "HTTPS from anywhere")],
       },
       {
         id: SG.web, vpc_id: VPC_SHOP, name: "shop-web", description: "Web tier instances behind the ALB", created_at: ago(95 * DAY),
-        ingress: [rule("tcp", 80, 80, "10.0.0.0/16", "HTTP from the load balancer"), rule("tcp", 8080, 8080, "10.0.0.0/16", "Application port"), rule("tcp", 22, 22, "10.0.1.0/24", "SSH from the bastion subnet")],
+        ingress: [fromGroup("tcp", 80, 80, SG.alb, "HTTP from the load balancer"), rule("tcp", 8080, 8080, "10.0.0.0/16", "Application port"), fromGroup("tcp", 22, 22, SG.bastion, "SSH from the bastion group")],
       },
-      { id: SG.db, vpc_id: VPC_SHOP, name: "shop-db", description: "Postgres access from the web tier", created_at: ago(94 * DAY), ingress: [rule("tcp", 5432, 5432, "10.0.11.0/24", "Postgres from private-a"), rule("tcp", 5432, 5432, "10.0.12.0/24", "Postgres from private-b")] },
+      { id: SG.db, vpc_id: VPC_SHOP, name: "shop-db", description: "Postgres access from the web tier", created_at: ago(94 * DAY), ingress: [fromGroup("tcp", 5432, 5432, SG.web, "Postgres from the web tier"), rule("tcp", 5432, 5432, "10.0.12.0/24", "Postgres from private-b")] },
       { id: SG.cache, vpc_id: VPC_SHOP, name: "shop-cache", description: "Redis access from the web tier", created_at: ago(94 * DAY), ingress: [rule("tcp", 6379, 6379, "10.0.0.0/16", "Redis from the VPC")] },
       { id: SG.bastion, vpc_id: VPC_SHOP, name: "shop-bastion", description: "SSH entry point for operators", created_at: ago(70 * DAY), ingress: [rule("tcp", 22, 22, "203.0.113.0/24", "SSH from the office network")] },
     ],
@@ -248,7 +264,8 @@ function routes(r: Router) {
       tags: name ? { Name: name } : null, arn: arn("ec2", `vpc/${id}`),
     }
     s.vpcs.push(v)
-    s.sgs.push({ id: uid("sg-"), vpc_id: id, name: "default", description: "default VPC security group", ingress: [], created_at: v.created_at })
+    const dsg = uid("sg-")
+    s.sgs.push({ id: dsg, vpc_id: id, name: "default", description: "default VPC security group", ingress: [selfRule(dsg)], self_rule: true, created_at: v.created_at })
     const t: RouteTable = { id: rtbId(), vpc_id: id, routes: [], associations: [{ id: uid("rtbassoc-"), main: true }] }
     if (internet) {
       const g: InternetGateway = { id: uid("igw-"), vpc_id: id, auto: true }
@@ -326,7 +343,9 @@ function routes(r: Router) {
   })
   r.post("/api/v1/vpc/security-groups/:id/ingress", ({ params, body }) => {
     const g = findSg(params.id)
-    g.ingress.push(normalizeRule(body ?? {}))
+    const r = normalizeRule(body ?? {})
+    if (r.source_group) findSg(r.source_group)
+    g.ingress.push(r)
     return g
   })
   r.del("/api/v1/vpc/security-groups/:id/ingress/:rule", ({ params }) => {
@@ -341,6 +360,8 @@ function routes(r: Router) {
     const g = findSg(params.id)
     if (g.name === "default") throw err(409, "CannotDelete", "the default security group cannot be deleted")
     if (sgInUse(g.id, getState())) throw err(409, "DependencyViolation", `security group ${g.id} is in use`)
+    const ref = s.sgs.find((o) => o.id !== g.id && o.ingress.some((x) => x.source_group === g.id))
+    if (ref) throw err(409, "DependencyViolation", `security group ${g.id} is referenced by a rule of ${ref.id}`)
     s.sgs = s.sgs.filter((x) => x.id !== g.id)
     return null
   })

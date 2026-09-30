@@ -23,6 +23,7 @@ import { FILE_SYSTEMS_PATH, fileSystemHref, fsLabel } from "@/components/efs/com
 import { api, errorMessage } from "@/lib/api"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import { formatMemoryMB, formatNumber, pluralize } from "@/lib/format"
+import { portRange, ruleProtocol, ruleSource } from "@/components/vpc/common"
 import { CreateKeyPairDialog, KEY_PAIRS_PATH } from "./key-pairs-list"
 import type { FileSystem, Image, Instance, KeyPair, RunInstancesInput, SecurityGroup, SecurityGroupRule, Subnet } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -46,8 +47,7 @@ interface FsRow {
 type ImageFilter = "all" | "catalog" | "mine"
 
 export function ruleSummary(r: SecurityGroupRule) {
-  const ports = r.from_port === r.to_port ? `${r.from_port}` : `${r.from_port}-${r.to_port}`
-  return `${r.protocol.toUpperCase()} ${ports} from ${r.cidr}`
+  return `${ruleProtocol(r)} ${portRange(r)} from ${ruleSource(r)}`
 }
 
 function sortSubnets(list: Subnet[]) {
@@ -121,7 +121,7 @@ export function LaunchWizard() {
   const groups = (sgs.data ?? []).filter((g) => g.vpc_id === vpcId)
   const selectedGroups = groups.filter((g) => sgIds.includes(g.id))
   const publishedPorts = Array.from(
-    new Set(selectedGroups.flatMap((g) => g.ingress.map((r) => (r.from_port === r.to_port ? `${r.from_port}/${r.protocol}` : `${r.from_port}-${r.to_port}/${r.protocol}`)))),
+    new Set(selectedGroups.flatMap((g) => g.ingress.filter((r) => (r.protocol === "tcp" || r.protocol === "udp") && (r.cidr === "0.0.0.0/0" || r.cidr === "127.0.0.1/32")).map((r) => (r.from_port === r.to_port ? `${r.from_port}/${r.protocol}` : `${r.from_port}-${r.to_port}/${r.protocol}`)))),
   )
 
   const visibleImages = useMemo(() => {

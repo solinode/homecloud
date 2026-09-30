@@ -252,6 +252,23 @@ func TestNetworkStack(t *testing.T) {
 		t.Fatalf("eip: %v", addrs)
 	}
 
+	// Ingress rules change in place: the group keeps its ID, and the rule another resource added stays.
+	moved := strings.Replace(netTemplate, "{IpProtocol: tcp, FromPort: 80, ToPort: 80, CidrIp: 0.0.0.0/0}", "{IpProtocol: tcp, FromPort: 8080, ToPort: 8080, CidrIp: 0.0.0.0/0}", 1)
+	e.AWS(t, "cloudformation", "update-stack", "--stack-name", "net", "--template-body", "file://"+write(t, "net2.yaml", moved))
+	out2 := outputs(e.waitFor(t, "net", "UPDATE_COMPLETE"))
+	if out2["SgId"] != out["SgId"] || out2["VpcId"] != out["VpcId"] {
+		t.Fatalf("the security group was replaced: %v -> %v", out, out2)
+	}
+	sg = e.AWSJSON(t, "ec2", "describe-security-groups", "--group-ids", out["SgId"])["SecurityGroups"].([]any)[0].(map[string]any)
+	ports = map[string]bool{}
+	for _, p := range sg["IpPermissions"].([]any) {
+		pm := p.(map[string]any)
+		ports[str(pm, "IpProtocol")+"/"+fmt.Sprint(pm["FromPort"])] = true
+	}
+	if len(ports) != 2 || !ports["tcp/8080"] || !ports["udp/5353"] {
+		t.Fatalf("ingress rules after the update: %v", ports)
+	}
+
 	e.AWS(t, "cloudformation", "delete-stack", "--stack-name", "net")
 	e.waitGone(t, "net")
 	for _, c := range [][]string{

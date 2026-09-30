@@ -257,3 +257,47 @@ Resources:
 		t.Fatalf("identical template: %v", ch)
 	}
 }
+
+func TestDiffReplacement(t *testing.T) {
+	s := &Service{}
+	old := mustParse(t, `
+Parameters: {N: {Type: String, Default: a}}
+Resources:
+  Q: {Type: AWS::SQS::Queue, Properties: {QueueName: !Ref N, VisibilityTimeout: 30}}
+  Same: {Type: AWS::SQS::Queue, Properties: {QueueName: same, VisibilityTimeout: 30}}
+  Sub: {Type: AWS::SNS::Subscription, Properties: {TopicArn: arn, Protocol: sqs, Endpoint: !GetAtt Q.Arn}}
+  P: {Type: AWS::SSM::Parameter, Properties: {Type: String, Value: !Ref Q}}
+  Raw: {Type: HC::SQS::Queue, Properties: {name: raw}}
+`)
+	st := &Stack{Name: "d", ARN: "arn:aws:cloudformation:us-east-1:123456789012:stack/d/1", Parameters: map[string]any{"N": "a"}, Resources: map[string]*Resource{
+		"Q": {PhysicalID: "q"}, "Same": {PhysicalID: "s"}, "Sub": {PhysicalID: "sub"}, "P": {PhysicalID: "p"}, "Raw": {PhysicalID: "raw"}}}
+	next := mustParse(t, `
+Parameters: {N: {Type: String, Default: a}}
+Resources:
+  Q: {Type: AWS::SQS::Queue, Properties: {QueueName: !Ref N, VisibilityTimeout: 30}}
+  Same: {Type: AWS::SQS::Queue, Properties: {QueueName: same, VisibilityTimeout: 90}}
+  Sub: {Type: AWS::SNS::Subscription, Properties: {TopicArn: arn, Protocol: sqs, Endpoint: !GetAtt Q.Arn}}
+  P: {Type: AWS::SSM::Parameter, Properties: {Type: String, Value: !Ref Q}}
+  Raw: {Type: HC::SQS::Queue, Properties: {name: raw, visibility_timeout: 5}}
+`)
+	got := map[string]string{}
+	for _, c := range s.diff(old, st, next, map[string]any{"N": "b"}) {
+		got[c.LogicalID] = c.Replacement
+	}
+	// Q is renamed (replaced); Same changes an attribute in place; the subscription cannot
+	// be updated, so whether it is replaced depends on what the replaced queue's ARN becomes;
+	// the parameter can take a new value; a native type is always replaced.
+	want := map[string]string{"Q": "True", "Same": "False", "Sub": "Conditional", "P": "False", "Raw": "True"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("replacement %v, want %v", got, want)
+	}
+	if r := replacement("AWS::SQS::Queue", "AWS::SQS::Queue", []string{"VisibilityTimeout", "Tags"}); r != "False" {
+		t.Fatalf("%s", r)
+	}
+	if r := replacement("AWS::SQS::Queue", "AWS::SQS::Queue", []string{"VisibilityTimeout", "FifoQueue"}); r != "True" {
+		t.Fatalf("%s", r)
+	}
+	if r := replacement("AWS::SQS::Queue", "AWS::SNS::Topic", nil); r != "True" {
+		t.Fatalf("%s", r)
+	}
+}

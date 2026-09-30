@@ -11,12 +11,12 @@ import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { formatNumber } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
+import { portRange, ruleProtocol, ruleSource } from "@/components/vpc/common"
 import type { SecurityGroup, SecurityGroupRule, Subnet } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 function ruleSummary(r: SecurityGroupRule) {
-  const ports = r.from_port === r.to_port ? `${r.from_port}` : `${r.from_port}-${r.to_port}`
-  return `${r.protocol.toUpperCase()} ${ports} from ${r.cidr}`
+  return `${ruleProtocol(r)} ${portRange(r)} from ${ruleSource(r)}`
 }
 
 function sortSubnets(list: Subnet[]) {
