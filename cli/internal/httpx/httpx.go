@@ -45,6 +45,10 @@ type Principal struct {
 	// as "aws:sourceip" or "aws:username"). IAM fills the identity keys; see
 	// AddRequestContext for the request keys.
 	Context map[string][]string `json:"-"`
+	// ResolveResource maps the resource a caller named to the one it denotes (IAM
+	// resolves role names and paths for iam:PassRole), so that a policy on the real
+	// resource cannot be dodged by another spelling of it.
+	ResolveResource func(action, resource string) string `json:"-"`
 }
 
 // AddRequestContext records the IAM global condition keys that come from the
@@ -91,7 +95,16 @@ type routeOpts struct {
 	resource string
 	public   bool
 	deferred bool
+	maxBody  int64
 }
+
+// PublicBodyLimit is the request body cap of routes marked SmallBody: sign-in
+// and similar calls whose bodies are a few hundred bytes.
+const PublicBodyLimit = 64 << 10
+
+// SmallBody caps the request body at PublicBodyLimit; use it on public routes,
+// which are reachable without credentials.
+func SmallBody() Opt { return func(o *routeOpts) { o.maxBody = PublicBodyLimit } }
 
 type Opt func(*routeOpts)
 
@@ -124,6 +137,9 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 		c := &Ctx{W: w, R: r, Account: rt.Account}
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 		c.W = sw
+		if o.maxBody > 0 {
+			r.Body = http.MaxBytesReader(sw, r.Body, o.maxBody)
+		}
 		resource := strings.ReplaceAll(strings.ReplaceAll(o.resource, "{account}", rt.Account), "{region}", core.Region)
 		resource = placeholder.ReplaceAllStringFunc(resource, func(m string) string {
 			return r.PathValue(m[1 : len(m)-1])
@@ -258,7 +274,7 @@ func WriteError(w http.ResponseWriter, err error) {
 		ce = core.Errf(http.StatusNotFound, "ResourceNotFound", "resource not found")
 	default:
 		log.Printf("internal error: %v", err)
-		ce = core.Errf(http.StatusInternalServerError, "InternalError", "%v", err)
+		ce = core.Errf(http.StatusInternalServerError, "InternalError", "%s", core.InternalErrorMessage)
 	}
 	WriteJSON(w, ce.Status, map[string]any{"error": ce})
 }

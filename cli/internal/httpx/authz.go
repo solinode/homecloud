@@ -6,6 +6,8 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"github.com/homecloudhq/homecloud/cli/internal/core"
 )
 
 // Decision is the outcome of evaluating identity policies.
@@ -131,6 +133,10 @@ func (p *Principal) identity(action, resource string, keys map[string][]string) 
 func (p *Principal) Permits(action, resource string, extra Access) bool {
 	if p == nil {
 		return PermitsAnonymous(action, resource, extra)
+	}
+	resource = core.CanonicalARN(resource)
+	if p.ResolveResource != nil {
+		resource = p.ResolveResource(action, resource)
 	}
 	acc := providerAccess(resource)
 	if extra.Policy != "" {

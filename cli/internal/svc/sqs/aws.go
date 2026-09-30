@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log"
 	"net/http"
 	"net/url"
 	"reflect"
@@ -867,7 +868,8 @@ func entryError(id string, err error) batchError {
 	if errors.As(e, &ae) {
 		return batchError{Id: id, SenderFault: ae.Status < 500, Code: ae.Code, Message: ae.Message}
 	}
-	return batchError{Id: id, Code: "InternalError", Message: err.Error()}
+	log.Printf("sqs: batch entry %s: %v", id, err)
+	return batchError{Id: id, Code: "InternalError", Message: core.InternalErrorMessage}
 }
 
 func isNoQueue(err error) bool {

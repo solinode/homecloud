@@ -16,7 +16,7 @@ import (
 func (s *Service) Routes(r *httpx.Router) {
 	iamRes := func(kind string) httpx.Opt { return httpx.Res("arn:aws:iam::{account}:" + kind) }
 
-	r.Handle("POST /api/v1/auth/login", "", s.login, httpx.Public())
+	r.Handle("POST /api/v1/auth/login", "", s.login, httpx.Public(), httpx.SmallBody())
 	r.Handle("POST /api/v1/auth/logout", "sts:Logout", s.logout)
 	r.Handle("GET /api/v1/auth/whoami", "sts:GetCallerIdentity", s.whoami)
 
@@ -70,15 +70,23 @@ func (s *Service) login(c *httpx.Ctx) (any, error) {
 		return nil, err
 	}
 	ip := httpx.ClientIP(c.R)
-	if s.throttled(ip, false) {
+	// Count the attempt before checking the password, so a burst of parallel
+	// requests cannot all pass the throttle before the first failure is recorded;
+	// a successful sign-in gives its attempt back.
+	if s.throttled(ip, true) {
+		s.releaseAttempt(ip)
 		return nil, core.Errf(http.StatusTooManyRequests, "TooManyRequests", "too many failed sign-in attempts; try again in a few minutes")
 	}
 	u, err := store.Get[User](s.env.Store, cUsers, in.Username)
-	if err != nil || u.PasswordHash == "" || bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Password)) != nil {
-		s.throttled(ip, true)
+	hash := u.PasswordHash
+	if err != nil || hash == "" {
+		hash = dummyHash() // spend the same time whether or not the user exists
+	}
+	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(in.Password)) != nil || err != nil || u.PasswordHash == "" {
 		time.Sleep(300 * time.Millisecond)
 		return nil, core.Errf(http.StatusUnauthorized, "AuthFailure", "incorrect user name or password")
 	}
+	s.releaseAttempt(ip)
 	token := "hcs_" + core.NewSecret(40)
 	exp := time.Now().Add(sessionTTL)
 	if err := store.Put(s.env.Store, cSessions, hashSecret(token), session{Token: "", UserName: u.Name, UserID: u.ID, Expires: exp}); err != nil {

@@ -109,6 +109,10 @@ func (s *Service) rotate(az Authz, ref string, in RotateInput) (Secret, string, 
 	if !strings.HasPrefix(fn, "arn:") {
 		fn = s.env.ARN("lambda", "function:"+fn)
 	}
+	fn = core.CanonicalARN(fn)
+	if !core.IsLocalARN(fn, s.env.AccountID) {
+		return sec, "", core.Errf(http.StatusBadRequest, "InvalidParameterException", "The rotation function must be a Lambda function of this account and region.")
+	}
 	// Secrets Manager invokes the function on the caller's behalf.
 	if err := az("lambda:InvokeFunction", fn); err != nil {
 		return sec, "", err

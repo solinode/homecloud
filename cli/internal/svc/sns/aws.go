@@ -549,7 +549,7 @@ func (s *Service) awsSetSubscriptionAttributes(q *awsapi.Req) (any, error) {
 		return nil, err
 	}
 	name, value := q.Param("AttributeName"), q.Param("AttributeValue")
-	_, err = store.Update(s.env.Store, cSubs, sub.ARN, func(x *Subscription) error { return s.setSubAttribute(x, name, value) })
+	_, err = store.Update(s.env.Store, cSubs, sub.ARN, func(x *Subscription) error { return s.setSubAttribute(x, name, value, q.Check) })
 	return nil, err
 }
 

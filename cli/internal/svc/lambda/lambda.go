@@ -180,6 +180,9 @@ type Service struct {
 	// ResolveImage maps an image URI (e.g. an ECR repository URI) to one the
 	// local Docker engine can pull.
 	ResolveImage func(uri string) string
+	// HTTP carries HTTP_PROXY integration requests; it refuses loopback, link-local
+	// and metadata addresses at dial time (tests point it at local backends).
+	HTTP *http.Client
 }
 
 // Credentials are temporary credentials for a function's execution role.
@@ -199,7 +202,7 @@ type RoleSource interface {
 
 func New(env *svc.Env, cw *cloudwatch.Service, v *vpc.Service) *Service {
 	s := &Service{env: env, cw: cw, vpc: v, pools: map[string]*pool{}, async: make(chan *asyncEvent, 10000),
-		urlKey: []byte(core.NewSecret(32)), now: time.Now}
+		urlKey: []byte(core.NewSecret(32)), now: time.Now, HTTP: core.SafeClient(0, 0)}
 	if v != nil {
 		v.RegisterMembers(s.fwMembers)
 	}
@@ -271,9 +274,28 @@ func (ci codeInput) zip() ([]byte, error) {
 	return zipFiles(ci.Files)
 }
 
+// maxUnzipped and maxZipEntries bound what a package may expand to. The zip is
+// unpacked in memory on every cold start, so a small archive of zeros must be
+// refused when it is uploaded, not when a function first runs.
+const (
+	maxUnzipped   = 5 * maxCodeBytes
+	maxZipEntries = 20000
+)
+
 func checkZip(b []byte) error {
-	if _, err := zip.NewReader(bytes.NewReader(b), int64(len(b))); err != nil {
+	zr, err := zip.NewReader(bytes.NewReader(b), int64(len(b)))
+	if err != nil {
 		return core.BadRequest("Could not unzip uploaded file. Please check your file, then try to upload again. (%v)", err)
+	}
+	if len(zr.File) > maxZipEntries {
+		return core.BadRequest("The package has more than %d files.", maxZipEntries)
+	}
+	var total uint64
+	for _, f := range zr.File {
+		total += f.UncompressedSize64
+		if total > maxUnzipped {
+			return core.BadRequest("Unzipped size must be smaller than %d bytes", int64(maxUnzipped))
+		}
 	}
 	return nil
 }
@@ -322,14 +344,15 @@ func unzip(b []byte) (map[string][]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		data, err := io.ReadAll(io.LimitReader(rc, 4*maxCodeBytes+1))
+		// A header may understate a file's size: read no more than the budget left.
+		data, err := io.ReadAll(io.LimitReader(rc, maxUnzipped-total+1))
 		rc.Close()
 		if err != nil {
 			return nil, err
 		}
 		total += int64(len(data))
-		if total > 5*maxCodeBytes {
-			return nil, core.BadRequest("Unzipped size must be smaller than %d bytes", 5*maxCodeBytes)
+		if total > maxUnzipped {
+			return nil, core.BadRequest("Unzipped size must be smaller than %d bytes", int64(maxUnzipped))
 		}
 		out[clean] = data
 	}

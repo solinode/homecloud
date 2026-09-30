@@ -189,6 +189,33 @@ func (s *Service) throttled(ip string, fail bool) bool {
 	return len(recent) >= maxFailures
 }
 
+// releaseAttempt gives back the throttle slot of a sign-in that succeeded.
+func (s *Service) releaseAttempt(ip string) {
+	s.failMu.Lock()
+	defer s.failMu.Unlock()
+	if l := s.failures[ip]; len(l) > 1 {
+		s.failures[ip] = l[:len(l)-1]
+	} else {
+		delete(s.failures, ip)
+	}
+}
+
+var (
+	dummyOnce sync.Once
+	dummyBcr  string
+)
+
+// dummyHash is a valid bcrypt hash nobody knows the password of, compared
+// against when a sign-in names an unknown user so the response time doesn't
+// reveal which user names exist.
+func dummyHash() string {
+	dummyOnce.Do(func() {
+		h, _ := bcrypt.GenerateFromPassword([]byte(core.NewSecret(24)), bcrypt.DefaultCost)
+		dummyBcr = string(h)
+	})
+	return dummyBcr
+}
+
 // BootstrapResult carries credentials that exist only at first start.
 type BootstrapResult struct {
 	AccountID    string
@@ -304,7 +331,12 @@ func (s *Service) Authenticate(r *http.Request) (*httpx.Principal, error) {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		token = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
 	} else if r.Method == http.MethodGet {
-		token = r.URL.Query().Get("access_token") // lets the console link downloads directly
+		// Lets the console link downloads directly. URLs end up in logs and history,
+		// so only a (revocable, expiring) console session may travel in one, never an
+		// access key secret.
+		if t := r.URL.Query().Get("access_token"); strings.HasPrefix(t, "hcs_") {
+			token = t
+		}
 	}
 	if token == "" {
 		return nil, core.Errf(http.StatusUnauthorized, "MissingAuthenticationToken", "request is not signed: send 'Authorization: Bearer <session token | access key id>:<secret>'")
@@ -384,7 +416,7 @@ func (s *Service) userContext(u User) CondContext {
 }
 
 func (s *Service) principal(u User, keyID string) *httpx.Principal {
-	p := &httpx.Principal{AccountID: s.env.AccountID, UserName: u.Name, ARN: u.ARN, Root: u.Root, AccessKey: keyID, Context: s.userContext(u)}
+	p := &httpx.Principal{AccountID: s.env.AccountID, UserName: u.Name, ARN: u.ARN, Root: u.Root, AccessKey: keyID, Context: s.userContext(u), ResolveResource: s.resolveResource}
 	if u.Root {
 		p.Can = func(string, string) bool { return true }
 		p.Identity = func(string, string, map[string][]string) httpx.Decision { return httpx.Allowed }

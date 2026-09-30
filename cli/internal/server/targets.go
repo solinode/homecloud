@@ -21,6 +21,8 @@ type targets struct {
 	sqs    *sqs.Service
 	sns    *sns.Service
 	sfn    *sfn.Service
+	// account, when set, restricts deliveries to this account's own ARNs.
+	account string
 }
 
 // Invoke, SendMessage and Publish implement sfn.Tasks.
@@ -64,7 +66,10 @@ func (t *targets) Publish(topic, subject, message string) (map[string]any, error
 }
 
 // parse splits "arn:aws:<service>:<region>:<account>:<resource>".
-func parse(arn string) (service, resource string, ok bool) {
+func (t *targets) parse(arn string) (service, resource string, ok bool) {
+	if t.account != "" && !core.IsLocalARN(arn, t.account) {
+		return "", "", false // another account or region: not a resource this server can deliver to
+	}
 	parts := strings.SplitN(core.CanonicalARN(arn), ":", 6)
 	if len(parts) != 6 || parts[0] != "arn" || parts[1] != core.Partition {
 		return "", "", false
@@ -73,7 +78,7 @@ func parse(arn string) (service, resource string, ok bool) {
 }
 
 func (t *targets) exists(arn string) bool {
-	svc, res, ok := parse(arn)
+	svc, res, ok := t.parse(arn)
 	if !ok {
 		return false
 	}
@@ -98,7 +103,7 @@ func denied(src core.Source, target string) error {
 }
 
 func (t *targets) deliver(ctx context.Context, arn string, payload []byte) error {
-	svc, res, ok := parse(arn)
+	svc, res, ok := t.parse(arn)
 	if !ok {
 		return fmt.Errorf("malformed ARN %q", arn)
 	}

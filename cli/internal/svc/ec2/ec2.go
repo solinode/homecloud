@@ -391,12 +391,35 @@ func checkTags(t core.Tags) error {
 	return nil
 }
 
+// PassProfile checks, through az, that the caller may pass the role of the
+// instance profile ref (a name or ARN) to instances: launching with a profile
+// hands the role's credentials to whoever controls the instance.
+func (s *Service) PassProfile(az func(action, resource string) error, ref string) error {
+	if ref == "" {
+		return nil
+	}
+	if s.Roles == nil {
+		return core.BadRequest("instance profiles are not available")
+	}
+	_, _, role, err := s.Roles.InstanceProfile(ref)
+	if err != nil {
+		return err
+	}
+	if role == "" {
+		return nil
+	}
+	return az("iam:PassRole", role)
+}
+
 func (s *Service) run(c *httpx.Ctx) (any, error) {
 	var in RunInput
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
 	if err := checkTags(in.Tags); err != nil {
+		return nil, err
+	}
+	if err := s.PassProfile(c.Authorize, in.IAMInstanceProfile); err != nil {
 		return nil, err
 	}
 	for _, v := range in.Volumes {

@@ -483,6 +483,15 @@ that door open:
   Console sign-in is throttled after 10 failures per client IP in 5 minutes, but that is no substitute.
 - Keep the API on loopback behind a proxy where you can, and firewall the ports HomeCloud publishes
   ([Firewall](#7-firewall)).
+- **Outbound requests made for users** (SNS and alarm webhooks, API Gateway `HTTP_PROXY` integrations)
+  never reach loopback, link-local (including the provider's `169.254.169.254` metadata service), this
+  host's own addresses or other metadata endpoints, checked when the connection is made. Private LAN
+  ranges stay reachable because homelabs call their own services; on a multi-user VPS set
+  `HOMECLOUD_DENY_PRIVATE_TARGETS=1` in the service environment to block RFC 1918 and unique-local
+  addresses too.
+- **`homecloud:CreateBackup` is account-root.** A backup contains `master.key` and everything it
+  decrypts, so grant that action (and `homecloud:*`) only to administrators, and encrypt backups before
+  they leave the machine.
 - Keep the host patched (`unattended-upgrades` on Ubuntu and Debian) and upgrade HomeCloud regularly.
 
 ## 14. Troubleshooting
