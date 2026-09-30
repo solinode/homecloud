@@ -91,7 +91,16 @@ type routeOpts struct {
 	resource string
 	public   bool
 	deferred bool
+	maxBody  int64
 }
+
+// PublicBodyLimit is the request body cap of routes marked SmallBody: sign-in
+// and similar calls whose bodies are a few hundred bytes.
+const PublicBodyLimit = 64 << 10
+
+// SmallBody caps the request body at PublicBodyLimit; use it on public routes,
+// which are reachable without credentials.
+func SmallBody() Opt { return func(o *routeOpts) { o.maxBody = PublicBodyLimit } }
 
 type Opt func(*routeOpts)
 
@@ -124,6 +133,9 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 		c := &Ctx{W: w, R: r, Account: rt.Account}
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 		c.W = sw
+		if o.maxBody > 0 {
+			r.Body = http.MaxBytesReader(sw, r.Body, o.maxBody)
+		}
 		resource := strings.ReplaceAll(strings.ReplaceAll(o.resource, "{account}", rt.Account), "{region}", core.Region)
 		resource = placeholder.ReplaceAllStringFunc(resource, func(m string) string {
 			return r.PathValue(m[1 : len(m)-1])

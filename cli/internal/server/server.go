@@ -400,7 +400,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		return err
 	}
 	var handler http.Handler = trust.Wrap(root)
-	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 256 << 10}
 	if workloadLn != nil {
 		// Workloads are never proxies: their listeners ignore forwarding headers.
 		defer serveWorkloads(workloadLn, root, logf)()
@@ -419,7 +419,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if goruntime.GOOS == "linux" {
 		if host, _, _ := net.SplitHostPort(cfg.APIAddr); host == "127.0.0.1" || host == "localhost" {
 			if gw := dk.BridgeGateway(); gw != "" {
-				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: root, ReadHeaderTimeout: 10 * time.Second}
+				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: root, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 256 << 10}
 				go func() {
 					var err error
 					if cfg.TLSCert != "" {

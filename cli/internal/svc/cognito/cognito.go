@@ -952,12 +952,12 @@ func (s *Service) removeGroup(pool, g string) (Pool, error) {
 // ---- public (application-facing) routes ----
 
 func (s *Service) publicRoutes(r *httpx.Router) {
-	r.Handle("POST /cognito/{pool}/sign-up", "", s.signUp, httpx.Public())
-	r.Handle("POST /cognito/{pool}/auth", "", s.auth, httpx.Public())
-	r.Handle("POST /cognito/{pool}/respond", "", s.respond, httpx.Public())
-	r.Handle("POST /cognito/{pool}/change-password", "", s.changePassword, httpx.Public())
+	r.Handle("POST /cognito/{pool}/sign-up", "", s.signUp, httpx.Public(), httpx.SmallBody())
+	r.Handle("POST /cognito/{pool}/auth", "", s.auth, httpx.Public(), httpx.SmallBody())
+	r.Handle("POST /cognito/{pool}/respond", "", s.respond, httpx.Public(), httpx.SmallBody())
+	r.Handle("POST /cognito/{pool}/change-password", "", s.changePassword, httpx.Public(), httpx.SmallBody())
 	r.Handle("GET /cognito/{pool}/userinfo", "", s.userinfo, httpx.Public())
-	r.Handle("POST /cognito/{pool}/sign-out", "", s.signOut, httpx.Public())
+	r.Handle("POST /cognito/{pool}/sign-out", "", s.signOut, httpx.Public(), httpx.SmallBody())
 	r.Handle("GET /cognito/{pool}/.well-known/jwks.json", "", s.jwks, httpx.Public())
 	r.Handle("GET /cognito/{pool}/.well-known/openid-configuration", "", s.discovery, httpx.Public())
 }

@@ -189,6 +189,33 @@ func (s *Service) throttled(ip string, fail bool) bool {
 	return len(recent) >= maxFailures
 }
 
+// releaseAttempt gives back the throttle slot of a sign-in that succeeded.
+func (s *Service) releaseAttempt(ip string) {
+	s.failMu.Lock()
+	defer s.failMu.Unlock()
+	if l := s.failures[ip]; len(l) > 1 {
+		s.failures[ip] = l[:len(l)-1]
+	} else {
+		delete(s.failures, ip)
+	}
+}
+
+var (
+	dummyOnce sync.Once
+	dummyBcr  string
+)
+
+// dummyHash is a valid bcrypt hash nobody knows the password of, compared
+// against when a sign-in names an unknown user so the response time doesn't
+// reveal which user names exist.
+func dummyHash() string {
+	dummyOnce.Do(func() {
+		h, _ := bcrypt.GenerateFromPassword([]byte(core.NewSecret(24)), bcrypt.DefaultCost)
+		dummyBcr = string(h)
+	})
+	return dummyBcr
+}
+
 // BootstrapResult carries credentials that exist only at first start.
 type BootstrapResult struct {
 	AccountID    string
