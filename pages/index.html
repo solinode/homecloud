@@ -97,7 +97,7 @@
   .copy { flex: none; border: 1px solid var(--line); background: rgba(0,255,163,.07); color: var(--a); border-radius: 10px; padding: 9px 14px; font: 600 12px var(--mono); cursor: pointer; letter-spacing: .05em; text-transform: uppercase; }
   .copy:hover { background: var(--a); color: #001a10; }
   .os { font: 12px var(--mono); color: var(--muted); margin-top: 12px; }
-  .os button { background: none; border: 0; color: var(--b); cursor: pointer; font: inherit; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
+  .os button, .os a { background: none; border: 0; color: var(--b); cursor: pointer; font: inherit; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
   .cta { display: flex; gap: 14px; margin-top: 30px; flex-wrap: wrap; }
 
   .term { position: relative; background: rgba(4,8,10,.82); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; backdrop-filter: blur(10px);
@@ -250,7 +250,7 @@
         <code><span class="p">$ </span><span id="cmd">curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh</span></code>
         <button class="copy" data-copy="cmd">Copy</button>
       </div>
-      <div class="os">macOS · Linux — <button id="os-toggle" type="button">windows instead</button> — needs docker</div>
+      <div class="os">macOS · Linux — <button id="os-toggle" type="button">windows instead</button> — needs docker — <a href="https://github.com/solinode/homecloud/blob/main/docs/install-server.md" target="_blank" rel="noopener">install on a server</a></div>
       <div class="cta">
         <a class="btn solid demo magnetic" href="/demo/"><span class="live" aria-hidden="true"></span>Try the live demo console →</a>
         <a class="btn magnetic" href="#start">Boot your cloud</a>
