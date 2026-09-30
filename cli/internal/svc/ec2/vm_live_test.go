@@ -106,18 +106,46 @@ func (f *filterEnv) startIMDS(t *testing.T) {
 }
 
 // sshDial connects to the guest through its published SSH port on the Docker host.
-func sshDial(t *testing.T, port int, signer ssh.Signer, user string) *ssh.Client {
+// On a timeout it reports what the guest and the container look like.
+func (f *filterEnv) sshDial(t *testing.T, id string, port int, signer ssh.Signer, user string) *ssh.Client {
 	t.Helper()
 	var c *ssh.Client
-	waitFor(t, "ssh on published port", vmTestBudget, func() bool {
-		var err error
-		c, err = ssh.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port), &ssh.ClientConfig{
+	var lastErr error
+	end := time.Now().Add(6 * time.Minute)
+	for {
+		c, lastErr = ssh.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port), &ssh.ClientConfig{
 			User: user, Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)}, HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: 15 * time.Second,
 		})
-		return err == nil
-	})
+		if lastErr == nil {
+			break
+		}
+		if time.Now().After(end) {
+			t.Fatalf("ssh to %s on published port %d: %v\n%s", id, port, lastErr, f.vmDiagnose(id))
+		}
+		time.Sleep(2 * time.Second)
+	}
 	t.Cleanup(func() { c.Close() })
 	return c
+}
+
+// vmDiagnose describes a guest that cannot be reached: its console's network
+// lines and the listening sockets in the VM container.
+func (f *filterEnv) vmDiagnose(id string) string {
+	i := f.vmGet(id)
+	var b strings.Builder
+	fmt.Fprintf(&b, "state %s, network %q, ports %v\n", i.State, i.VMNetwork, i.PublicPorts)
+	logs, _ := f.h.Env.Docker.Logs(i.ContainerID, 0, time.Time{})
+	for _, l := range strings.Split(logs, "\n") {
+		if strings.Contains(l, "ci-info") || strings.Contains(l, "[homecloud]") || strings.Contains(l, "passt") || strings.Contains(l, "DHCP") || strings.Contains(l, "sshd") || strings.Contains(l, "ssh.service") {
+			b.WriteString(l + "\n")
+		}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if res, err := f.h.Env.Docker.Exec(ctx, i.ContainerID, []string{"/bin/sh", "-c", "cat /proc/net/tcp | head -12; echo; ls -l /tmp; cat /run/passt.log | head"}, nil); err == nil {
+		b.WriteString(res.Stdout + res.Stderr)
+	}
+	return b.String()
 }
 
 func sshRun(t *testing.T, c *ssh.Client, cmd string) string {
@@ -232,7 +260,7 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	volID := desc[0].(map[string]any)["VolumeId"].(string)
 
 	// Log in through the published port and inspect the guest.
-	c := sshDial(t, i.PublicPorts["22/tcp"], signer, vmTestUser)
+	c := f.sshDial(t, id, i.PublicPorts["22/tcp"], signer, vmTestUser)
 	if got, want := sshRun(t, c, "hostname"), "ip-"+strings.ReplaceAll(ip, ".", "-"); got != want {
 		t.Errorf("hostname %q, want %q", got, want)
 	}
@@ -284,7 +312,7 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	}
 	h.AWS(t, "ec2", "start-instances", "--instance-ids", id)
 	i = f.vmWaitState(t, id, "running")
-	c = sshDial(t, i.PublicPorts["22/tcp"], signer, vmTestUser)
+	c = f.sshDial(t, id, i.PublicPorts["22/tcp"], signer, vmTestUser)
 	if got := sshRun(t, c, "cat /home/"+vmTestUser+"/keep.txt && cat /var/tmp/userdata.txt"); got != "persisted\nhc-userdata-ran" {
 		t.Errorf("after stop/start: %q", got)
 	}
@@ -315,7 +343,7 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	// A loopback-only rule publishes the port again (another rebuild); the disk survived.
 	h.AWS(t, "ec2", "authorize-security-group-ingress", "--group-id", sg, "--protocol", "tcp", "--port", "22", "--cidr", "127.0.0.1/32")
 	waitFor(t, "loopback port published", vmTestBudget, func() bool { return f.vmGet(id).PublicPorts["22/tcp"] > 0 })
-	c = sshDial(t, f.vmGet(id).PublicPorts["22/tcp"], signer, vmTestUser)
+	c = f.sshDial(t, id, f.vmGet(id).PublicPorts["22/tcp"], signer, vmTestUser)
 	if got := sshRun(t, c, "cat /home/"+vmTestUser+"/keep.txt"); got != "persisted" {
 		t.Errorf("after the rebuild: %q", got)
 	}
