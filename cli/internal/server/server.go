@@ -286,6 +286,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	eventsSvc.RegisterAWS()
 	sfnSvc.RegisterAWS()
 	ec2Svc.RegisterAWS()
+	ec2Svc.RegisterEFSAWS()
 	elbSvc.RegisterAWS()
 	rdsSvc.RegisterAWS()
 	ecrSvc.RegisterAWS()
