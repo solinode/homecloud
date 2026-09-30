@@ -6,11 +6,14 @@
 
 <p align="center">
   <a href="https://homecloud.pages.dev"><b>Website</b></a> ·
+  <a href="https://homecloud.pages.dev/demo/"><b>Live demo</b></a> ·
   <a href="#-quick-start"><b>Quick start</b></a> ·
   <a href="docs/aws-compat.md"><b>AWS compatibility</b></a> ·
   <a href="docs/architecture.md"><b>Architecture</b></a> ·
   <a href="https://discord.gg/pemra9uaC9"><b>Discord</b></a>
 </p>
+
+**[Try the live demo console](https://homecloud.pages.dev/demo/)** — click through every service in your browser, no install needed (sample data, runs entirely client-side).
 
 **An open-source, self-hosted cloud platform.** HomeCloud runs AWS-style services (compute, object storage, managed databases, serverless functions, queues, pub/sub, key-value tables, networking, identity, monitoring) on your own hardware, from one binary, managed through a web console, a CLI and a REST API.
 

@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { EmptyState } from "@/components/console/empty-state"
 import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
-import { seg, wsUrl } from "@/lib/api"
+import { DEMO, seg, wsUrl } from "@/lib/api"
 import type { Instance } from "@/lib/types"
 import { INSTANCES_PATH } from "./instance-actions"
 
@@ -62,6 +62,13 @@ export function InstanceTerminal({ instance }: { instance: Instance }) {
         // the container may not be laid out yet
       }
       term.write("\x1b[90mConnecting to " + instance.id + "...\x1b[0m\r\n")
+
+      if (DEMO) {
+        term.write("\r\n\x1b[33mThe browser terminal is not available in the demo.\x1b[0m\r\n")
+        term.write("Install HomeCloud to open a real shell on your instances.\r\n")
+        cleanup = () => term.dispose()
+        return
+      }
 
       const ws = new WebSocket(wsUrl(`${INSTANCES_PATH}/${seg(instance.id)}/terminal`))
       const send = (m: object) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(m))

@@ -8,6 +8,26 @@ export const API_BASE = (process.env.NEXT_PUBLIC_API_URL ?? "").replace(/\/+$/, 
 
 const SESSION_KEY = "homecloud.session"
 
+/**
+ * DEMO is true only in the static demo build (NEXT_PUBLIC_DEMO=1). Next inlines
+ * the env var, so in normal builds every `if (DEMO)` branch and the dynamic
+ * import of the mock backend are dead code and never reach the bundle.
+ */
+/** BASE_PATH is the sub-path the console is served from ("/demo" in the demo build, "" otherwise). */
+export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? ""
+
+export const DEMO = process.env.NEXT_PUBLIC_DEMO === "1"
+
+/** Marker href for links that need a real server (downloads); the demo shell intercepts clicks on it. */
+export const DEMO_UNAVAILABLE_HREF = "#demo-unavailable"
+
+const DEMO_SESSION: Session = {
+  token: "demo-token",
+  expires: "2099-01-01T00:00:00Z",
+  account_id: "123456789012",
+  user: { name: "demo-admin", id: "AIDADEMOADMIN000000", arn: "arn:aws:iam::123456789012:user/demo-admin", root: false, console_access: true },
+}
+
 export interface SessionUser {
   name: string
   id: string
@@ -49,6 +69,7 @@ type Listener = (s: Session | null) => void
 const listeners = new Set<Listener>()
 
 export function getSession(): Session | null {
+  if (DEMO) return DEMO_SESSION
   if (typeof window === "undefined") return null
   try {
     const raw = window.localStorage.getItem(SESSION_KEY)
@@ -117,11 +138,13 @@ export function apiUrl(path: string, q?: Query): string {
 
 /** authUrl is an API URL that authenticates via ?access_token= (GET only). */
 export function authUrl(path: string, q?: Query): string {
+  if (DEMO) return DEMO_UNAVAILABLE_HREF
   return apiUrl(path, { ...q, access_token: getToken() ?? "" })
 }
 
 /** wsUrl is the WebSocket URL for an API path, authenticated via ?access_token=. */
 export function wsUrl(path: string, q?: Query): string {
+  if (DEMO) throw new ApiError(501, "NotAvailableInDemo", "Live connections are not available in the demo.")
   const base = API_BASE || window.location.origin
   const u = new URL(authUrl(path, q), base)
   u.protocol = u.protocol === "https:" ? "wss:" : "ws:"
@@ -142,7 +165,42 @@ export interface RequestOptions {
   noAuthRedirect?: boolean
 }
 
+/**
+ * loadDemo lazily imports the mock backend. The literal env check is what lets the
+ * bundler drop the import (and the whole lib/demo tree) from normal builds.
+ */
+export function loadDemo() {
+  return process.env.NEXT_PUBLIC_DEMO === "1" ? import("@/lib/demo") : Promise.reject(new Error("demo mode is disabled"))
+}
+
+/** demoRequest answers the call from the in-browser mock backend (demo build only). */
+async function demoRequest<T>(method: string, path: string, opts: RequestOptions): Promise<T> {
+  const demo = await loadDemo()
+  let body: unknown = opts.body
+  let raw: unknown
+  if (opts.body instanceof Blob) {
+    raw = opts.body.size <= 512 * 1024 ? await opts.body.text() : undefined
+    body = raw
+  } else if (typeof opts.body === "string") {
+    raw = opts.body
+    try {
+      body = JSON.parse(opts.body)
+    } catch {
+      body = opts.body
+    }
+  }
+  const query: Record<string, string> = {}
+  for (const [k, v] of Object.entries(opts.query ?? {})) if (v !== undefined && v !== null && v !== "") query[k] = String(v)
+  try {
+    return await demo.demoRequest<T>({ method, path, query, body, raw, headers: opts.headers })
+  } catch (e) {
+    if (e instanceof demo.DemoError) throw new ApiError(e.status, e.code, e.message)
+    throw e
+  }
+}
+
 export async function request<T = unknown>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
+  if (DEMO) return demoRequest<T>(method, path, opts)
   const headers: Record<string, string> = { Accept: "application/json", ...opts.headers }
   const token = getToken()
   if (token) headers.Authorization = `Bearer ${token}`
@@ -206,6 +264,16 @@ export function upload(
   onProgress?: (loaded: number, total: number) => void,
   contentType?: string,
 ): UploadHandle {
+  if (DEMO) {
+    // Small files are stored in the in-memory demo bucket; anything bigger is refused.
+    const promise = (async () => {
+      if (file.size > 256 * 1024) throw new ApiError(501, "NotAvailableInDemo", "Uploads larger than 256 KB are not available in the demo.")
+      await new Promise((r) => setTimeout(r, 300))
+      onProgress?.(file.size, file.size)
+      return demoRequest("PUT", path, { query, body: file, headers: { "Content-Type": contentType || file.type || "application/octet-stream" } })
+    })()
+    return { promise, abort: () => {} }
+  }
   const xhr = new XMLHttpRequest()
   const promise = new Promise<unknown>((resolve, reject) => {
     xhr.open("PUT", apiUrl(path, query))
@@ -240,12 +308,14 @@ export function upload(
 // ---- auth ----
 
 export async function login(username: string, password: string): Promise<Session> {
+  if (DEMO) return DEMO_SESSION
   const s = await request<Session>("POST", "/api/v1/auth/login", { body: { username, password }, noAuthRedirect: true })
   setSession(s)
   return s
 }
 
 export async function logout() {
+  if (DEMO) return
   try {
     await request("POST", "/api/v1/auth/logout", { noAuthRedirect: true })
   } catch {

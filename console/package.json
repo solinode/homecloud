@@ -5,6 +5,7 @@
   "scripts": {
     "dev": "next dev",
     "build": "next build",
+    "build:demo": "NEXT_PUBLIC_DEMO=1 next build",
     "typecheck": "tsc --noEmit",
     "lint": "next lint",
     "start": "npx serve out"

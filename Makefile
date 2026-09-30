@@ -6,7 +6,7 @@ PLATFORMS := linux/amd64 linux/arm64 darwin/amd64 darwin/arm64 windows/amd64 win
 DIST := dist
 WEB := cli/internal/web/dist
 
-.PHONY: all build console test vet release clean dev
+.PHONY: all build console demo test vet release clean dev
 
 all: console build
 
@@ -19,6 +19,12 @@ console:
 	cd console && npm ci && npm run build
 	find $(WEB) -mindepth 1 ! -name .keep -exec rm -rf {} +
 	cp -R console/out/. $(WEB)/
+
+## demo: build the static, server-less console demo into pages/demo/ (served at /demo/ by the landing page)
+demo:
+	cd console && npm ci && npm run build:demo
+	rm -rf pages/demo && mkdir -p pages/demo
+	cp -R console/.next-demo/. pages/demo/
 
 test:
 	cd cli && go test ./...
@@ -46,5 +52,5 @@ dev:
 	cd cli && go run . serve
 
 clean:
-	rm -rf bin $(DIST) console/out console/.next
+	rm -rf bin $(DIST) console/out console/.next console/.next-demo
 	find $(WEB) -mindepth 1 ! -name .keep -exec rm -rf {} +

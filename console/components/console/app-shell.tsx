@@ -5,6 +5,7 @@ import { usePathname } from "next/navigation"
 
 import { Sheet, SheetContent, SheetTitle } from "@/components/ui/sheet"
 import { AuthGate } from "@/components/console/auth"
+import { DemoBanner } from "@/components/console/demo-banner"
 import { DetailSkeleton } from "@/components/console/loading"
 import { SideNav } from "@/components/console/side-nav"
 import { Logo, Topbar } from "@/components/console/topbar"
@@ -30,6 +31,7 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <AuthGate fallback={<Splash />}>
       <div className="flex min-h-screen flex-col">
+        <DemoBanner />
         <Topbar showMenu={hasNav} onMenu={() => setMobileOpen(true)} />
         <div className="flex flex-1">
           {hasNav && service && (

@@ -11,6 +11,7 @@ import { CopyButton } from "@/components/console/copy-button"
 import { Field } from "@/components/console/form-field"
 import { Section } from "@/components/console/section"
 import { TagsEditor, type TagRow } from "@/components/console/tags-editor"
+import { DEMO } from "@/lib/api"
 import { formatBytes, formatNumber } from "@/lib/format"
 import type { HttpApi } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -118,6 +119,12 @@ export function TryIt({ api: target, preset }: { api: HttpApi; preset: TryPreset
     setResult(null)
     const t0 = performance.now()
     try {
+      if (DEMO) {
+        await new Promise((r) => setTimeout(r, 400))
+        const text = JSON.stringify({ message: "Sample response from the demo. Install HomeCloud to call your real API endpoints.", route: `${method} ${url.replace(/^https?:\/\/[^/]+/, "")}` }, null, 2)
+        setResult({ status: 200, statusText: "OK", ms: performance.now() - t0, headers: [["content-type", "application/json"]], body: text, size: text.length })
+        return
+      }
       const res = await fetch(url, { method, headers: reqHeaders(), body: hasBody && body ? body : undefined, signal: ctl.signal, cache: "no-store" })
       const buf = await res.arrayBuffer()
       const ms = performance.now() - t0

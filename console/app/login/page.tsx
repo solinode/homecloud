@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Logo } from "@/components/console/topbar"
-import { errorMessage, getSession, login } from "@/lib/api"
+import { BASE_PATH, errorMessage, getSession, login } from "@/lib/api"
 
 function safeNext(next: string | null): string {
   if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/login")) return "/"
@@ -24,7 +24,7 @@ function LoginForm() {
   const [pending, setPending] = useState(false)
 
   useEffect(() => {
-    if (getSession()) window.location.replace(next)
+    if (getSession()) window.location.replace(BASE_PATH + next)
   }, [next])
 
   const submit = async (e: React.FormEvent) => {
@@ -33,7 +33,7 @@ function LoginForm() {
     setError(null)
     try {
       await login(username.trim(), password)
-      window.location.replace(next)
+      window.location.replace(BASE_PATH + next)
     } catch (err) {
       setError(errorMessage(err))
       setPending(false)
