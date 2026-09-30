@@ -75,6 +75,7 @@ func (s *Service) RegisterAWS() {
 		}
 	}
 	awsapi.Register(svc)
+	s.registerElastiCache()
 }
 
 func apiErr(code, format string, a ...any) error {
@@ -756,7 +757,7 @@ func (s *Service) awsDeleteSubnetGroup(q *awsapi.Req) (any, error) {
 		return nil, notFound("DBSubnetGroupNotFoundFault", "DB subnet group '%s' not found.", name)
 	}
 	for _, i := range store.List[Instance](s.env.Store, cInstances) {
-		if i.SubnetGroup == name {
+		if i.Kind == "relational" && i.SubnetGroup == name {
 			return nil, apiErr("InvalidDBSubnetGroupStateFault", "Cannot delete the subnet group '%s' because at least one database instance is still using it.", name)
 		}
 	}

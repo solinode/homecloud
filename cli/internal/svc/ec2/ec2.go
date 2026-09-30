@@ -151,6 +151,7 @@ type Service struct {
 	vpc     *vpc.Service
 	hostCPU float64
 	mu      sync.Mutex // serialises state transitions
+	efsMu   sync.Mutex // serialises file system, mount target and access point changes
 	// OnTerminate is called after an instance is terminated (e.g. to deregister it from target groups).
 	OnTerminate func(id string)
 	// TemplateInUse names what still uses a launch template (an Auto Scaling group), or "".
@@ -176,13 +177,20 @@ type Credentials struct {
 
 func New(env *svc.Env, v *vpc.Service) *Service {
 	s := &Service{env: env, vpc: v, hostCPU: 1}
-	if info, err := env.Docker.C.Info(); err == nil && info.NCPU > 0 {
-		s.hostCPU = float64(info.NCPU)
+	if env.Docker != nil { // tests of the API layer run without containers
+		if info, err := env.Docker.C.Info(); err == nil && info.NCPU > 0 {
+			s.hostCPU = float64(info.NCPU)
+		}
 	}
 	v.GroupChanged = s.groupChanged
 	v.InUse = func(sg string) bool {
 		for _, i := range store.List[Instance](env.Store, cInstances) {
 			if i.State != "terminated" && slices.Contains(i.SecurityGroups, sg) {
+				return true
+			}
+		}
+		for _, m := range store.List[MountTarget](env.Store, cMountTargets) {
+			if slices.Contains(m.SecurityGroups, sg) {
 				return true
 			}
 		}

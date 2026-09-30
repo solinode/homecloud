@@ -71,8 +71,9 @@ type Instance struct {
 	SubnetGroup         string            `json:"subnet_group,omitempty"`
 	ParameterGroup      string            `json:"parameter_group,omitempty"`
 	SecurityGroups      []string          `json:"security_groups,omitempty"`
-	ManagedSecret       bool              `json:"managed_secret,omitempty"` // ManageMasterUserPassword
-	Settings            map[string]string `json:"settings,omitempty"`       // AWS attributes stored and echoed (maintenance window, ...)
+	ManagedSecret       bool              `json:"managed_secret,omitempty"`    // ManageMasterUserPassword
+	Settings            map[string]string `json:"settings,omitempty"`          // AWS attributes stored and echoed (maintenance window, ...)
+	ReplicationGroup    string            `json:"replication_group,omitempty"` // the ElastiCache replication group this node is the primary of
 	CreatedAt           time.Time         `json:"created_at"`
 	Tags                core.Tags         `json:"tags,omitempty"`
 }
@@ -94,6 +95,8 @@ type Snapshot struct {
 	StorageGB      int       `json:"storage_gb"`
 	CreatedAt      time.Time `json:"created_at"`
 	Tags           core.Tags `json:"tags,omitempty"`
+	// ReplicationGroup is set when a cache snapshot was taken through its replication group.
+	ReplicationGroup string `json:"replication_group,omitempty"`
 }
 
 func (s Snapshot) view() Snapshot { s.PasswordCT = ""; return s }
@@ -286,6 +289,10 @@ type createInput struct {
 	SecurityGroups []string          `json:"-"`
 	ManagedSecret  bool              `json:"-"`
 	Settings       map[string]string `json:"-"`
+	// NoAuth runs a Redis-family cache without a password (ElastiCache without an AuthToken).
+	NoAuth bool `json:"-"`
+	// ReplicationGroup makes the instance the primary of an ElastiCache replication group.
+	ReplicationGroup string `json:"-"`
 }
 
 func (s *Service) create(c *httpx.Ctx) (any, error) {
@@ -342,7 +349,10 @@ func (s *Service) provision(in createInput, snap *Snapshot) (Instance, error) {
 			in.DBName = "app"
 		}
 	}
-	if e.HasPassword && in.MasterPassword == "" {
+	if in.NoAuth && (e.Kind != "cache" || in.MasterPassword != "") {
+		return Instance{}, core.BadRequest("only a cache without a password can run without authentication")
+	}
+	if e.HasPassword && in.MasterPassword == "" && !in.NoAuth {
 		in.MasterPassword = core.NewSecret(24)
 	}
 	if in.MasterPassword != "" && (len(in.MasterPassword) < 8 || strings.ContainsAny(in.MasterPassword, `"'/@ \`)) {
@@ -360,8 +370,12 @@ func (s *Service) provision(in createInput, snap *Snapshot) (Instance, error) {
 	if err != nil {
 		return Instance{}, err
 	}
+	arn := s.env.ARN("rds", "db:"+in.ID)
+	if e.Kind == "cache" {
+		arn = s.cacheARN(in.ID)
+	}
 	i := Instance{
-		ID: in.ID, ARN: s.env.ARN("rds", "db:"+in.ID), Kind: e.Kind, Engine: e.Name, EngineVersion: in.EngineVersion,
+		ID: in.ID, ARN: arn, Kind: e.Kind, ReplicationGroup: in.ReplicationGroup, Engine: e.Name, EngineVersion: in.EngineVersion,
 		Class: cl.Name, VCPUs: cl.VCPUs, MemoryMB: cl.MemoryMB, StorageGB: in.StorageGB, Status: "creating",
 		MasterUsername: in.MasterUsername, DBName: in.DBName, VpcID: pl.VPC.ID, SubnetID: pl.Subnet.ID,
 		AvailabilityZone: pl.Subnet.AvailabilityZone, PubliclyAccessible: in.PubliclyAccessible,
@@ -377,7 +391,7 @@ func (s *Service) provision(in createInput, snap *Snapshot) (Instance, error) {
 		i.Endpoint.PublicHost = s.env.Cfg.PublicHost
 	}
 	i.Endpoint.ConnectHint = connectHint(i)
-	if e.HasPassword {
+	if e.HasPassword && !in.NoAuth {
 		i.SecretName = "rds!" + in.ID
 		sv, _ := json.Marshal(map[string]any{"username": in.MasterUsername, "password": in.MasterPassword, "engine": e.Name,
 			"host": i.Endpoint.Address, "port": e.DefaultPort, "dbname": in.DBName, "dbInstanceIdentifier": in.ID})
@@ -450,6 +464,9 @@ func (s *Service) boot(i Instance, e Engine, in createInput, network string, sna
 	}
 	if e.Name == "memcached" {
 		spec.Cmd = []string{"memcached", "-m", fmt.Sprint(i.MemoryMB * 3 / 4)}
+	}
+	if i.ReplicationGroup != "" {
+		spec.Aliases = append(spec.Aliases, primaryHost(i.ReplicationGroup), readerHost(i.ReplicationGroup))
 	}
 	if i.PubliclyAccessible {
 		spec.Ports = []runtime.Port{{ContainerPort: e.DefaultPort, HostPort: in.Port}}
@@ -535,7 +552,7 @@ func (s *Service) boot(i Instance, e Engine, in createInput, network string, sna
 // RDB snapshot, waits for the AOF to be written, then recreates the container
 // with its normal command line so later restarts load the AOF.
 func (s *Service) enableAOF(ctx context.Context, cid string, e Engine, spec runtime.RunSpec, pass string) (string, error) {
-	cli := e.Name + "-cli --no-auth-warning -a " + q(pass)
+	cli := e.Name + "-cli" + authFlags(pass)
 	res, err := s.env.Docker.Exec(ctx, cid, sh(cli+" CONFIG SET appendonly yes"), nil)
 	if err != nil {
 		return "", fmt.Errorf("enable AOF: %w", err)
@@ -983,7 +1000,11 @@ func (s *Service) snapshot(ctx context.Context, i Instance, typ, id string) (Sna
 	if err != nil {
 		return Snapshot{}, err
 	}
-	sn := Snapshot{ID: id, ARN: s.env.ARN("rds", "snapshot:"+id), SourceInstance: i.ID, Kind: i.Kind, Engine: i.Engine,
+	arn := s.env.ARN("rds", "snapshot:"+id)
+	if i.Kind == "cache" {
+		arn = s.cacheSnapARN(id)
+	}
+	sn := Snapshot{ID: id, ARN: arn, SourceInstance: i.ID, Kind: i.Kind, Engine: i.Engine, ReplicationGroup: i.ReplicationGroup,
 		EngineVersion: i.EngineVersion, Type: typ, Status: "creating", MasterUsername: i.MasterUsername, DBName: i.DBName,
 		PasswordCT: s.secrets.Encrypt([]byte(pass)), StorageGB: i.StorageGB, CreatedAt: core.Now()}
 	err = store.Put(s.env.Store, cSnapshots, id, sn)
@@ -1115,7 +1136,17 @@ func (s *Service) restoreSnapshot(snapID string, in createInput) (any, error) {
 		return nil, err
 	}
 	// A restored database keeps the snapshot's engine and master credentials, as in AWS.
+	// A cache's data does not depend on its password, so a caller may choose one.
+	keep, keepNoAuth := in.MasterPassword, in.NoAuth
 	in.Engine, in.EngineVersion, in.MasterUsername, in.MasterPassword, in.DBName = sn.Engine, sn.EngineVersion, sn.MasterUsername, string(pass), sn.DBName
+	if sn.Kind == "cache" {
+		switch {
+		case keep != "":
+			in.MasterPassword = keep
+		case keepNoAuth || len(pass) == 0:
+			in.MasterPassword, in.NoAuth = "", true
+		}
+	}
 	if in.StorageGB < sn.StorageGB {
 		in.StorageGB = sn.StorageGB
 	}

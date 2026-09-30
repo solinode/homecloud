@@ -158,6 +158,12 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/efs/file-systems` | `elasticfilesystem:CreateFileSystem` |
 | GET | `/api/v1/efs/file-systems/{id}` | `elasticfilesystem:DescribeFileSystems` |
 | DELETE | `/api/v1/efs/file-systems/{id}` | `elasticfilesystem:DeleteFileSystem` |
+| GET | `/api/v1/efs/file-systems/{id}/mount-targets` | `elasticfilesystem:DescribeMountTargets` |
+| POST | `/api/v1/efs/file-systems/{id}/mount-targets` | `elasticfilesystem:CreateMountTarget` |
+| DELETE | `/api/v1/efs/file-systems/{id}/mount-targets/{mt}` | `elasticfilesystem:DeleteMountTarget` |
+| GET | `/api/v1/efs/file-systems/{id}/access-points` | `elasticfilesystem:DescribeAccessPoints` |
+| POST | `/api/v1/efs/file-systems/{id}/access-points` | `elasticfilesystem:CreateAccessPoint` |
+| DELETE | `/api/v1/efs/file-systems/{id}/access-points/{ap}` | `elasticfilesystem:DeleteAccessPoint` |
 
 ## EC2 Auto Scaling
 
