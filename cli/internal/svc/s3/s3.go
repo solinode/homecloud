@@ -73,7 +73,9 @@ type Service struct {
 }
 
 func New(env *svc.Env, sec *secrets.Service) *Service {
-	return &Service{env: env, secrets: sec, status: "starting"}
+	s := &Service{env: env, secrets: sec, status: "starting"}
+	httpx.RegisterPolicyProvider("s3", s.policyProvider)
+	return s
 }
 
 func (s *Service) Endpoint() string {

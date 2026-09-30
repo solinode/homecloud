@@ -482,6 +482,9 @@ func (s *Service) deliver(ctx context.Context, r Rule, t Target, payload []byte,
 	if s.Deliver == nil {
 		return nil
 	}
+	// SQS queues and SNS topics accept the delivery only if their resource
+	// policy allows events.amazonaws.com for this rule.
+	ctx = core.WithSource(ctx, core.Source{Service: "events.amazonaws.com", ARN: r.ARN})
 	attempts, maxAge := 185, 24*time.Hour
 	if rp := t.RetryPolicy; rp != nil {
 		if rp.MaximumRetryAttempts != nil {
@@ -510,7 +513,7 @@ func (s *Service) deliver(ctx context.Context, r Rule, t Target, payload []byte,
 	}
 	log.Printf("events: rule %s -> %s: %v", r.Name, t.ARN, err)
 	if t.DeadLetterARN != "" {
-		if derr := s.Deliver(context.Background(), t.DeadLetterARN, payload); derr != nil {
+		if derr := s.Deliver(core.WithSource(context.Background(), core.Source{Service: "events.amazonaws.com", ARN: r.ARN}), t.DeadLetterARN, payload); derr != nil {
 			log.Printf("events: dead-letter queue %s: %v", t.DeadLetterARN, derr)
 		}
 	}

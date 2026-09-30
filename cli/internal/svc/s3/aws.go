@@ -21,6 +21,7 @@ import (
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi"
 	"github.com/homecloudhq/homecloud/cli/internal/core"
+	"github.com/homecloudhq/homecloud/cli/internal/httpx"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/web"
 	"github.com/minio/minio-go/v7"
@@ -505,24 +506,30 @@ func liftQueryHeaders(a *s3req) {
 // authorize checks IAM and the bucket policy.
 func (s *Service) authorize(a *s3req, action, resource string) error {
 	q := a.q
-	dec := noDecision
-	if a.bucket != "" && a.op.name != "CreateBucket" {
-		doc, err := s.bucketPolicy(a.ctx(), bucketOf(resource, a.bucket))
-		if err != nil && q.P == nil {
-			return err
+	acc, err := s.access(a, action, resource)
+	if err != nil {
+		return err
+	}
+	if q.P == nil {
+		// Anonymous: only a bucket policy naming everyone can allow it. The
+		// request keys (source IP, TLS) come from the connection.
+		acc.Keys = mergeKeys(httpx.RequestContext(q.R), acc.Keys)
+		if httpx.PermitsAnonymous(action, resource, acc) {
+			return nil
 		}
-		if doc != nil {
-			dec = doc.evaluate(q.P, action, resource)
-		}
 	}
-	err := q.Authorize(action, resource)
-	if dec == policyDeny && (q.P == nil || !q.P.Root) {
-		return awsapi.Errorf(http.StatusForbidden, "AccessDenied", "Access Denied (explicit deny in the bucket policy)")
+	return q.AuthorizeWith(action, resource, acc)
+}
+
+func mergeKeys(a, b map[string][]string) map[string][]string {
+	out := make(map[string][]string, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
 	}
-	if err == nil || dec == policyAllow {
-		return nil
+	for k, v := range b {
+		out[k] = v
 	}
-	return err
+	return out
 }
 
 func bucketOf(arn, def string) string {
@@ -1021,11 +1028,28 @@ func (s *Service) putBucketPolicy(a *s3req) error {
 	if err != nil {
 		return err
 	}
+	if err := validateBucketPolicy(b); err != nil {
+		return err
+	}
 	resp, err := s.sendBuffered(a, b, extra)
 	if err != nil {
 		return err
 	}
 	s.forgetPolicy(a.bucket)
+	if resp.StatusCode == http.StatusBadRequest {
+		// MinIO cannot express some policies (ArnLike, aws:PrincipalArn, ...).
+		// HomeCloud evaluates the policy itself, so it keeps the document and
+		// leaves MinIO without one (its own endpoint then grants nothing).
+		resp.Body.Close()
+		cl, err := s.cl()
+		if err != nil {
+			return err
+		}
+		if err := cl.SetBucketPolicy(a.ctx(), a.bucket, ""); err != nil {
+			return s3err(err)
+		}
+		resp = &http.Response{StatusCode: http.StatusNoContent, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(nil))}
+	}
 	if resp.StatusCode/100 == 2 {
 		cl, _ := s.cl()
 		norm, _ := cl.GetBucketPolicy(a.ctx(), a.bucket)
@@ -1043,6 +1067,16 @@ func (s *Service) getBucketPolicy(a *s3req) error {
 		return err
 	}
 	m := s.meta(a.bucket)
+	if resp.StatusCode == http.StatusNotFound && m.Config["policy"] != "" && m.Config["policyNorm"] == awsapi.HashHex(nil) {
+		// A policy MinIO could not store (see putBucketPolicy).
+		resp.Body.Close()
+		body := []byte(m.Config["policy"])
+		resp.StatusCode, resp.Status = http.StatusOK, "200 OK"
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+		resp.Header.Set("Content-Type", "application/json")
+		return s.relay(a, resp)
+	}
 	if resp.StatusCode != http.StatusOK || m.Config["policy"] == "" {
 		return s.relay(a, resp)
 	}
@@ -1439,23 +1473,17 @@ func (s *Service) awsPutObjectACL(a *s3req) error {
 }
 
 func (s *Service) awsPolicyStatus(a *s3req) error {
-	doc, err := s.bucketPolicy(a.ctx(), a.bucket)
+	text, err := s.bucketPolicy(a.ctx(), a.bucket)
 	if err != nil {
 		return err
 	}
-	if doc == nil {
+	if text == "" {
 		return awsapi.Errorf(http.StatusNotFound, "NoSuchBucketPolicy", "The bucket policy does not exist")
-	}
-	public := false
-	for _, st := range doc.Statement {
-		if st.Effect == "Allow" && st.Principal != nil && st.Principal.any && (len(st.Condition) == 0 || string(st.Condition) == "null") {
-			public = true
-		}
 	}
 	return a.writeXML(http.StatusOK, struct {
 		XMLName  xml.Name `xml:"http://s3.amazonaws.com/doc/2006-03-01/ PolicyStatus"`
 		IsPublic bool     `xml:"IsPublic"`
-	}{IsPublic: public})
+	}{IsPublic: publicPolicy(text)})
 }
 
 // Bucket configuration HomeCloud stores but does not act on (CORS for the

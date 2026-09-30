@@ -377,6 +377,7 @@ func (s *Service) principal(u User, keyID string) *httpx.Principal {
 	p := &httpx.Principal{AccountID: s.env.AccountID, UserName: u.Name, ARN: u.ARN, Root: u.Root, AccessKey: keyID, Context: s.userContext(u)}
 	if u.Root {
 		p.Can = func(string, string) bool { return true }
+		p.Identity = func(string, string, map[string][]string) httpx.Decision { return httpx.Allowed }
 		return p
 	}
 	docs := s.effectiveDocs(u)
@@ -384,6 +385,8 @@ func (s *Service) principal(u User, keyID string) *httpx.Principal {
 	p.Can = func(action, resource string) bool {
 		return decide(docs, boundary, action, resource, CondContext(p.Context)) == allow
 	}
+	p.Identity = identityFunc(p, docs, boundary)
+	p.Mentions = mentionsFunc(docs, boundary)
 	return p
 }
 

@@ -60,7 +60,7 @@ type Queue struct {
 	MaxMessageSize            int       `json:"max_message_size"`
 	Redrive                   *Redrive  `json:"redrive_policy,omitempty"`
 	RedriveAllowPolicy        string    `json:"redrive_allow_policy,omitempty"` // JSON, as in AWS
-	Policy                    string    `json:"policy,omitempty"`               // JSON access policy (stored, not enforced)
+	Policy                    string    `json:"policy,omitempty"`               // JSON access policy, enforced with IAM (see policy.go)
 	KmsMasterKeyID            string    `json:"kms_master_key_id,omitempty"`
 	KmsDataKeyReusePeriod     int       `json:"kms_data_key_reuse_period_seconds,omitempty"`
 	SqsManagedSSE             *bool     `json:"sqs_managed_sse_enabled,omitempty"`
@@ -147,6 +147,7 @@ func New(env *svc.Env) *Service {
 	for _, q := range store.List[Queue](env.Store, cQueues) {
 		s.queues[q.Name] = s.load(q.Name)
 	}
+	httpx.RegisterPolicyProvider("sqs", s.policyProvider)
 	return s
 }
 

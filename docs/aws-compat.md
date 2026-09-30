@@ -23,20 +23,70 @@ Temporary credentials work as in AWS: create an IAM role whose trust policy allo
 instances with a role receive credentials and `AWS_ENDPOINT_URL` in their environment, so SDK
 calls from inside them reach HomeCloud.
 
+## Policies and authorization
+
+Every request is decided the way AWS does within one account: an explicit `Deny` in the
+caller's identity policies (or permissions boundary) or in the target's resource policy always
+wins; otherwise the request is allowed if the identity policies allow it or the resource policy
+grants the caller. A resource policy that names the account (`arn:aws:iam::<account>:root`)
+only delegates to identity policies; one that names a user or role ARN, or `"*"`, grants access
+on its own.
+
+Resource policies that are enforced, over both the AWS and the native API:
+
+| Resource | Policy | Notes |
+|---|---|---|
+| S3 bucket | bucket policy (`PutBucketPolicy`) | Anonymous callers are allowed by `Principal: "*"`. Policies MinIO cannot store (`ArnLike`, `aws:PrincipalArn`, ...) are kept by HomeCloud and returned as written. |
+| SQS queue | `Policy` attribute, `AddPermission` | |
+| SNS topic | `Policy` attribute | |
+| KMS key | key policy | Required, as in AWS: the default policy grants the account root, which delegates to IAM, so existing keys behave as before. A key policy without the root statement makes IAM policies ineffective for that key. Grants are stored but do not authorize requests. |
+
+The account's root user is not subject to resource-policy `Deny` statements, so a bad policy
+cannot lock the administrator out.
+
+Service-to-service deliveries honor the target's policy too. SNS delivering to a queue (and
+its dead-letter queue) and EventBridge delivering to a queue or topic are evaluated as the
+service principal (`sns.amazonaws.com`, `events.amazonaws.com`) with `aws:SourceArn` (the topic or
+rule) and `aws:SourceAccount`. A queue or topic with a policy needs an `Allow` for the service and
+no matching `Deny`. Unlike AWS, a queue or topic with no policy at all still accepts deliveries,
+because the subscription or target was authorized when it was created. CloudWatch alarm actions
+and Lambda destinations are not yet evaluated against the target's policy.
+
+Condition operators: `String*` (`StringEquals`, `StringLike`, `IgnoreCase`, `Not` variants),
+`Arn*`, `IpAddress`/`NotIpAddress`, `Bool`, `Numeric*`, `Date*`, `BinaryEquals` and `Null`, with the
+`IfExists`, `ForAnyValue` and `ForAllValues` modifiers, and `${aws:username}`-style policy
+variables. Condition keys:
+
+- Global: `aws:SourceIp`, `aws:SecureTransport`, `aws:UserAgent`, `aws:Referer`, `aws:TlsVersion`,
+  `aws:CurrentTime`, `aws:EpochTime`, `aws:PrincipalArn`, `aws:PrincipalAccount`,
+  `aws:PrincipalType`, `aws:PrincipalTag/<k>`, `aws:username`, `aws:userid`,
+  `aws:RequestedRegion`, `aws:SourceArn` and `aws:SourceAccount` (service deliveries).
+- S3: `s3:prefix`, `s3:delimiter`, `s3:max-keys` (listings), `s3:x-amz-acl` and the other
+  `s3:x-amz-*` request headers (server-side encryption, storage class, copy source, grants),
+  `s3:versionid`, `s3:authType`, `s3:signatureversion`, `s3:RequestObjectTag/<k>` (the
+  `x-amz-tagging` header of uploads and copies) and `s3:ExistingObjectTag/<k>` (looked up only
+  when a policy uses it). Tags sent in a `PutObjectTagging` body are not available as
+  `s3:RequestObjectTag`.
+- KMS: `kms:CallerAccount`.
+
+`aws:SourceIp` is the address of the connection; `X-Forwarded-For` is not trusted because
+HomeCloud has no notion of trusted proxies. `aws:SecureTransport` is true only when the
+connection to HomeCloud itself is TLS, so behind a TLS-terminating proxy it is false.
+
 ## Coverage
 
 | Service | Signing name | Protocol | Notes |
 |---|---|---|---|
 | STS | sts | awsQuery | GetCallerIdentity, AssumeRole, GetSessionToken |
 | IAM | iam | awsQuery | Users, groups, roles, managed policies (with versions, `arn:aws:iam::aws:policy/...`), inline policies, access keys, instance profiles, permissions boundaries, conditions, simulation |
-| S3 | s3 | restXml | Objects, multipart, presigned URLs (SigV4 and SigV2), chunked/trailer uploads, versioning, lifecycle, policy, tagging, website; path and virtual-host addressing |
+| S3 | s3 | restXml | Objects, multipart, presigned URLs (SigV4 and SigV2), chunked/trailer uploads, versioning, lifecycle, bucket policies with condition keys, tagging, website; path and virtual-host addressing |
 | Lambda | lambda | restJson1 | Functions (zip, S3, container image), invoke (sync/async/tail), versions, aliases, layers, permissions, concurrency, destinations, event source mappings (SQS, DynamoDB streams), function URLs |
 | DynamoDB | dynamodb | awsJson 1.0 | Tables, GSIs/LSIs, all item ops with expressions, batch, transactions, PartiQL, TTL, streams |
-| SQS | sqs | awsJson 1.0 + awsQuery | Standard and FIFO queues, DLQs and redrive, batch ops, long polling |
-| SNS | sns | awsQuery | Topics (incl. FIFO), subscriptions (sqs, lambda, http/s, email), filter policies, signed messages |
+| SQS | sqs | awsJson 1.0 + awsQuery | Standard and FIFO queues, DLQs and redrive, batch ops, long polling, queue policies |
+| SNS | sns | awsQuery | Topics (incl. FIFO), subscriptions (sqs, lambda, http/s, email), filter policies, topic policies, signed messages |
 | Secrets Manager | secretsmanager | awsJson 1.1 | Versions and staging labels, rotation via Lambda, resource policies |
 | SSM Parameter Store | ssm | awsJson 1.1 | Parameters, hierarchies, versions and labels, SecureString |
-| KMS | kms | awsJson 1.1 | Symmetric, RSA, ECC and HMAC keys, aliases, rotation, data keys, grants |
+| KMS | kms | awsJson 1.1 | Symmetric, RSA, ECC and HMAC keys, aliases, rotation, data keys, key policies, grants (stored) |
 | CloudWatch | monitoring | awsJson 1.0 + awsQuery | Metrics, GetMetricData with math, alarms, dashboards |
 | CloudWatch Logs | logs | awsJson 1.1 | Groups, streams, events, filter patterns, Logs Insights, metric and subscription filters |
 | EventBridge | events | awsJson 1.1 | Buses, rules with full pattern syntax, targets with transforms |

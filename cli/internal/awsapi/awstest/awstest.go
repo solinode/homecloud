@@ -252,6 +252,31 @@ func (h *Harness) nativeAsRoot(t *testing.T, method, path string, body any) []by
 	return b.Bytes()
 }
 
+// NativeAs calls the native HomeCloud API with an access key and returns the
+// status and body, without failing on error statuses.
+func (h *Harness) NativeAs(t *testing.T, akid, secret, method, path string, body any) (int, []byte) {
+	t.Helper()
+	var rd *bytes.Reader
+	if body != nil {
+		b, _ := json.Marshal(body)
+		rd = bytes.NewReader(b)
+	} else {
+		rd = bytes.NewReader(nil)
+	}
+	h.sync()
+	req, _ := http.NewRequest(method, h.URL+path, rd)
+	req.Header.Set("Authorization", "Bearer "+akid+":"+secret)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	var b bytes.Buffer
+	_, _ = b.ReadFrom(resp.Body)
+	return resp.StatusCode, b.Bytes()
+}
+
 // Native calls the native HomeCloud API as root and returns the response body.
 func (h *Harness) Native(t *testing.T, method, path string, body any) []byte {
 	return h.nativeAsRoot(t, method, path, body)

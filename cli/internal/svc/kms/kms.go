@@ -29,6 +29,7 @@ import (
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
+	"github.com/homecloudhq/homecloud/cli/internal/httpx"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/secrets"
@@ -126,7 +127,11 @@ type Service struct {
 	Now func() time.Time
 }
 
-func New(env *svc.Env, master *secrets.Service) *Service { return &Service{env: env, master: master} }
+func New(env *svc.Env, master *secrets.Service) *Service {
+	s := &Service{env: env, master: master}
+	httpx.RegisterPolicyProvider("kms", s.policyProvider)
+	return s
+}
 
 func (s *Service) now() time.Time {
 	if s.Now != nil {

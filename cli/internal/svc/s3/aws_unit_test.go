@@ -2,7 +2,6 @@ package s3
 
 import (
 	"bytes"
-	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -10,7 +9,6 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/homecloudhq/homecloud/cli/internal/httpx"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/svctest"
 )
 
@@ -59,42 +57,6 @@ func TestResolveActions(t *testing.T) {
 	}
 	if _, err := resolve("GET", "b", "", url.Values{"torrent": nil}, http.Header{}); err == nil {
 		t.Error("unknown subresource accepted")
-	}
-}
-
-func TestBucketPolicyEvaluate(t *testing.T) {
-	var d bucketPolicy
-	_ = json.Unmarshal([]byte(`{"Statement":[
-		{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/public/*"},
-		{"Effect":"Allow","Principal":{"AWS":["arn:aws:iam::111122223333:user/alice"]},"Action":["s3:Put*"],"Resource":"arn:aws:s3:::b/*"},
-		{"Effect":"Allow","Principal":"*","Action":"s3:GetObject","Resource":"arn:aws:s3:::b/cond/*","Condition":{"IpAddress":{"aws:SourceIp":"10.0.0.0/8"}}},
-		{"Effect":"Deny","Principal":{"AWS":"arn:aws:iam::111122223333:role/ci"},"Action":"s3:*","Resource":"arn:aws:s3:::b/secret*"}]}`), &d)
-	alice := &httpx.Principal{AccountID: "111122223333", ARN: "arn:aws:iam::111122223333:user/alice"}
-	ci := &httpx.Principal{AccountID: "111122223333", ARN: "arn:aws:sts::111122223333:assumed-role/ci/s", RoleName: "ci"}
-	for _, c := range []struct {
-		p           *httpx.Principal
-		action, res string
-		want        policyDecision
-	}{
-		{nil, "s3:GetObject", "arn:aws:s3:::b/public/x", policyAllow},
-		{nil, "s3:GetObject", "arn:aws:s3:::b/private/x", noDecision},
-		{nil, "s3:GetObject", "arn:aws:s3:::b/cond/x", noDecision}, // conditions are not evaluated: no grant
-		{alice, "s3:PutObject", "arn:aws:s3:::b/k", policyAllow},
-		{alice, "s3:DeleteObject", "arn:aws:s3:::b/k", noDecision},
-		{ci, "s3:GetObject", "arn:aws:s3:::b/secret.txt", policyDeny},
-		{ci, "s3:GetObject", "arn:aws:s3:::b/public/x", policyAllow},
-	} {
-		if got := d.evaluate(c.p, c.action, c.res); got != c.want {
-			t.Errorf("%v %s %s: %v, want %v", c.p, c.action, c.res, got, c.want)
-		}
-	}
-	for _, c := range []struct {
-		p, s string
-		want bool
-	}{{"a*c", "abbbc", true}, {"a?c", "abc", true}, {"a*", "", false}, {"*", "", true}, {"arn:*:s3:::b/*", "arn:aws:s3:::b/x/y", true}, {"a*b", "aab", true}, {"a*b", "abc", false}} {
-		if glob(c.p, c.s) != c.want {
-			t.Errorf("glob(%q,%q) != %v", c.p, c.s, c.want)
-		}
 	}
 }
 
