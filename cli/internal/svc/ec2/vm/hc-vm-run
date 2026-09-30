@@ -37,20 +37,22 @@ fi
 # namespace (127.0.0.11), so names resolve as they do for container instances.
 dns=""
 if [ -n "${HC_VM_DNS:-}" ]; then dns="-D $HC_VM_DNS --dns-forward $HC_VM_DNS --dns-host 127.0.0.11"; fi
-rm -f /run/passt.sock /run/qmp.sock
+rm -f /tmp/passt.sock /run/qmp.sock
 if [ "${HC_VM_NET:-}" != "user" ]; then
   # shellcheck disable=SC2086
-  passt -f -s /run/passt.sock -t all -u all $dns >/run/passt.log 2>&1 &
+  passt -f -s /tmp/passt.sock -t all -u all $dns >/run/passt.log 2>&1 &
   pid=$!
   n=0
-  while [ ! -S /run/passt.sock ] && [ $n -lt 50 ]; do n=$((n+1)); sleep 0.1; done
-  # passt binds its socket first and isolates itself afterwards; it can still exit then.
+  while [ ! -S /tmp/passt.sock ] && [ $n -lt 50 ]; do n=$((n+1)); sleep 0.1; done
+  # passt binds its socket (as nobody: /tmp is world-writable, /run is not) and sandboxes itself; it can still exit then.
   sleep 0.5
-  if [ ! -S /run/passt.sock ] || ! kill -0 "$pid" 2>/dev/null; then
+  if [ ! -S /tmp/passt.sock ] || ! kill -0 "$pid" 2>/dev/null; then
     echo "[homecloud] passt did not start; falling back to user-mode networking:" >&2
     cat /run/passt.log >&2
     if grep -q "Too many open files" /run/passt.log; then
       echo "hint: the open-file limit ($(ulimit -Hn)) is too low for passt's port forwarding" >&2
+    elif grep -q "Failed to bind" /run/passt.log; then
+      echo "hint: passt binds its socket as user nobody, so the socket directory must be world-writable" >&2
     elif grep -qE "sandbox|user namespace|remount|pivot_root" /run/passt.log; then
       echo "hint: the container's seccomp or AppArmor profile blocks passt's sandbox (it needs seccomp=unconfined and apparmor=unconfined)" >&2
     fi

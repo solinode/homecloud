@@ -62,7 +62,7 @@ func (m Machine) Args() []string {
 		"-drive", "file="+DiskDir+"/seed.iso,if=none,id=seed,format=raw,readonly=on",
 		"-device", "virtio-blk-pci,drive=seed",
 		// The NIC is wired to passt inside the container (see hc-vm-run).
-		"-netdev", "stream,id=net0,addr.type=unix,addr.path=/run/passt.sock,server=off",
+		"-netdev", "stream,id=net0,addr.type=unix,addr.path=/tmp/passt.sock,server=off",
 		"-device", "virtio-net-pci,netdev=net0,mac="+m.MAC()+",romfile=",
 		"-device", "virtio-rng-pci",
 		"-display", "none", "-monitor", "none",

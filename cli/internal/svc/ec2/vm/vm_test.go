@@ -28,7 +28,7 @@ func TestQEMUAArch64Emulated(t *testing.T) {
 		"file=/vm/disk.qcow2,if=none,id=root,format=qcow2",
 		"virtio-blk-pci,drive=root,bootindex=1",
 		"file=/vm/seed.iso,if=none,id=seed,format=raw,readonly=on",
-		"-netdev stream,id=net0,addr.type=unix,addr.path=/run/passt.sock,server=off",
+		"-netdev stream,id=net0,addr.type=unix,addr.path=/tmp/passt.sock,server=off",
 		"virtio-net-pci,netdev=net0,mac=" + m.MAC(),
 		"-chardev stdio,id=ser0,signal=off -serial chardev:ser0",
 		"-qmp unix:/run/qmp.sock,server=on,wait=off",
