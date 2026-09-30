@@ -104,6 +104,10 @@ func newInfraEnv(t *testing.T, docker bool) *infraEnv {
 	tasks.Routes(h.Router)
 	tasks.RegisterAWS()
 	if docker {
+		// The server runs this loop; it rolls deployments forward and retires old tasks.
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		go tasks.Run(ctx)
 		lb.Resolve = func(id string) (string, string, bool) { return tasks.PrivateIP(id) }
 		dns.Resolve = func(id string) (string, bool) { return lb.PrivateIP(id) }
 	}
