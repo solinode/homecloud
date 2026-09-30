@@ -50,6 +50,8 @@ type Zone struct {
 	Private   bool      `json:"private"`
 	VpcIDs    []string  `json:"vpc_ids,omitempty"`
 	Comment   string    `json:"comment,omitempty"`
+	CallerRef string    `json:"caller_reference,omitempty"`
+	Tags      core.Tags `json:"tags,omitempty"`
 	Records   []Record  `json:"records"`
 	Serial    uint32    `json:"serial"`
 	CreatedAt time.Time `json:"created_at"`
@@ -127,12 +129,26 @@ func (s *Service) zoneFile(z Zone, nsIP string) string {
 		}
 		for _, v := range values {
 			if r.Type == "TXT" {
-				v = strconv.Quote(v)
+				v = txtRData(v)
 			}
 			fmt.Fprintf(&b, "%s %d IN %s %s\n", name, r.TTL, r.Type, v)
 		}
 	}
 	return b.String()
+}
+
+// txtRData renders a TXT value as zone-file character strings of at most 255
+// bytes each, so long values (DKIM keys) are valid.
+func txtRData(v string) string {
+	if len(v) <= 255 {
+		return strconv.Quote(v)
+	}
+	var parts []string
+	for len(v) > 255 {
+		parts = append(parts, strconv.Quote(v[:255]))
+		v = v[255:]
+	}
+	return strings.Join(append(parts, strconv.Quote(v)), " ")
 }
 
 // nsAddress is the address for a zone's generated ns record: the VPC resolver,
@@ -256,6 +272,9 @@ func (s *Service) copy(ctx context.Context, cid string, files map[string]string)
 }
 
 func (s *Service) sync(ctx context.Context) {
+	if s.env.Docker == nil {
+		return // no container runtime (tests)
+	}
 	for _, v := range s.vpc.List() {
 		_ = s.env.Docker.ConnectIP(v.Network, containerName, vpc.DNSAddress(v.CIDR), "dns.internal")
 	}
@@ -320,37 +339,46 @@ func (s *Service) list(c *httpx.Ctx) (any, error) {
 
 var labelRe = regexp.MustCompile(`^([a-zA-Z0-9_]([a-zA-Z0-9_-]{0,61}[a-zA-Z0-9_])?\.)+$`)
 
+type zoneInput struct {
+	Name      string    `json:"name"`
+	Private   bool      `json:"private"`
+	VpcIDs    []string  `json:"vpc_ids"`
+	Comment   string    `json:"comment"`
+	CallerRef string    `json:"caller_reference"`
+	Tags      core.Tags `json:"tags"`
+}
+
 func (s *Service) create(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Name    string   `json:"name"`
-		Private bool     `json:"private"`
-		VpcIDs  []string `json:"vpc_ids"`
-		Comment string   `json:"comment"`
-	}
+	var in zoneInput
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	return s.createZone(in)
+}
+
+// createZone is shared by the native and AWS APIs.
+func (s *Service) createZone(in zoneInput) (Zone, error) {
 	name := strings.ToLower(strings.TrimSpace(in.Name))
 	if !strings.HasSuffix(name, ".") {
 		name += "."
 	}
 	if !labelRe.MatchString(name) || len(name) > 254 {
-		return nil, core.BadRequest("%q is not a valid domain name", in.Name)
+		return Zone{}, core.BadRequest("%q is not a valid domain name", in.Name)
 	}
 	for _, z := range store.List[Zone](s.env.Store, cZones) {
 		if z.Name == name {
-			return nil, core.Errf(http.StatusConflict, "HostedZoneAlreadyExists", "zone %s already exists (%s)", name, z.ID)
+			return Zone{}, core.Errf(http.StatusConflict, "HostedZoneAlreadyExists", "zone %s already exists (%s)", name, z.ID)
 		}
 	}
 	for _, v := range in.VpcIDs {
 		if _, err := s.vpc.GetVPC(v); err != nil {
-			return nil, core.NotFound("vpc", v)
+			return Zone{}, core.NotFound("vpc", v)
 		}
 	}
-	z := Zone{ID: "Z" + strings.ToUpper(core.RandHex(13)), Name: name, Private: in.Private, VpcIDs: in.VpcIDs, Comment: in.Comment,
+	z := Zone{ID: "Z" + strings.ToUpper(core.RandHex(13)), Name: name, Private: in.Private, VpcIDs: in.VpcIDs, Comment: in.Comment, CallerRef: in.CallerRef, Tags: in.Tags,
 		Records: []Record{}, Serial: uint32(time.Now().Unix()), CreatedAt: core.Now()}
 	if err := store.Put(s.env.Store, cZones, z.ID, z); err != nil {
-		return nil, err
+		return Zone{}, err
 	}
 	go s.sync(context.Background())
 	return z, nil
@@ -383,18 +411,22 @@ func (s *Service) get(c *httpx.Ctx) (any, error) {
 }
 
 func (s *Service) delete(c *httpx.Ctx) (any, error) {
-	z, err := s.zone(c.Param("id"))
+	return nil, s.deleteZone(c.Param("id"), c.Query("force") == "true")
+}
+
+func (s *Service) deleteZone(id string, force bool) error {
+	z, err := s.zone(id)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if len(z.Records) > 0 && c.Query("force") != "true" {
-		return nil, core.Errf(http.StatusConflict, "HostedZoneNotEmpty", "zone has %d records; delete them first or pass force=true", len(z.Records))
+	if len(z.Records) > 0 && !force {
+		return core.Errf(http.StatusConflict, "HostedZoneNotEmpty", "zone has %d records; delete them first or pass force=true", len(z.Records))
 	}
 	if err := store.Delete(s.env.Store, cZones, z.ID); err != nil {
-		return nil, err
+		return err
 	}
 	go s.sync(context.Background())
-	return nil, nil
+	return nil
 }
 
 var types = map[string]bool{"A": true, "AAAA": true, "CNAME": true, "TXT": true, "MX": true, "SRV": true, "NS": true, "CAA": true, "PTR": true}
@@ -427,11 +459,11 @@ func validate(z Zone, r *Record) error {
 	if len(r.Values) == 0 {
 		return core.BadRequest("a record needs at least one value")
 	}
-	if r.Type == "CNAME" && (len(r.Values) > 1 || r.Name == "@") {
+	if r.Type == "CNAME" && (len(r.Values) > 1 || full == z.Name) {
 		return core.BadRequest("a CNAME has exactly one value and cannot be at the zone apex")
 	}
 	for _, v := range r.Values {
-		if strings.ContainsAny(v, "\n\r;") {
+		if strings.ContainsAny(v, "\n\r") || (r.Type != "TXT" && strings.Contains(v, ";")) {
 			return core.BadRequest("record values may not contain newlines or semicolons")
 		}
 		switch r.Type {
@@ -448,30 +480,41 @@ func validate(z Zone, r *Record) error {
 				return core.BadRequest("%q is not a domain name", v)
 			}
 		case "TXT":
-			if len(v) > 255 {
-				return core.BadRequest("TXT strings are at most 255 characters")
+			if len(v) > 4000 {
+				return core.BadRequest("TXT values are at most 4000 characters")
 			}
 		}
 	}
 	return nil
 }
 
+// Change is one record change of a batch.
+type Change struct {
+	Action string `json:"action"` // CREATE | UPSERT | DELETE
+	Record Record `json:"record"`
+}
+
 func (s *Service) change(c *httpx.Ctx) (any, error) {
 	var in struct {
-		Changes []struct {
-			Action string `json:"action"` // CREATE | UPSERT | DELETE
-			Record Record `json:"record"`
-		} `json:"changes"`
+		Changes []Change `json:"changes"`
 	}
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	if len(in.Changes) == 0 {
-		return nil, core.BadRequest("no changes")
+	z, err := s.applyChanges(c.Param("id"), in.Changes)
+	if err != nil {
+		return nil, err
 	}
-	id := c.Param("id")
+	return map[string]any{"status": "INSYNC", "records": len(z.Records)}, nil
+}
+
+// applyChanges applies a batch atomically: all changes take effect or none.
+func (s *Service) applyChanges(id string, changes []Change) (Zone, error) {
+	if len(changes) == 0 {
+		return Zone{}, core.BadRequest("no changes")
+	}
 	z, err := store.Update(s.env.Store, cZones, id, func(z *Zone) error {
-		for _, ch := range in.Changes {
+		for _, ch := range changes {
 			r := ch.Record
 			if err := validate(*z, &r); err != nil {
 				return err
@@ -512,13 +555,13 @@ func (s *Service) change(c *httpx.Ctx) (any, error) {
 		return nil
 	})
 	if err == store.ErrNotFound {
-		return nil, core.Errf(http.StatusNotFound, "NoSuchHostedZone", "hosted zone %q does not exist", id)
+		return Zone{}, core.Errf(http.StatusNotFound, "NoSuchHostedZone", "hosted zone %q does not exist", id)
 	}
 	if err != nil {
-		return nil, err
+		return Zone{}, err
 	}
 	s.bump(id)
-	return map[string]any{"status": "INSYNC", "records": len(z.Records)}, nil
+	return z, nil
 }
 
 func (s *Service) exportZone(c *httpx.Ctx) (any, error) {

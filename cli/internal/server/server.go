@@ -214,6 +214,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		}
 	}()
 	acmSvc.InUse, acmSvc.OnRenew = elbSvc.UsesCertificate, elbSvc.CertificateRenewed
+	acmSvc.UsedBy = elbSvc.CertificateUsers
 	ecsSvc := ecs.New(env, vpcSvc, elbSvc, secSvc)
 	elbSvc.Resolve = func(id string) (string, string, bool) {
 		if ip, v, ok := ec2Svc.PrivateIP(id); ok {
@@ -297,6 +298,8 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		return cw.Append(group, stream, evs...)
 	}
 	asgSvc.RegisterAWS()
+	dnsSvc.RegisterAWS()
+	acmSvc.RegisterAWS()
 	ec2Svc.TemplateInUse = asgSvc.TemplateInUse
 	awsHandler := &awsapi.Handler{Creds: iamSvc, Account: account, Audit: trailSvc.Record}
 	if len(httpx.Unscoped) > 0 {
