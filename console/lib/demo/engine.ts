@@ -231,8 +231,17 @@ export async function dispatch(
   await new Promise((r) => setTimeout(r, 25 + Math.random() * 60))
   const path = fullPath.split("?")[0]
   const m = router.match(method, path)
-  if (!m) throw err(404, "NotFound", `No such API route in the demo: ${method} ${path}`)
-  const out = await m.route.handler({ method, path, params: m.params, query, body, raw, headers })
+  if (!m) {
+    console.error(`[demo] missing route: ${method} ${path}`)
+    throw err(404, "NotFound", `No such API route in the demo: ${method} ${path}`)
+  }
+  let out: unknown
+  try {
+    out = await m.route.handler({ method, path, params: m.params, query, body, raw, headers })
+  } catch (e) {
+    if (!(e instanceof DemoError)) console.error(`[demo] handler crashed: ${method} ${path}`, e)
+    throw e
+  }
   if (method !== "GET") {
     save()
     notifyChanged()

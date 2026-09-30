@@ -165,9 +165,17 @@ export interface RequestOptions {
   noAuthRedirect?: boolean
 }
 
+/**
+ * loadDemo lazily imports the mock backend. The literal env check is what lets the
+ * bundler drop the import (and the whole lib/demo tree) from normal builds.
+ */
+export function loadDemo() {
+  return process.env.NEXT_PUBLIC_DEMO === "1" ? import("@/lib/demo") : Promise.reject(new Error("demo mode is disabled"))
+}
+
 /** demoRequest answers the call from the in-browser mock backend (demo build only). */
 async function demoRequest<T>(method: string, path: string, opts: RequestOptions): Promise<T> {
-  const demo = await import("@/lib/demo")
+  const demo = await loadDemo()
   let body: unknown = opts.body
   let raw: unknown
   if (opts.body instanceof Blob) {

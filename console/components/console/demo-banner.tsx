@@ -4,7 +4,7 @@ import { useEffect } from "react"
 import { FlaskConical, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 
-import { DEMO, DEMO_UNAVAILABLE_HREF } from "@/lib/api"
+import { DEMO, DEMO_UNAVAILABLE_HREF, loadDemo } from "@/lib/api"
 
 const INSTALL_URL = "https://homecloud.pages.dev/#start"
 const GITHUB_URL = "https://github.com/solinode/homecloud"
@@ -12,6 +12,7 @@ const GITHUB_URL = "https://github.com/solinode/homecloud"
 /** DemoBanner is rendered above the top bar of every page in the static demo build. */
 export function DemoBanner() {
   useEffect(() => {
+    if (!DEMO) return
     // Download links cannot work without a server: explain instead of 404ing.
     const onClick = (e: MouseEvent) => {
       const a = (e.target as Element | null)?.closest?.("a")
@@ -25,7 +26,7 @@ export function DemoBanner() {
   }, [])
 
   const reset = async () => {
-    const demo = await import("@/lib/demo")
+    const demo = await loadDemo()
     demo.demoReset()
     window.location.reload()
   }

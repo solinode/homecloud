@@ -59,7 +59,7 @@ export async function demoRequest<T = unknown>(r: DemoRequest): Promise<T> {
   return res.data as T
 }
 
-/** demoSyncGet runs a GET synchronously-ish for download links: resolves the JSON/text body. */
+/** demoReset drops session changes and re-seeds the fixtures. */
 export function demoReset() {
   boot()
   resetDemo()

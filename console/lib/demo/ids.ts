@@ -89,3 +89,10 @@ export const NAMES = {
   bucketLogs: "shop-alb-logs",
   bucketTfState: "shop-terraform-state",
 }
+
+/** EFS file systems (owned by the efs demo service). */
+export const FS = {
+  media: stableId("fs-", "shop-media"),
+  backups: stableId("fs-", "shop-backups"),
+  scratch: stableId("fs-", "dev-scratch"),
+}
