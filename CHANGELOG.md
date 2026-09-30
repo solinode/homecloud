@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- KMS supports imported key material (`create-key --origin EXTERNAL`, `get-parameters-for-import`, `import-key-material` with `RSAES_OAEP_SHA_1/256` and `RSA_AES_KEY_WRAP_SHA_1/256`, `ValidTo` expiry, `delete-imported-key-material`; only the same material can be imported again) and multi-Region primary keys (`--multi-region`, `mrk-` ids). `ReplicateKey` and `UpdatePrimaryRegion` return `UnsupportedOperationException` because HomeCloud runs a single region.
 - Cognito user pools support `USER_SRP_AUTH` (Amplify, amazon-cognito-identity-js, pycognito), `ForgotPassword`/`ConfirmForgotPassword` and `AdminResetUserPassword`. Existing users need their password set again (or one `USER_PASSWORD_AUTH` sign-in) before SRP works.
 - CloudFormation updates behave like AWS: queues, topics, parameters, functions, roles, tables, alarms and other resources change in place, replacements create the new resource before deleting the old one, and a failed update rolls back to the previous template (`UPDATE_ROLLBACK_COMPLETE`, `ContinueUpdateRollback`, `DisableRollback`). A replacement that keeps a custom resource name now fails, as in AWS.
 
