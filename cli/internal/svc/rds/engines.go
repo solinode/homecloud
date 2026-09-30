@@ -86,31 +86,27 @@ var engines = []Engine{
 		},
 	},
 	{
-		Name: "redis", Label: "Redis", Kind: "cache", Versions: []string{"7.4", "7.2"}, DefaultPort: 6379, DataDir: "/data", HasPassword: true,
+		Name: "redis", Label: "Redis", Kind: "cache", Versions: []string{"7.4", "7.2", "7.1", "7.0", "6.2"}, DefaultPort: 6379, DataDir: "/data", HasPassword: true,
 		image: func(v string) string { return "redis:" + v + "-alpine" },
-		cmd:   func(p string) []string { return []string{"redis-server", "--requirepass", p, "--appendonly", "yes"} },
-		probe: func(u, p, db string) []string {
-			return sh("redis-cli --no-auth-warning -a " + q(p) + " ping | grep -q PONG")
-		},
+		cmd:   func(p string) []string { return keyValueCmd("redis-server", p) },
+		probe: func(u, p, db string) []string { return sh("redis-cli" + authFlags(p) + " ping | grep -q PONG") },
 		dump: func(u, p string) []string {
-			return sh("redis-cli --no-auth-warning -a " + q(p) + " --rdb /tmp/hc-snapshot.rdb >/dev/null 2>&1 && cat /tmp/hc-snapshot.rdb && rm -f /tmp/hc-snapshot.rdb")
+			return sh("redis-cli" + authFlags(p) + " --rdb /tmp/hc-snapshot.rdb >/dev/null 2>&1 && cat /tmp/hc-snapshot.rdb && rm -f /tmp/hc-snapshot.rdb")
 		},
 		query: func(u, p, db, cmd string) []string {
-			return append([]string{"redis-cli", "--no-auth-warning", "-a", p}, splitCommand(cmd)...)
+			return append(append([]string{"redis-cli"}, authArgs(p)...), splitCommand(cmd)...)
 		},
 	},
 	{
-		Name: "valkey", Label: "Valkey", Kind: "cache", Versions: []string{"8"}, DefaultPort: 6379, DataDir: "/data", HasPassword: true,
+		Name: "valkey", Label: "Valkey", Kind: "cache", Versions: []string{"8", "7.2"}, DefaultPort: 6379, DataDir: "/data", HasPassword: true,
 		image: func(v string) string { return "valkey/valkey:" + v + "-alpine" },
-		cmd:   func(p string) []string { return []string{"valkey-server", "--requirepass", p, "--appendonly", "yes"} },
-		probe: func(u, p, db string) []string {
-			return sh("valkey-cli --no-auth-warning -a " + q(p) + " ping | grep -q PONG")
-		},
+		cmd:   func(p string) []string { return keyValueCmd("valkey-server", p) },
+		probe: func(u, p, db string) []string { return sh("valkey-cli" + authFlags(p) + " ping | grep -q PONG") },
 		dump: func(u, p string) []string {
-			return sh("valkey-cli --no-auth-warning -a " + q(p) + " --rdb /tmp/hc-snapshot.rdb >/dev/null 2>&1 && cat /tmp/hc-snapshot.rdb && rm -f /tmp/hc-snapshot.rdb")
+			return sh("valkey-cli" + authFlags(p) + " --rdb /tmp/hc-snapshot.rdb >/dev/null 2>&1 && cat /tmp/hc-snapshot.rdb && rm -f /tmp/hc-snapshot.rdb")
 		},
 		query: func(u, p, db, cmd string) []string {
-			return append([]string{"valkey-cli", "--no-auth-warning", "-a", p}, splitCommand(cmd)...)
+			return append(append([]string{"valkey-cli"}, authArgs(p)...), splitCommand(cmd)...)
 		},
 	},
 	{
@@ -138,6 +134,32 @@ var engines = []Engine{
 			return sh("mongosh --quiet --host 127.0.0.1 -u " + q(u) + " -p " + q(p) + " --authenticationDatabase admin " + q(db) + " --eval " + q(js))
 		},
 	},
+}
+
+// A Redis-family server runs with a password (the native API always sets one)
+// or without (an ElastiCache cluster created without an AuthToken).
+
+func keyValueCmd(server, pass string) []string {
+	if pass == "" {
+		return []string{server, "--appendonly", "yes"}
+	}
+	return []string{server, "--requirepass", pass, "--appendonly", "yes"}
+}
+
+// authArgs are the redis-cli authentication arguments for a password ("" for none).
+func authArgs(pass string) []string {
+	if pass == "" {
+		return nil
+	}
+	return []string{"--no-auth-warning", "-a", pass}
+}
+
+// authFlags is authArgs quoted for a shell command line.
+func authFlags(pass string) string {
+	if pass == "" {
+		return ""
+	}
+	return " --no-auth-warning -a " + q(pass)
 }
 
 // splitCommand splits a Redis-style command line into arguments, honouring
@@ -196,10 +218,20 @@ var classes = []InstanceClass{
 	{"db.m5.large", 2, 8192, "db"},
 	{"db.m5.xlarge", 4, 16384, "db"},
 	{"db.r5.large", 2, 16384, "db"},
+	{"cache.t2.micro", 1, 512, "cache"},
+	{"cache.t2.small", 1, 1536, "cache"},
+	{"cache.t2.medium", 2, 3072, "cache"},
 	{"cache.t3.micro", 1, 512, "cache"},
 	{"cache.t3.small", 1, 1536, "cache"},
 	{"cache.t3.medium", 2, 3072, "cache"},
+	{"cache.t4g.micro", 1, 512, "cache"},
+	{"cache.t4g.small", 1, 1536, "cache"},
+	{"cache.t4g.medium", 2, 3072, "cache"},
 	{"cache.m5.large", 2, 6144, "cache"},
+	{"cache.m5.xlarge", 4, 12288, "cache"},
+	{"cache.m6g.large", 2, 6144, "cache"},
+	{"cache.r5.large", 2, 13312, "cache"},
+	{"cache.r6g.large", 2, 13312, "cache"},
 }
 
 func findClass(name string) (InstanceClass, bool) {
