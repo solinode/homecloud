@@ -858,19 +858,31 @@ func (s *Service) website(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !s.isPublic(c.R.Context(), cl, bucket) {
-		return nil, core.Errf(http.StatusForbidden, "AccessDenied", "bucket %q hosts a website but does not allow public reads", bucket)
+	// The site is served with the server's own storage credentials, so each key
+	// must be one the bucket policy lets an anonymous caller read: a policy that
+	// merely mentions "*" and s3:GetObject (for one prefix, with a Deny or a
+	// condition) does not make the whole bucket public.
+	policy, _ := s.bucketPolicy(c.R.Context(), bucket)
+	acc := httpx.Access{Policy: policy, Keys: httpx.RequestContext(c.R)}
+	public := func(k string) bool {
+		return policy != "" && httpx.PermitsAnonymous("s3:GetObject", "arn:aws:s3:::"+bucket+"/"+k, acc)
 	}
+	denied := core.Errf(http.StatusForbidden, "AccessDenied", "bucket %q hosts a website but does not allow public reads of this object", bucket)
 	if key == "" || strings.HasSuffix(key, "/") {
 		key += m.IndexDocument
 	}
+	if !public(key) {
+		return nil, denied
+	}
 	if _, err := cl.StatObject(c.R.Context(), bucket, key, minio.StatObjectOptions{}); err != nil {
-		if _, err2 := cl.StatObject(c.R.Context(), bucket, key+"/"+m.IndexDocument, minio.StatObjectOptions{}); err2 == nil {
-			http.Redirect(c.W, c.R, c.R.URL.Path+"/", http.StatusFound)
-			c.MarkWritten()
-			return nil, nil
+		if public(key + "/" + m.IndexDocument) {
+			if _, err2 := cl.StatObject(c.R.Context(), bucket, key+"/"+m.IndexDocument, minio.StatObjectOptions{}); err2 == nil {
+				http.Redirect(c.W, c.R, c.R.URL.Path+"/", http.StatusFound)
+				c.MarkWritten()
+				return nil, nil
+			}
 		}
-		if m.ErrorDocument != "" {
+		if m.ErrorDocument != "" && public(m.ErrorDocument) {
 			return nil, s.stream(c, cl, bucket, m.ErrorDocument, "", false, http.StatusNotFound)
 		}
 		return nil, core.Errf(http.StatusNotFound, "NoSuchKey", "%s not found", key)

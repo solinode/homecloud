@@ -150,7 +150,7 @@ func (s *Service) claimsUnsigned(r *http.Request) bool {
 		return v2 || s.knownBucket(b)
 	}
 	p := r.URL.Path
-	for _, pre := range []string{"/api/", "/website/", "/lambda-url/", "/apigw/", "/cognito/", "/_next/"} {
+	for _, pre := range []string{"/api/", "/website/", "/lambda-url/", "/apigw/", "/cognito/", "/_next/", "/lambda-code/", "/_s3/"} {
 		if strings.HasPrefix(p, pre) {
 			return false
 		}
@@ -993,6 +993,15 @@ func (s *Service) deleteObjects(a *s3req) error {
 		return awsapi.Errorf(http.StatusBadRequest, "MalformedXML", "the XML you provided was not well-formed")
 	}
 	for _, o := range in.Objects {
+		// Keys in the body are forwarded as they are, so they need the same check
+		// as the key in the URL: "allowed/../secret" is authorized as a key under
+		// allowed/ but may name another object.
+		if err := checkKey(o.Key); err != nil {
+			return err
+		}
+		if len(o.Key) > 1024 || strings.ContainsRune(o.Key, 0) {
+			return awsapi.Errorf(http.StatusBadRequest, "KeyTooLongError", "the object key is invalid")
+		}
 		act := "s3:DeleteObject"
 		if o.VersionID != "" {
 			act = "s3:DeleteObjectVersion"
