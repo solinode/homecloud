@@ -111,6 +111,7 @@ func (f *filterEnv) sshDial(t *testing.T, id string, port int, signer ssh.Signer
 	t.Helper()
 	var c *ssh.Client
 	var lastErr error
+	tries := 0
 	end := time.Now().Add(vmTestBudget)
 	for {
 		// The published port changes when the container is rebuilt: look it up each time.
@@ -122,6 +123,13 @@ func (f *filterEnv) sshDial(t *testing.T, id string, port int, signer ssh.Signer
 		})
 		if lastErr == nil {
 			break
+		}
+		tries++
+		// A passt that exited will not come back: fail now, with its log.
+		if tries%15 == 0 {
+			if logs, _ := f.h.Env.Docker.Logs(f.vmGet(id).ContainerID, 0, time.Time{}); strings.Contains(logs, "passt exited unexpectedly") {
+				t.Fatalf("ssh to %s: passt exited while the guest ran: %v\n%s", id, lastErr, f.vmDiagnose(id))
+			}
 		}
 		if time.Now().After(end) {
 			t.Fatalf("ssh to %s on published port %d: %v\n%s", id, port, lastErr, f.vmDiagnose(id))
@@ -144,10 +152,17 @@ func (f *filterEnv) vmDiagnose(id string) string {
 			b.WriteString(l + "\n")
 		}
 	}
+	if k := strings.Index(logs, "[homecloud] passt exited unexpectedly"); k >= 0 {
+		rest := strings.Split(logs[k:], "\n")
+		b.WriteString("--- from the supervisor's report:\n" + strings.Join(rest[:min(len(rest), 70)], "\n") + "\n")
+	}
+	b.WriteString("--- last console lines:\n")
+	lines := strings.Split(strings.TrimSpace(logs), "\n")
+	b.WriteString(strings.Join(lines[max(0, len(lines)-25):], "\n") + "\n")
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	probe := "timeout 5 bash -c 'exec 3<>/dev/tcp/" + i.PrivateIP + "/22; head -c 60 <&3' 2>&1; echo; iptables -S INPUT 2>&1 | head -20"
-	if res, err := f.h.Env.Docker.Exec(ctx, i.ContainerID, []string{"/bin/sh", "-c", "cat /proc/net/tcp6 | head -8; echo; ls -l /tmp; cat /run/passt.log | head -40; echo banner-from-inside:; " + probe}, nil); err == nil {
+	if res, err := f.h.Env.Docker.Exec(ctx, i.ContainerID, []string{"/bin/sh", "-c", "cat /proc/net/tcp6 | head -8; echo; ls -l /tmp; tail -n 40 /run/passt.log; echo banner-from-inside:; " + probe}, nil); err == nil {
 		b.WriteString(res.Stdout + res.Stderr)
 	}
 	return b.String()

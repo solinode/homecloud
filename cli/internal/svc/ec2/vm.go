@@ -268,7 +268,7 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 		// share the container's quota with the guest's vCPUs: a quota the vCPUs
 		// alone exhaust starves passt, and the guest's DHCP and connections time out.
 		NanoCPUs: int64(min(float64(mach.VCPUs)+1.5, s.hostCPU) * 1e9),
-		MemoryMB: inst.MemoryMB + 512,
+		MemoryMB: inst.MemoryMB + 768,
 		Ports:    s.portsFor(inst),
 		Mounts:   mounts,
 		Network:  network,

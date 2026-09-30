@@ -61,7 +61,8 @@ if [ -n "${HC_VM_DNS:-}" ]; then dns="-D $HC_VM_DNS --dns-forward $HC_VM_DNS --d
 rm -f /tmp/passt.sock /run/qmp.sock /run/serial.sock /run/qga.sock
 if [ "${HC_VM_NET:-}" != "user" ]; then
   # shellcheck disable=SC2086
-  passt -f -s /tmp/passt.sock -t all -u all $dns >/run/passt.log 2>&1 &
+  # -d logs each flow to a circular 2 MiB file: it is what tells why passt exited.
+  passt -f -d -l /run/passt.log --log-size 2097152 -s /tmp/passt.sock -t all -u all $dns >/dev/null 2>&1 &
   pid=$!
   n=0
   while [ ! -S /tmp/passt.sock ] && [ $n -lt 50 ]; do n=$((n+1)); sleep 0.1; done
@@ -105,8 +106,12 @@ reported=
 while alive "$qemu"; do
   if [ -n "${pid:-}" ] && [ -z "$reported" ] && ! alive "$pid"; then
     reported=1
-    echo "[homecloud] passt exited unexpectedly; the guest has lost its network:" >&2
-    cat /run/passt.log >&2
+    st=0; wait "$pid" || st=$?
+    echo "[homecloud] passt exited unexpectedly (status $st; 137 is SIGKILL, 159 SIGSYS); the guest has lost its network:" >&2
+    tail -n 40 /run/passt.log >&2
+    for f in /sys/fs/cgroup/memory.events /sys/fs/cgroup/memory.current /sys/fs/cgroup/memory.max; do
+      [ -r "$f" ] && echo "$f: $(tr '\n' ' ' < "$f")" >&2
+    done
   fi
   sleep 2 &
   wait $!
