@@ -44,32 +44,37 @@ type Endpoint struct {
 }
 
 type Instance struct {
-	ID                  string     `json:"id"`
-	ARN                 string     `json:"arn"`
-	Kind                string     `json:"kind"`
-	Engine              string     `json:"engine"`
-	EngineVersion       string     `json:"engine_version"`
-	Class               string     `json:"class"`
-	VCPUs               float64    `json:"vcpus"`
-	MemoryMB            int64      `json:"memory_mb"`
-	StorageGB           int        `json:"storage_gb"`
-	Status              string     `json:"status"`
-	StatusReason        string     `json:"status_reason,omitempty"`
-	MasterUsername      string     `json:"master_username,omitempty"`
-	DBName              string     `json:"db_name,omitempty"`
-	SecretName          string     `json:"secret_name,omitempty"`
-	Endpoint            Endpoint   `json:"endpoint"`
-	VpcID               string     `json:"vpc_id"`
-	SubnetID            string     `json:"subnet_id"`
-	AvailabilityZone    string     `json:"availability_zone"`
-	PubliclyAccessible  bool       `json:"publicly_accessible"`
-	BackupRetentionDays int        `json:"backup_retention_days"`
-	LatestBackup        *time.Time `json:"latest_backup,omitempty"`
-	DeletionProtection  bool       `json:"deletion_protection"`
-	ContainerID         string     `json:"container_id,omitempty"`
-	RestoredFrom        string     `json:"restored_from,omitempty"`
-	CreatedAt           time.Time  `json:"created_at"`
-	Tags                core.Tags  `json:"tags,omitempty"`
+	ID                  string            `json:"id"`
+	ARN                 string            `json:"arn"`
+	Kind                string            `json:"kind"`
+	Engine              string            `json:"engine"`
+	EngineVersion       string            `json:"engine_version"`
+	Class               string            `json:"class"`
+	VCPUs               float64           `json:"vcpus"`
+	MemoryMB            int64             `json:"memory_mb"`
+	StorageGB           int               `json:"storage_gb"`
+	Status              string            `json:"status"`
+	StatusReason        string            `json:"status_reason,omitempty"`
+	MasterUsername      string            `json:"master_username,omitempty"`
+	DBName              string            `json:"db_name,omitempty"`
+	SecretName          string            `json:"secret_name,omitempty"`
+	Endpoint            Endpoint          `json:"endpoint"`
+	VpcID               string            `json:"vpc_id"`
+	SubnetID            string            `json:"subnet_id"`
+	AvailabilityZone    string            `json:"availability_zone"`
+	PubliclyAccessible  bool              `json:"publicly_accessible"`
+	BackupRetentionDays int               `json:"backup_retention_days"`
+	LatestBackup        *time.Time        `json:"latest_backup,omitempty"`
+	DeletionProtection  bool              `json:"deletion_protection"`
+	ContainerID         string            `json:"container_id,omitempty"`
+	RestoredFrom        string            `json:"restored_from,omitempty"`
+	SubnetGroup         string            `json:"subnet_group,omitempty"`
+	ParameterGroup      string            `json:"parameter_group,omitempty"`
+	SecurityGroups      []string          `json:"security_groups,omitempty"`
+	ManagedSecret       bool              `json:"managed_secret,omitempty"` // ManageMasterUserPassword
+	Settings            map[string]string `json:"settings,omitempty"`       // AWS attributes stored and echoed (maintenance window, ...)
+	CreatedAt           time.Time         `json:"created_at"`
+	Tags                core.Tags         `json:"tags,omitempty"`
 }
 
 type Snapshot struct {
@@ -88,6 +93,7 @@ type Snapshot struct {
 	PasswordCT     string    `json:"password_ct,omitempty"` // encrypted master password
 	StorageGB      int       `json:"storage_gb"`
 	CreatedAt      time.Time `json:"created_at"`
+	Tags           core.Tags `json:"tags,omitempty"`
 }
 
 func (s Snapshot) view() Snapshot { s.PasswordCT = ""; return s }
@@ -133,6 +139,9 @@ func (s *Service) Recover() {
 
 func New(env *svc.Env, v *vpc.Service, sec *secrets.Service) *Service {
 	s := &Service{env: env, vpc: v, secrets: sec, hostCPU: 1}
+	if env.Docker == nil {
+		return s
+	}
 	if info, err := env.Docker.C.Info(); err == nil && info.NCPU > 0 {
 		s.hostCPU = float64(info.NCPU)
 	}
@@ -270,6 +279,13 @@ type createInput struct {
 	BackupRetentionDays *int      `json:"backup_retention_days"`
 	DeletionProtection  bool      `json:"deletion_protection"`
 	Tags                core.Tags `json:"tags"`
+
+	// Set by the AWS API layer.
+	SubnetGroup    string            `json:"-"`
+	ParameterGroup string            `json:"-"`
+	SecurityGroups []string          `json:"-"`
+	ManagedSecret  bool              `json:"-"`
+	Settings       map[string]string `json:"-"`
 }
 
 func (s *Service) create(c *httpx.Ctx) (any, error) {
@@ -350,6 +366,8 @@ func (s *Service) provision(in createInput, snap *Snapshot) (Instance, error) {
 		MasterUsername: in.MasterUsername, DBName: in.DBName, VpcID: pl.VPC.ID, SubnetID: pl.Subnet.ID,
 		AvailabilityZone: pl.Subnet.AvailabilityZone, PubliclyAccessible: in.PubliclyAccessible,
 		BackupRetentionDays: retention, DeletionProtection: in.DeletionProtection, CreatedAt: core.Now(), Tags: in.Tags,
+		SubnetGroup: in.SubnetGroup, ParameterGroup: in.ParameterGroup, SecurityGroups: in.SecurityGroups,
+		ManagedSecret: in.ManagedSecret, Settings: in.Settings,
 		Endpoint: Endpoint{Address: in.ID + "." + serviceLabel(e.Kind) + ".internal", Port: e.DefaultPort, PrivateIP: pl.IP},
 	}
 	if snap != nil {
@@ -586,17 +604,19 @@ func (s *Service) requireStatus(i Instance, allowed ...string) error {
 	return nil
 }
 
-func (s *Service) start(c *httpx.Ctx) (any, error) {
-	i, err := s.get(c.Param("id"))
+func (s *Service) start(c *httpx.Ctx) (any, error) { return s.startInstance(c.Param("id")) }
+
+func (s *Service) startInstance(id string) (Instance, error) {
+	i, err := s.get(id)
 	if err != nil {
-		return nil, err
+		return Instance{}, err
 	}
 	if err := s.requireStatus(i, "stopped"); err != nil {
-		return nil, err
+		return Instance{}, err
 	}
 	unlock, err := s.lock(i.ID)
 	if err != nil {
-		return nil, err
+		return Instance{}, err
 	}
 	s.setStatus(i.ID, "starting", "")
 	go func() {
@@ -618,39 +638,43 @@ func (s *Service) start(c *httpx.Ctx) (any, error) {
 	return s.get(i.ID)
 }
 
-func (s *Service) stop(c *httpx.Ctx) (any, error) {
-	i, err := s.get(c.Param("id"))
+func (s *Service) stop(c *httpx.Ctx) (any, error) { return s.stopInstance(c.Param("id")) }
+
+func (s *Service) stopInstance(id string) (Instance, error) {
+	i, err := s.get(id)
 	if err != nil {
-		return nil, err
+		return Instance{}, err
 	}
 	if err := s.requireStatus(i, "available"); err != nil {
-		return nil, err
+		return Instance{}, err
 	}
 	unlock, err := s.lock(i.ID)
 	if err != nil {
-		return nil, err
+		return Instance{}, err
 	}
 	defer unlock()
 	s.setStatus(i.ID, "stopping", "")
 	if err := s.env.Docker.Stop(i.ContainerID, 30); err != nil {
 		s.setStatus(i.ID, "available", "")
-		return nil, err
+		return Instance{}, err
 	}
 	s.setStatus(i.ID, "stopped", "")
 	return s.get(i.ID)
 }
 
-func (s *Service) reboot(c *httpx.Ctx) (any, error) {
-	i, err := s.get(c.Param("id"))
+func (s *Service) reboot(c *httpx.Ctx) (any, error) { return s.rebootInstance(c.Param("id")) }
+
+func (s *Service) rebootInstance(id string) (Instance, error) {
+	i, err := s.get(id)
 	if err != nil {
-		return nil, err
+		return Instance{}, err
 	}
 	if err := s.requireStatus(i, "available"); err != nil {
-		return nil, err
+		return Instance{}, err
 	}
 	unlock, err := s.lock(i.ID)
 	if err != nil {
-		return nil, err
+		return Instance{}, err
 	}
 	s.setStatus(i.ID, "rebooting", "")
 	go func() {
@@ -672,40 +696,51 @@ func (s *Service) reboot(c *httpx.Ctx) (any, error) {
 	return s.get(i.ID)
 }
 
+type modifyInput struct {
+	Class               string    `json:"class"`
+	StorageGB           int       `json:"storage_gb"`
+	BackupRetentionDays *int      `json:"backup_retention_days"`
+	DeletionProtection  *bool     `json:"deletion_protection"`
+	Tags                core.Tags `json:"tags"`
+
+	// Set by the AWS API layer.
+	ParameterGroup *string
+	SecurityGroups []string
+	Settings       map[string]string
+}
+
 func (s *Service) modify(c *httpx.Ctx) (any, error) {
-	var in struct {
-		Class               string    `json:"class"`
-		StorageGB           int       `json:"storage_gb"`
-		BackupRetentionDays *int      `json:"backup_retention_days"`
-		DeletionProtection  *bool     `json:"deletion_protection"`
-		Tags                core.Tags `json:"tags"`
-	}
+	var in modifyInput
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	i, err := s.get(c.Param("id"))
+	return s.modifyInstance(c.Param("id"), in)
+}
+
+func (s *Service) modifyInstance(id string, in modifyInput) (Instance, error) {
+	i, err := s.get(id)
 	if err != nil {
-		return nil, err
+		return Instance{}, err
 	}
 	var cl InstanceClass
 	if in.Class != "" && in.Class != i.Class {
 		var ok bool
 		if cl, ok = findClass(in.Class); !ok {
-			return nil, core.BadRequest("unknown instance class %q", in.Class)
+			return Instance{}, core.BadRequest("unknown instance class %q", in.Class)
 		}
 		if err := s.requireStatus(i, "available", "stopped"); err != nil {
-			return nil, err
+			return Instance{}, err
 		}
 		mem := cl.MemoryMB * 1024 * 1024
 		if err := s.env.Docker.C.UpdateContainer(i.ContainerID, docker.UpdateContainerOptions{
 			Memory: int(mem), MemorySwap: int(mem * 2), CPUPeriod: 100000, CPUQuota: int(min(cl.VCPUs, s.hostCPU) * 100000),
 		}); err != nil {
-			return nil, fmt.Errorf("resize: %w", err)
+			return Instance{}, fmt.Errorf("resize: %w", err)
 		}
 	}
 	e, _ := findEngine(i.Engine)
 	if in.BackupRetentionDays != nil && (*in.BackupRetentionDays < 0 || *in.BackupRetentionDays > 35 || (e.dump == nil && *in.BackupRetentionDays > 0)) {
-		return nil, core.BadRequest("backup_retention_days must be 0-35 (and 0 for engines without backup support)")
+		return Instance{}, core.BadRequest("backup_retention_days must be 0-35 (and 0 for engines without backup support)")
 	}
 	return store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error {
 		if cl.Name != "" {
@@ -723,32 +758,57 @@ func (s *Service) modify(c *httpx.Ctx) (any, error) {
 		if in.Tags != nil {
 			x.Tags = in.Tags
 		}
+		if in.ParameterGroup != nil {
+			x.ParameterGroup = *in.ParameterGroup
+		}
+		if in.SecurityGroups != nil {
+			x.SecurityGroups = in.SecurityGroups
+		}
+		if len(in.Settings) > 0 {
+			m := map[string]string{}
+			for k, v := range x.Settings {
+				m[k] = v
+			}
+			for k, v := range in.Settings {
+				m[k] = v
+			}
+			x.Settings = m
+		}
 		return nil
 	})
 }
 
 func (s *Service) delete(c *httpx.Ctx) (any, error) {
-	i, err := s.get(c.Param("id"))
+	final := ""
+	if c.Query("final_snapshot") == "true" {
+		final = c.Param("id") + "-final-" + time.Now().UTC().Format("20060102150405")
+	}
+	return nil, s.deleteInstance(c.R.Context(), c.Param("id"), final, c.Query("delete_automated_backups") != "false")
+}
+
+// deleteInstance removes an instance, taking a final snapshot named finalSnap first when set.
+func (s *Service) deleteInstance(ctx context.Context, id, finalSnap string, deleteBackups bool) error {
+	i, err := s.get(id)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	if i.DeletionProtection {
-		return nil, core.Errf(http.StatusConflict, "InvalidParameterCombination", "deletion protection is enabled for %s", i.ID)
+		return core.Errf(http.StatusConflict, "InvalidParameterCombination", "deletion protection is enabled for %s", i.ID)
 	}
 	unlock, err := s.lock(i.ID)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	defer unlock()
-	if c.Query("final_snapshot") == "true" && i.Status == "available" {
-		if _, err := s.snapshot(c.R.Context(), i, "manual", i.ID+"-final-"+time.Now().UTC().Format("20060102150405")); err != nil {
-			return nil, fmt.Errorf("final snapshot failed (instance kept): %w", err)
+	if finalSnap != "" && i.Status == "available" {
+		if _, err := s.snapshot(ctx, i, "manual", finalSnap); err != nil {
+			return fmt.Errorf("final snapshot failed (instance kept): %w", err)
 		}
 	}
 	s.setStatus(i.ID, "deleting", "")
 	if i.ContainerID != "" {
 		if err := s.env.Docker.Remove(i.ContainerID); err != nil {
-			return nil, err
+			return err
 		}
 	}
 	_ = s.env.Docker.RemoveVolume(volumeName(i.ID))
@@ -756,14 +816,14 @@ func (s *Service) delete(c *httpx.Ctx) (any, error) {
 		s.secrets.Remove(i.SecretName)
 	}
 	s.vpc.Release("db:" + i.ID)
-	if c.Query("delete_automated_backups") != "false" {
+	if deleteBackups {
 		for _, sn := range store.List[Snapshot](s.env.Store, cSnapshots) {
 			if sn.SourceInstance == i.ID && sn.Type == "automated" {
 				s.removeSnapshot(sn.ID)
 			}
 		}
 	}
-	return nil, store.Delete(s.env.Store, cInstances, i.ID)
+	return store.Delete(s.env.Store, cInstances, i.ID)
 }
 
 func (s *Service) resetPassword(c *httpx.Ctx) (any, error) {
@@ -773,7 +833,13 @@ func (s *Service) resetPassword(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	i, err := s.get(c.Param("id"))
+	return s.setPassword(c.R.Context(), c.Param("id"), in.Password)
+}
+
+// setPassword changes the master password (a generated one when empty).
+func (s *Service) setPassword(ctx context.Context, id, password string) (any, error) {
+	in := struct{ Password string }{password}
+	i, err := s.get(id)
 	if err != nil {
 		return nil, err
 	}
@@ -803,7 +869,7 @@ func (s *Service) resetPassword(c *httpx.Ctx) (any, error) {
 	default:
 		return nil, core.BadRequest("password rotation is not supported for engine %s; create a new cluster from a snapshot instead", i.Engine)
 	}
-	res, err := s.env.Docker.Exec(c.R.Context(), i.ContainerID, cmd, nil)
+	res, err := s.env.Docker.Exec(ctx, i.ContainerID, cmd, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -963,29 +1029,42 @@ func (s *Service) createSnapshot(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	i, err := s.get(c.Param("id"))
+	sn, err := s.takeSnapshot(c.R.Context(), c.Param("id"), in.ID, nil)
 	if err != nil {
 		return nil, err
 	}
+	return sn, nil
+}
+
+// takeSnapshot makes a manual snapshot of an instance.
+func (s *Service) takeSnapshot(ctx context.Context, instID, snapID string, tags core.Tags) (Snapshot, error) {
+	in := struct{ ID string }{snapID}
+	i, err := s.get(instID)
+	if err != nil {
+		return Snapshot{}, err
+	}
 	if err := s.requireStatus(i, "available"); err != nil {
-		return nil, err
+		return Snapshot{}, err
 	}
 	if in.ID == "" {
 		in.ID = i.ID + "-" + time.Now().UTC().Format("20060102-150405")
 	}
 	if !idRe.MatchString(in.ID) {
-		return nil, core.BadRequest("snapshot id must start with a letter and contain only lowercase letters, digits and hyphens")
+		return Snapshot{}, core.BadRequest("snapshot id must start with a letter and contain only lowercase letters, digits and hyphens")
 	}
 	unlock, err := s.lock(i.ID)
 	if err != nil {
-		return nil, err
+		return Snapshot{}, err
 	}
 	defer unlock()
 	s.setStatus(i.ID, "backing-up", "")
 	defer s.setStatus(i.ID, "available", "")
-	sn, err := s.snapshot(c.R.Context(), i, "manual", in.ID)
+	sn, err := s.snapshot(ctx, i, "manual", in.ID)
 	if err != nil {
-		return nil, err
+		return Snapshot{}, err
+	}
+	if len(tags) > 0 {
+		sn, _ = store.Update(s.env.Store, cSnapshots, sn.ID, func(x *Snapshot) error { x.Tags = tags; return nil })
 	}
 	return sn.view(), nil
 }
@@ -1020,9 +1099,13 @@ func (s *Service) restore(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	sn, err := store.Get[Snapshot](s.env.Store, cSnapshots, c.Param("snap"))
+	return s.restoreSnapshot(c.Param("snap"), in)
+}
+
+func (s *Service) restoreSnapshot(snapID string, in createInput) (any, error) {
+	sn, err := store.Get[Snapshot](s.env.Store, cSnapshots, snapID)
 	if err != nil {
-		return nil, core.NotFound("snapshot", c.Param("snap"))
+		return nil, core.NotFound("snapshot", snapID)
 	}
 	if sn.Status != "available" {
 		return nil, core.Errf(http.StatusConflict, "InvalidDBSnapshotState", "snapshot %s is %s", sn.ID, sn.Status)
