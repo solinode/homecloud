@@ -244,8 +244,7 @@ func (s *Service) expire() {
 }
 
 func (s *Service) queueURL(name string) string {
-	_, port, _ := strings.Cut(s.env.Cfg.APIAddr, ":")
-	return fmt.Sprintf("http://%s:%s/api/v1/sqs/queues/%s", s.env.Cfg.PublicHost, port, name)
+	return s.env.Cfg.PublicBase() + "/api/v1/sqs/queues/" + name
 }
 
 func errNoQueue(name string) error {

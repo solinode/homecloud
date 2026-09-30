@@ -389,13 +389,8 @@ func (s *Service) getBucket(c *httpx.Ctx) (any, error) {
 		"name": name, "arn": "arn:aws:s3:::" + name, "region": s.env.Cfg.Region, "versioning": ver.Status, "created_at": created,
 		"public": s.isPublic(ctx, cl, name), "policy": policy, "object_count": count, "size_bytes": size, "stats_truncated": truncated,
 		"website": m.Website, "index_document": m.IndexDocument, "error_document": m.ErrorDocument, "lifecycle_rules": rules, "tags": m.Tags,
-		"website_url": fmt.Sprintf("http://%s/website/%s/", s.apiHost(), name),
+		"website_url": fmt.Sprintf("%s/website/%s/", s.env.Cfg.PublicBase(), name),
 	}, nil
-}
-
-func (s *Service) apiHost() string {
-	_, port, _ := strings.Cut(s.env.Cfg.APIAddr, ":")
-	return s.env.Cfg.PublicHost + ":" + port
 }
 
 func (s *Service) deleteBucket(c *httpx.Ctx) (any, error) {

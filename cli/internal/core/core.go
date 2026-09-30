@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"log"
 	"math/big"
+	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"runtime/debug"
@@ -39,6 +41,20 @@ type Config struct {
 	DataDir    string `json:"data_dir"`
 	APIAddr    string `json:"api_addr"`
 	PublicHost string `json:"public_host"` // host name clients use to reach published ports
+	// PublicURL is the base URL clients reach the API at when it differs from
+	// scheme://public_host:<api port>, e.g. https://cloud.example.com behind a
+	// reverse proxy on 443. Every URL HomeCloud generates for clients (API
+	// Gateway endpoints, function URLs, queue URLs, issuers, website links)
+	// starts with it. Workloads keep using the internal address.
+	PublicURL string `json:"public_url,omitempty"`
+	// TrustedProxies lists CIDRs (or bare IPs) of reverse proxies whose
+	// X-Forwarded-For and X-Forwarded-Proto headers are believed.
+	TrustedProxies []string `json:"trusted_proxies,omitempty"`
+	// ServiceBind is the host address the MinIO and MinIO console ports are
+	// published on (default 127.0.0.1: Docker publishing bypasses host
+	// firewalls such as ufw); DNSBind is the same for the DNS server.
+	ServiceBind string `json:"service_bind,omitempty"`
+	DNSBind     string `json:"dns_bind,omitempty"`
 	// ElasticIPPool is the IPv4 CIDR Elastic IPs are allocated from
 	// (default 203.0.113.0/24, a documentation range: the addresses are
 	// records, not routed).
@@ -74,6 +90,78 @@ func DefaultConfig() Config {
 		DNSPort:       8053,
 		Region:        DefaultRegion,
 	}
+}
+
+// TLS reports whether the API is served over HTTPS by HomeCloud itself.
+func (c Config) TLS() bool { return c.TLSCert != "" }
+
+// APIPort is the port the API listens on.
+func (c Config) APIPort() string {
+	if _, port, err := net.SplitHostPort(c.APIAddr); err == nil {
+		return port
+	}
+	_, port, _ := strings.Cut(c.APIAddr, ":")
+	return port
+}
+
+// PublicBase is the API's base URL as clients reach it, without a trailing slash.
+func (c Config) PublicBase() string {
+	if u := strings.TrimRight(strings.TrimSpace(c.PublicURL), "/"); u != "" {
+		return u
+	}
+	scheme := "http"
+	if c.TLS() {
+		scheme = "https"
+	}
+	return scheme + "://" + net.JoinHostPort(c.PublicHost, c.APIPort())
+}
+
+// PublicHostname is the host name in PublicBase.
+func (c Config) PublicHostname() string {
+	if u, err := url.Parse(c.PublicBase()); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	return c.PublicHost
+}
+
+// ValidatePublicURL checks a --public-url value: an absolute http(s) URL with
+// no query or fragment.
+func ValidatePublicURL(v string) error {
+	if v == "" {
+		return nil
+	}
+	u, err := url.Parse(v)
+	if err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Hostname() == "" || u.RawQuery != "" || u.Fragment != "" || u.User != nil {
+		return fmt.Errorf("--public-url must look like https://cloud.example.com (scheme, host, optional port and path prefix), got %q", v)
+	}
+	return nil
+}
+
+// Normalize fills settings derived from others: with a public URL and no
+// explicit public host, published ports (load balancers, instances) are
+// reached through the URL's host name.
+func (c *Config) Normalize() {
+	if c.PublicURL != "" && (c.PublicHost == "" || c.PublicHost == "localhost") {
+		if u, err := url.Parse(c.PublicURL); err == nil && u.Hostname() != "" {
+			c.PublicHost = u.Hostname()
+		}
+	}
+}
+
+// ServiceBindAddr is where MinIO's ports are published on the host.
+func (c Config) ServiceBindAddr() string {
+	if c.ServiceBind != "" {
+		return c.ServiceBind
+	}
+	return "127.0.0.1"
+}
+
+// DNSBindAddr is where the DNS server's port is published on the host.
+func (c Config) DNSBindAddr() string {
+	if c.DNSBind != "" {
+		return c.DNSBind
+	}
+	return "127.0.0.1"
 }
 
 func (c Config) Path(parts ...string) string {

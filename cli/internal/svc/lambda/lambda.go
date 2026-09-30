@@ -20,7 +20,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -225,8 +224,7 @@ func (s *Service) codeFile(f Function) string {
 }
 
 func (s *Service) urlFor(name string) string {
-	_, port, _ := strings.Cut(s.env.Cfg.APIAddr, ":")
-	return fmt.Sprintf("http://%s:%s/lambda-url/%s/", s.env.Cfg.PublicHost, port, name)
+	return s.publicBase() + "/lambda-url/" + name + "/"
 }
 
 func fnNotFound(arn string) error {
