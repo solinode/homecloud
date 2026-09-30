@@ -315,6 +315,7 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("GET /api/v1/ec2/instances/{id}/terminal", "ec2-instance-connect:SendSSHPublicKey", s.terminal, res)
 
 	r.Handle("GET /api/v1/ec2/instance-types", "ec2:DescribeInstanceTypes", s.listTypes)
+	r.Handle("GET /api/v1/ec2/capabilities", "ec2:DescribeInstanceTypes", s.capabilities)
 	r.Handle("GET /api/v1/ec2/images", "ec2:DescribeImages", s.listImages)
 	r.Handle("POST /api/v1/ec2/images", "ec2:RegisterImage", s.registerImage)
 	imgRes := httpx.Res("arn:aws:ec2:{region}:{account}:image/{id}")
