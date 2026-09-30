@@ -1,6 +1,7 @@
 package cfn_test
 
 import (
+	"encoding/json"
 	"fmt"
 	"strings"
 	"sync/atomic"
@@ -96,6 +97,126 @@ func TestUpdateInPlace(t *testing.T) {
 	tags := e.AWSJSON(t, "sqs", "list-queue-tags", "--queue-url", url)["Tags"].(map[string]any)
 	if tags["v"] != "90" {
 		t.Fatalf("queue tags: %v", tags)
+	}
+}
+
+// TestUpdateCoreTypesInPlace changes settings of most resource types in place: nothing may be deleted.
+func TestUpdateCoreTypesInPlace(t *testing.T) {
+	e := newEnv(t, true)
+	acct := e.Env.AccountID
+	e.AWS(t, "cloudformation", "create-stack", "--stack-name", "core", "--template-body", "file://"+write(t, "core.yaml", coreTemplate), "--capabilities", "CAPABILITY_NAMED_IAM")
+	e.waitFor(t, "core", "CREATE_COMPLETE")
+	physical := func() string {
+		var out []string
+		for _, r := range e.AWSJSON(t, "cloudformation", "list-stack-resources", "--stack-name", "core")["StackResourceSummaries"].([]any) {
+			m := r.(map[string]any)
+			out = append(out, str(m, "LogicalResourceId")+"="+str(m, "PhysicalResourceId"))
+		}
+		return strings.Join(out, " ")
+	}
+	before := physical()
+	password := func() string {
+		var val map[string]string
+		_ = json.Unmarshal([]byte(str(e.AWSJSON(t, "secretsmanager", "get-secret-value", "--secret-id", "core/db"), "SecretString")), &val)
+		return val["password"]
+	}
+	pw := password()
+
+	next := strings.NewReplacer(
+		"TimeToLiveSpecification: {AttributeName: expires, Enabled: true}", "TimeToLiveSpecification: {AttributeName: expires2, Enabled: true}",
+		"StreamViewType: NEW_AND_OLD_IMAGES", "StreamViewType: NEW_IMAGE",
+		"Tags: [{Key: app, Value: core}]", "Tags: [{Key: app, Value: core2}]",
+		"RetentionInDays: 14", "RetentionInDays: 30",
+		"Description: generated", "Description: rotated",
+		"DisplayName: core", "DisplayName: core2",
+		"State: DISABLED", "State: ENABLED",
+		"Description: every hour", "Description: hourly",
+		"Description: state machine role", "Description: machine role v2",
+		"MaxSessionDuration: 7200", "MaxSessionDuration: 3600",
+		`Action: "sqs:SendMessage", Resource: "*"`, `Action: "sqs:ReceiveMessage", Resource: "*"`,
+		"Tags: [{Key: t, Value: v}]", "Tags: [{Key: t, Value: v2}]",
+		`Action: "sns:Publish", Resource: !Ref Topic`, `Action: "sns:Subscribe", Resource: !Ref Topic`,
+		"VersioningConfiguration: {Status: Enabled}", "VersioningConfiguration: {Status: Suspended}",
+		"Tags: [{Key: env, Value: test}]", "Tags: [{Key: env, Value: prod}]",
+		"Action: s3:GetObject", "Action: s3:GetObjectVersion",
+		"Principal: {Service: events.amazonaws.com}", "Principal: {Service: sns.amazonaws.com}",
+	).Replace(coreTemplate)
+	if next == coreTemplate {
+		t.Fatal("nothing replaced")
+	}
+	e.AWS(t, "cloudformation", "create-change-set", "--stack-name", "core", "--change-set-name", "peek", "--template-body", "file://"+write(t, "core2.yaml", next), "--capabilities", "CAPABILITY_NAMED_IAM")
+	d := e.AWSJSON(t, "cloudformation", "describe-change-set", "--stack-name", "core", "--change-set-name", "peek")
+	for _, c := range d["Changes"].([]any) {
+		rc := c.(map[string]any)["ResourceChange"].(map[string]any)
+		id := str(rc, "LogicalResourceId")
+		// The bucket policy has no in-place update: it is replaced by writing the same policy again.
+		if str(rc, "Replacement") != "False" && id != "BucketPolicy" {
+			t.Errorf("%s: replacement %v", id, rc["Replacement"])
+		}
+	}
+	e.AWS(t, "cloudformation", "update-stack", "--stack-name", "core", "--template-body", "file://"+write(t, "core2b.yaml", next), "--capabilities", "CAPABILITY_NAMED_IAM")
+	e.waitFor(t, "core", "UPDATE_COMPLETE")
+	for _, ev := range e.events(t, "core") {
+		if strings.HasPrefix(str(ev, "ResourceStatus"), "DELETE_") {
+			t.Errorf("update deleted %s (%s)", str(ev, "LogicalResourceId"), str(ev, "ResourceStatus"))
+		}
+	}
+	if after := physical(); after != before {
+		t.Fatalf("physical IDs changed:\n%s\n%s", before, after)
+	}
+	if t.Failed() {
+		t.FailNow()
+	}
+
+	tbl := e.AWSJSON(t, "dynamodb", "describe-table", "--table-name", "core-orders")["Table"].(map[string]any)
+	if tbl["StreamSpecification"].(map[string]any)["StreamViewType"] != "NEW_IMAGE" {
+		t.Fatalf("stream: %v", tbl["StreamSpecification"])
+	}
+	if ttl := e.AWSJSON(t, "dynamodb", "describe-time-to-live", "--table-name", "core-orders")["TimeToLiveDescription"].(map[string]any); ttl["AttributeName"] != "expires2" {
+		t.Fatalf("ttl: %v", ttl)
+	}
+	if lg := e.AWSJSON(t, "logs", "describe-log-groups", "--log-group-name-prefix", "/core")["logGroups"].([]any); lg[0].(map[string]any)["retentionInDays"] != float64(30) {
+		t.Fatalf("log groups: %v", lg)
+	}
+	if password() != pw {
+		t.Fatal("a generated secret changed although its recipe did not")
+	}
+	if s := e.AWSJSON(t, "secretsmanager", "describe-secret", "--secret-id", "core/db"); str(s, "Description") != "rotated" {
+		t.Fatalf("secret: %v", s)
+	}
+	if o := e.AWS(t, "sns", "get-topic-attributes", "--topic-arn", "arn:aws:sns:us-east-1:"+acct+":core-topic"); !strings.Contains(o, "core2") {
+		t.Fatalf("topic: %s", o)
+	}
+	if r := e.AWSJSON(t, "events", "describe-rule", "--name", "core-rule"); str(r, "State") != "ENABLED" || str(r, "Description") != "hourly" {
+		t.Fatalf("rule: %v", r)
+	}
+	if tg := e.AWSJSON(t, "events", "list-targets-by-rule", "--rule", "core-rule")["Targets"].([]any); len(tg) != 1 {
+		t.Fatalf("targets: %v", tg)
+	}
+	role := e.AWSJSON(t, "iam", "get-role", "--role-name", "core-machine-role")["Role"].(map[string]any)
+	if role["MaxSessionDuration"] != float64(3600) || str(role, "Description") != "machine role v2" {
+		t.Fatalf("role: %v", role)
+	}
+	if o := e.AWS(t, "iam", "get-role-policy", "--role-name", "core-machine-role", "--policy-name", "inline"); !strings.Contains(o, "sqs:ReceiveMessage") {
+		t.Fatalf("inline policy: %s", o)
+	}
+	if o := e.AWS(t, "iam", "get-role-policy", "--role-name", "core-machine-role", "--policy-name", "attached"); !strings.Contains(o, "sns:Subscribe") {
+		t.Fatalf("attached policy: %s", o)
+	}
+	if o := e.AWS(t, "iam", "list-role-tags", "--role-name", "core-machine-role"); !strings.Contains(o, `"v2"`) {
+		t.Fatalf("role tags: %s", o)
+	}
+	if v := e.AWSJSON(t, "s3api", "get-bucket-versioning", "--bucket", "core-bucket-cfn"); v["Status"] != "Suspended" {
+		t.Fatalf("versioning: %v", v)
+	}
+	if o := e.AWS(t, "s3api", "get-bucket-tagging", "--bucket", "core-bucket-cfn"); !strings.Contains(o, "prod") {
+		t.Fatalf("bucket tags: %s", o)
+	}
+	if o := e.AWS(t, "s3api", "get-bucket-policy", "--bucket", "core-bucket-cfn"); !strings.Contains(o, "GetObjectVersion") {
+		t.Fatalf("bucket policy after being written again: %s", o)
+	}
+	if o := e.AWS(t, "sqs", "get-queue-attributes", "--queue-url", str(e.AWSJSON(t, "sqs", "get-queue-url", "--queue-name", "core-queue"), "QueueUrl"), "--attribute-names", "Policy"); !strings.Contains(o, "sns.amazonaws.com") {
+		t.Fatalf("queue policy: %s", o)
 	}
 }
 

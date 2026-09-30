@@ -179,7 +179,8 @@ Outputs:
 func TestLambdaStack(t *testing.T) {
 	e := newLambdaEnv(t, false)
 	acct := e.Env.AccountID
-	tf := write(t, "lambda.yaml", strings.Replace(lambdaTemplate, `"123456789012"`, `"`+acct+`"`, 1))
+	body := strings.Replace(lambdaTemplate, `"123456789012"`, `"`+acct+`"`, 1)
+	tf := write(t, "lambda.yaml", body)
 	e.AWS(t, "cloudformation", "create-stack", "--stack-name", "fnstack", "--template-body", "file://"+tf, "--capabilities", "CAPABILITY_IAM")
 	out := outputs(e.waitFor(t, "fnstack", "CREATE_COMPLETE"))
 
@@ -247,6 +248,28 @@ func TestLambdaStack(t *testing.T) {
 	routes := e.AWSJSON(t, "apigatewayv2", "get-routes", "--api-id", out["ApiId"])["Items"].([]any)
 	if len(routes) != 1 || routes[0].(map[string]any)["RouteKey"] != "GET /hello" {
 		t.Fatalf("routes: %v", routes)
+	}
+
+	// Code and configuration change in place: the function keeps its name, ARN, URL, mapping and version.
+	v2 := strings.NewReplacer("Description: from a stack", "Description: second", "Timeout: 7", "Timeout: 9", "STAGE: prod", "STAGE: dev",
+		`"body": "hello"`, `"body": "hello again"`).Replace(body)
+	e.AWS(t, "cloudformation", "update-stack", "--stack-name", "fnstack", "--template-body", "file://"+write(t, "lambda2.yaml", v2), "--capabilities", "CAPABILITY_IAM")
+	up := outputs(e.waitFor(t, "fnstack", "UPDATE_COMPLETE"))
+	if up["FnName"] != fnName || up["FnArn"] != fnArn || up["MapId"] != out["MapId"] || up["UrlValue"] != out["UrlValue"] {
+		t.Fatalf("outputs changed: %v -> %v", out, up)
+	}
+	cfg = e.AWSJSON(t, "lambda", "get-function", "--function-name", fnName)["Configuration"].(map[string]any)
+	if cfg["Description"] != "second" || cfg["Timeout"].(float64) != 9 || cfg["MemorySize"].(float64) != 256 ||
+		cfg["Environment"].(map[string]any)["Variables"].(map[string]any)["STAGE"] != "dev" {
+		t.Fatalf("configuration after the update: %v", cfg)
+	}
+	if code := e.Native(t, "GET", "/api/v1/lambda/functions/"+fnName+"/code", nil); !strings.Contains(string(code), "hello again") {
+		t.Fatalf("code after the update: %s", code)
+	}
+	for _, ev := range e.events(t, "fnstack") {
+		if strings.HasPrefix(str(ev, "ResourceStatus"), "DELETE_") {
+			t.Fatalf("the update deleted %s", str(ev, "LogicalResourceId"))
+		}
 	}
 
 	// Deleting the stack removes everything it made.

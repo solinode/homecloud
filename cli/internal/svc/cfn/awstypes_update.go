@@ -577,8 +577,17 @@ func init() {
 					}
 				}
 			}
+			// Only rules this resource made are removed: SecurityGroupIngress resources add their own.
+			mine := map[string]bool{}
+			for _, e := range lv(old, "SecurityGroupIngress") {
+				if m, ok := e.(map[string]any); ok {
+					if rule, ok := ingressRule(m); ok {
+						mine[key(rule)] = true
+					}
+				}
+			}
 			for k, id := range have {
-				if !wanted[k] {
+				if mine[k] && !wanted[k] {
 					if _, err := x.Call("DELETE", base+"/ingress/"+esc(id), nil); err != nil && !gone(err) {
 						return nil, err
 					}
