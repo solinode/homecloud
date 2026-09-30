@@ -175,12 +175,16 @@ func (s *Service) createCustomerKey(az Authz, in CreateKeyInput) (Key, error) {
 	if err := validSpec(&ks); err != nil {
 		return Key{}, err
 	}
-	if in.Origin != "" && in.Origin != "AWS_KMS" {
-		return Key{}, errf("UnsupportedOperationException", "Origin %s is not supported; only AWS_KMS", in.Origin)
+	switch in.Origin {
+	case "", originKMS:
+		in.Origin = originKMS
+	case originExternal:
+	case "AWS_CLOUDHSM", "EXTERNAL_KEY_STORE":
+		return Key{}, errf("UnsupportedOperationException", "Origin %s is not supported; only AWS_KMS and EXTERNAL", in.Origin)
+	default:
+		return Key{}, core.BadRequest("Origin %q is invalid", in.Origin)
 	}
-	if in.MultiRegion {
-		return Key{}, errf("UnsupportedOperationException", "multi-Region keys are not supported")
-	}
+	ks.Origin, ks.MultiRegion = in.Origin, in.MultiRegion
 	if len(in.Description) > 8192 {
 		return Key{}, core.BadRequest("Description must be at most 8192 characters")
 	}
@@ -227,6 +231,9 @@ func (s *Service) setEnabled(az Authz, ref string, enabled bool) (Key, error) {
 		if err := notPending(k); err != nil {
 			return err
 		}
+		if k.State == stateImport {
+			return errf("KMSInvalidStateException", "%s is pending import.", k.ARN)
+		}
 		k.State = state
 		return nil
 	})
@@ -246,6 +253,9 @@ func (s *Service) updateDescription(az Authz, ref, desc string) (Key, error) {
 }
 
 func rotatable(k *Key) error {
+	if k.external() {
+		return errf("UnsupportedOperationException", "%s has imported key material; rotation is not supported for it.", k.ARN)
+	}
 	if !k.symmetric() {
 		return errf("UnsupportedOperationException", "%s is not a symmetric encryption key; only those keys support rotation.", k.ARN)
 	}
@@ -331,6 +341,9 @@ func (s *Service) cancelDeletion(az Authz, ref string) (Key, error) {
 			return errf("KMSInvalidStateException", "%s is not pending deletion.", k.ARN)
 		}
 		k.State, k.DeletionDate, k.PendingWindow = stateDisabled, nil, 0
+		if !k.hasMaterial() {
+			k.State = stateImport
+		}
 		return nil
 	})
 }

@@ -8,6 +8,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi"
 	"github.com/homecloudhq/homecloud/cli/internal/core"
@@ -61,6 +62,11 @@ func (s *Service) RegisterAWS() {
 			"ListGrants":                          s.awsListGrants,
 			"RevokeGrant":                         s.awsRevokeGrant,
 			"RetireGrant":                         s.awsRetireGrant,
+			"GetParametersForImport":              s.awsGetParametersForImport,
+			"ImportKeyMaterial":                   s.awsImportKeyMaterial,
+			"DeleteImportedKeyMaterial":           s.awsDeleteImportedKeyMaterial,
+			"ReplicateKey":                        s.awsReplicateKey,
+			"UpdatePrimaryRegion":                 s.awsUpdatePrimaryRegion,
 		},
 	})
 }
@@ -68,7 +74,21 @@ func (s *Service) RegisterAWS() {
 func metadata(k Key) map[string]any {
 	m := map[string]any{"AWSAccountId": strings.Split(k.ARN, ":")[4], "KeyId": k.ID, "Arn": k.ARN, "CreationDate": epochT(k.CreatedAt),
 		"Enabled": k.State == stateEnabled, "Description": k.Description, "KeyUsage": k.KeyUsage, "KeyState": k.State,
-		"Origin": "AWS_KMS", "KeyManager": "CUSTOMER", "CustomerMasterKeySpec": k.KeySpec, "KeySpec": k.KeySpec, "MultiRegion": false}
+		"Origin": originKMS, "KeyManager": "CUSTOMER", "CustomerMasterKeySpec": k.KeySpec, "KeySpec": k.KeySpec, "MultiRegion": k.MultiRegion}
+	if k.external() {
+		m["Origin"] = originExternal
+		if k.ExpirationModel != "" {
+			m["ExpirationModel"] = k.ExpirationModel
+		}
+		if k.ValidTo != nil {
+			m["ValidTo"] = epochT(*k.ValidTo)
+		}
+	}
+	if k.MultiRegion {
+		region := strings.Split(k.ARN, ":")[3]
+		m["MultiRegionConfiguration"] = map[string]any{"MultiRegionKeyType": "PRIMARY",
+			"PrimaryKey": map[string]any{"Arn": k.ARN, "Region": region}, "ReplicaKeys": []any{}}
+	}
 	if k.KeySpec == "" {
 		m["KeySpec"], m["CustomerMasterKeySpec"] = specSym, specSym
 	}
@@ -207,6 +227,91 @@ func (s *Service) awsListKeys(q *awsapi.Req) (any, error) {
 	}
 	out["Keys"] = items
 	return out, nil
+}
+
+func (s *Service) awsGetParametersForImport(q *awsapi.Req) (any, error) {
+	var in struct{ KeyId, WrappingAlgorithm, WrappingKeySpec string }
+	if err := q.Bind(&in); err != nil {
+		return nil, err
+	}
+	p, err := s.getParametersForImport(q.Authorize, in.KeyId, in.WrappingAlgorithm, in.WrappingKeySpec)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"KeyId": p.KeyARN, "ImportToken": p.Token, "PublicKey": p.PublicKey, "ParametersValidTo": epochT(p.ValidTo)}, nil
+}
+
+func (s *Service) awsImportKeyMaterial(q *awsapi.Req) (any, error) {
+	var in struct {
+		KeyId, ExpirationModel string
+		ImportToken            []byte
+		EncryptedKeyMaterial   []byte
+		ValidTo                *awsapi.Time
+	}
+	if err := q.Bind(&in); err != nil {
+		return nil, err
+	}
+	var vt *time.Time
+	if in.ValidTo != nil {
+		vt = &in.ValidTo.Time
+	}
+	_, err := s.importKeyMaterial(q.Authorize, in.KeyId, in.ImportToken, in.EncryptedKeyMaterial, vt, in.ExpirationModel)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{}, nil
+}
+
+func (s *Service) awsDeleteImportedKeyMaterial(q *awsapi.Req) (any, error) {
+	var in keyIn
+	if err := q.Bind(&in); err != nil {
+		return nil, err
+	}
+	k, err := s.deleteImportedKeyMaterial(q.Authorize, in.KeyId)
+	if err != nil {
+		return nil, err
+	}
+	return map[string]any{"KeyId": k.ARN}, nil
+}
+
+// HomeCloud is one region, so a multi-Region key can only have its primary here.
+func (s *Service) awsReplicateKey(q *awsapi.Req) (any, error) {
+	var in struct{ KeyId, ReplicaRegion string }
+	if err := q.Bind(&in); err != nil {
+		return nil, err
+	}
+	k, err := s.keyFor(q.Authorize, "kms:ReplicateKey", in.KeyId)
+	if err != nil {
+		return nil, err
+	}
+	if in.ReplicaRegion == "" {
+		return nil, awsapi.Errorf(http.StatusBadRequest, "ValidationException", "ReplicaRegion is required")
+	}
+	if !k.MultiRegion {
+		return nil, awsapi.Errorf(http.StatusBadRequest, "UnsupportedOperationException", "%s is not a multi-Region key.", k.ARN)
+	}
+	if in.ReplicaRegion == strings.Split(k.ARN, ":")[3] {
+		return nil, awsapi.Errorf(http.StatusBadRequest, "AlreadyExistsException", "%s already has a key in %s (its primary).", k.ARN, in.ReplicaRegion)
+	}
+	return nil, awsapi.Errorf(http.StatusBadRequest, "UnsupportedOperationException", "HomeCloud serves a single region (%s), so multi-Region keys have no replicas: ReplicaRegion %s is not available.", strings.Split(k.ARN, ":")[3], in.ReplicaRegion)
+}
+
+func (s *Service) awsUpdatePrimaryRegion(q *awsapi.Req) (any, error) {
+	var in struct{ KeyId, PrimaryRegion string }
+	if err := q.Bind(&in); err != nil {
+		return nil, err
+	}
+	k, err := s.keyFor(q.Authorize, "kms:UpdatePrimaryRegion", in.KeyId)
+	if err != nil {
+		return nil, err
+	}
+	if !k.MultiRegion {
+		return nil, awsapi.Errorf(http.StatusBadRequest, "UnsupportedOperationException", "%s is not a multi-Region key.", k.ARN)
+	}
+	if in.PrimaryRegion == strings.Split(k.ARN, ":")[3] {
+		return nil, awsapi.Errorf(http.StatusBadRequest, "UnsupportedOperationException", "%s is already the primary key in %s.", k.ARN, in.PrimaryRegion)
+	}
+	return nil, awsapi.Errorf(http.StatusBadRequest, "UnsupportedOperationException", "HomeCloud serves a single region, so the primary region of a multi-Region key cannot move to %s.", in.PrimaryRegion)
 }
 
 func (s *Service) awsEnableKey(q *awsapi.Req) (any, error) {

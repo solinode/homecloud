@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- KMS supports imported key material (`create-key --origin EXTERNAL`, `get-parameters-for-import`, `import-key-material` with `RSAES_OAEP_SHA_1/256` and `RSA_AES_KEY_WRAP_SHA_1/256`, `ValidTo` expiry, `delete-imported-key-material`; only the same material can be imported again) and multi-Region primary keys (`--multi-region`, `mrk-` ids). `ReplicateKey` and `UpdatePrimaryRegion` return `UnsupportedOperationException` because HomeCloud runs a single region.
 - `homecloud configure` accepts `--ca-file` and `--region`, and keeps the region and `ca_file` already in the credentials file when it rewrites it (#79).
 - With `--addr 0.0.0.0:8080` (or `[::]`) the credentials file records `127.0.0.1` (or the public URL) as the endpoint instead of `0.0.0.0`; an existing file is repaired at the next start (#79).
 - New `--public-url` (config `public_url`): API Gateway endpoints, function URLs, queue URLs, Cognito issuers and website links use it, and function URLs and queue URLs now follow the API's scheme (https with built-in TLS). Unset, links are unchanged (#79).
