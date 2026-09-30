@@ -106,16 +106,24 @@ green.
 
 Start the server once in the foreground, with the settings you want to keep. Settings passed as flags
 are saved to `<data-dir>/config.json` and reused on every later start (including by the service), so you
-only pass them once. The two you need on a server are `--public-host` and, when you are not putting a
-reverse proxy in front, `--addr`:
+only pass them once. The ones you need on a server are `--public-url` (when the API is reached through
+a reverse proxy or on a non-default port), `--public-host` and, when you are not putting a reverse proxy
+in front, `--addr`:
 
 ```bash
-homecloud serve --public-host cloud.example.com
+homecloud serve --public-url https://cloud.example.com
 ```
 
-`--public-host` is the name clients use to reach what HomeCloud publishes: the S3 endpoint, published
-instance and database ports, function and website URLs, the DNS name server. It defaults to `localhost`,
-which is wrong for any remote use. Use a DNS name (or the server's IP address).
+`--public-url` is the base URL clients reach the API at. Every link HomeCloud generates for clients
+(API Gateway endpoints, Lambda function URLs, queue URLs, static website URLs, Cognito issuers,
+presigned S3 URLs) starts with it, so they point at your proxy on 443 rather than at the API's own port.
+Without it they are built as `<scheme>://<public-host>:<api port>`, with `https` when `--tls-cert` or
+`--tls-self-signed` is used. Containers you run keep using the internal address for `AWS_ENDPOINT_URL`.
+
+`--public-host` is the name clients use to reach what HomeCloud publishes on host ports: published
+instance and database ports, load balancer ports, the DNS name server. It defaults to `localhost`, which is
+wrong for any remote use; when `--public-url` is set and `--public-host` is not, the host name of the URL
+is used. Use a DNS name (or the server's IP address).
 
 On the very first start HomeCloud creates the account and prints, once:
 
@@ -123,11 +131,13 @@ On the very first start HomeCloud creates the account and prints, once:
 first start: created account 123456789012
   console sign-in   user: root   password: ...
   CLI credentials written to /home/you/.homecloud/credentials
-  (the password is shown only once; reset it with `homecloud serve --reset-root-password`)
+  (the password is shown only once; reset it with `homecloud serve --reset-root-password`, or choose one with `homecloud admin set-root-password` while the server is stopped)
 ```
 
-Copy the password now. The CLI credentials (an access key for the `root` user) are written to
-`~/.homecloud/credentials` (mode 0600). The data directory defaults to `~/.homecloud`; override it with
+Copy the password now, or set one you prefer (see [Security notes](#13-security-notes)). The CLI
+credentials (an access key for the `root` user) are written to `~/.homecloud/credentials` (mode 0600).
+When the server listens on a wildcard address such as `0.0.0.0:8080`, the file records `127.0.0.1` (or
+the `--public-url`) as the endpoint. The data directory defaults to `~/.homecloud`; override it with
 `--data-dir` or the `HOMECLOUD_DATA_DIR` environment variable.
 
 By default the API and console listen on `127.0.0.1:8080` only, so nothing is reachable from outside
@@ -142,11 +152,12 @@ Press Ctrl-C to stop it, then continue with the service. (If you forget the pass
 
 ## 5. Run it as a service
 
-Install a systemd system unit. Run it with `sudo` from your normal user, and pass the data directory
-explicitly so the unit uses the directory you just initialized rather than root's home:
+Install a systemd system unit. Run it with `sudo` from your normal user; under `sudo` the data directory
+defaults to the invoking user's `~/.homecloud` (the one you just initialized), not root's. If that user's
+home cannot be found the command stops and asks for `--data-dir`.
 
 ```bash
-sudo homecloud service install --system --data-dir "$HOME/.homecloud"
+sudo homecloud service install --system
 ```
 
 This writes `/etc/systemd/system/homecloud.service`, runs `systemctl daemon-reload`, and
@@ -197,18 +208,27 @@ Ports to forward or open to the internet for this setup:
 - Nothing else for the console and API. HomeCloud's API stays bound to loopback, so port 8080 is not
   reachable from outside.
 
-Your DNS name must already point at the server. Make sure `--public-host cloud.example.com` was set
-(see [First start](#4-first-start)). Containers you run (functions, instances, tasks) keep reaching
-the API directly over plain HTTP on the Docker bridge, which is unaffected by the proxy.
+Your DNS name must already point at the server. Tell HomeCloud where clients reach it and that it may
+believe the proxy's forwarding headers (Caddy runs on the same machine, so it connects from loopback):
 
-Things to know when a proxy terminates TLS:
+```bash
+homecloud serve --public-url https://cloud.example.com --trusted-proxies 127.0.0.1/32
+```
 
-- HomeCloud does not trust `X-Forwarded-For`, so IAM conditions on `aws:SourceIp` see the proxy's
-  address, and `aws:SecureTransport` is false ([details](aws-compat.md#policies-and-authorization)).
-- Some URLs HomeCloud generates (function URLs, static website URLs, Cognito issuers, API Gateway
-  endpoints) are built as `<public-host>:<api-port>` with the port the API listens on, and function
-  URLs use `http`. Behind a proxy on 443 they point at `:8080`, which is not open. Reach those
-  endpoints through the proxy yourself (for example `https://cloud.example.com/lambda-url/<name>/`).
+Containers you run (functions, instances, tasks) keep reaching the API directly over plain HTTP on the
+Docker bridge, which is unaffected by the proxy.
+
+What the two settings do when a proxy terminates TLS:
+
+- `--public-url` makes every generated link (function URLs, static website URLs, Cognito issuers, API
+  Gateway endpoints, queue URLs, presigned S3 URLs) use `https://cloud.example.com` instead of
+  `<public-host>:8080`. Function URLs follow the URL's scheme.
+- `--trusted-proxies` takes a comma-separated list of CIDRs (default: none). When a request comes from
+  one of them, the client address is taken from `X-Forwarded-For` (the rightmost entry that is not itself
+  a trusted proxy, so entries a client forges on the left are ignored) and the scheme from
+  `X-Forwarded-Proto`. IAM conditions on `aws:SourceIp` and `aws:SecureTransport`, the audit trail and
+  the sign-in throttle then see the real client. Trust only proxies you control; without the flag the
+  headers are ignored ([details](aws-compat.md#policies-and-authorization)).
 
 ### Option B: HomeCloud's built-in TLS
 
@@ -235,9 +255,14 @@ homecloud serve --addr 0.0.0.0:8443 --public-host homelab.tailnet.ts.net --tls-s
   machine. Browsers will warn until you trust the certificate.
 - Ports below 1024 need extra privileges for an unprivileged user, so use a high port such as 8443, or
   use Option A for 443.
-- When TLS is on, containers reach the API at `https://host.docker.internal:<port>`. A certificate for
-  your public name does not cover that name, so a reverse proxy (Option A) is the smoother choice if
-  your functions and instances call the HomeCloud API.
+- With TLS on, functions, tasks and instances do not call the HTTPS endpoint (a certificate for your
+  public name cannot cover `host.docker.internal`). HomeCloud opens a second, plain-HTTP listener for
+  them on a random port, bound only to the Docker bridge gateway on Linux (an address that exists only
+  inside the machine) or to loopback on Docker Desktop and OrbStack, and gives workloads that address as
+  `AWS_ENDPOINT_URL` (`http://host.docker.internal:<port>`). Nothing outside the machine can reach it.
+  Requests from workloads therefore have `aws:SecureTransport` false, like any request over plain HTTP.
+- Set `--public-url` too when clients reach the server at a name or port other than
+  `<public-host>:<api port>`.
 
 Open the chosen port (8443 above) in your firewall. The rest of the flow is the same as for Option A.
 
@@ -257,14 +282,19 @@ publishes on host ports.
 | 22/tcp | SSH (yours) | |
 | 80, 443/tcp | Caddy, if you use Option A | all interfaces |
 | 8080/tcp (`--addr`) | API, console and AWS endpoint | `127.0.0.1` by default |
-| 9500/tcp (`--s3-port`) | S3 endpoint (MinIO) | all interfaces |
-| 9501/tcp (`--s3-console-port`) | MinIO console | all interfaces |
-| 8053/udp and tcp (`--dns-port`) | DNS for public Route 53 zones | all interfaces |
+| 9500/tcp (`--s3-port`) | S3 endpoint (MinIO) | `127.0.0.1` (`--s3-bind`) |
+| 9501/tcp (`--s3-console-port`) | MinIO console | `127.0.0.1` (`--s3-bind`) |
+| 8053/udp and tcp (`--dns-port`) | DNS for public Route 53 zones | `127.0.0.1` (`--dns-bind`) |
 | 5500/tcp | Container registry (ECR) | `127.0.0.1` only |
 | dynamic | ports of instances, load balancers and public databases that security groups open | all interfaces |
 
 The API's S3 operations already go through the main endpoint; the separate S3 and MinIO console ports
-are not needed by the AWS CLI or console. MinIO's S3 endpoint requires credentials, but you should still not expose the ports you do not use.
+are not needed by the AWS CLI, the SDKs or the console (presigned URLs made by the console are served
+through the API too, under `/_s3/`). Because Docker publishes ports around `ufw`, HomeCloud publishes
+MinIO, its console and the DNS server on `127.0.0.1` by default. To expose them, pass
+`--s3-bind 0.0.0.0` (or one address) and `--dns-bind 0.0.0.0`; both are saved to `config.json`. Existing
+installations get their MinIO and DNS containers recreated with the new binding at the next start
+(their data lives in volumes and the zone records in the state file).
 
 **Docker and ufw.** Docker publishes container ports by editing iptables directly, so `ufw` rules do
 not filter them. `ufw` is still right for everything that is not a Docker-published port:
@@ -277,9 +307,11 @@ sudo ufw allow 80,443/tcp      # only with Caddy (Option A)
 sudo ufw enable
 ```
 
-To keep 9500, 9501 and 8053 private, the simplest and most reliable place is your provider's network
-firewall (security group). On the host itself, drop them in Docker's `DOCKER-USER` chain (replace `eth0`
-with your public interface, and repeat per port; add `-p udp` for 8053):
+If you did expose 9500, 9501 or 8053 with `--s3-bind` / `--dns-bind` and want them limited, the
+simplest and most reliable place is your provider's network firewall (security group). On the host
+itself, drop them in Docker's `DOCKER-USER` chain (replace `eth0` with your public interface, and
+repeat per port; add `-p udp` for 8053). The same applies to the ports of instances, load balancers and
+public databases, which Docker publishes on all interfaces:
 
 ```bash
 sudo iptables -I DOCKER-USER -i eth0 -p tcp -m conntrack --ctorigdstport 9501 --ctdir ORIGINAL -j DROP
@@ -294,12 +326,22 @@ ports are published (see [architecture](architecture.md#security-notes)).
 - **For the console and API:** create an `A` (and `AAAA`) record for `cloud.example.com` pointing at
   the server. That name is what you give Caddy, `--public-host` and the AWS endpoint.
 - **For Route 53 hosted zones inside HomeCloud:** public zones are answered on HomeCloud's DNS port
-  (`--dns-port`, default 8053, UDP and TCP), and inside your VPCs by each VPC's resolver. When
-  `--public-host` is an IP address, a public zone's name server record points at it. You can test a zone
-  from another machine with `dig @<server-ip> -p 8053 www.example.test`. Resolvers on the internet
-  query port 53, so HomeCloud zones are for your own machines and networks; making a real domain
-  delegate to HomeCloud would need port 53 on the host, which you would have to free and set with
-  `--dns-port` yourself.
+  (`--dns-port`, default 8053, UDP and TCP), and inside your VPCs by each VPC's resolver. The port is
+  published on `127.0.0.1` unless you pass `--dns-bind`: to serve other machines, use
+  `--dns-bind 0.0.0.0` (or the server's public IP). You can then test a zone from another machine with
+  `dig @<server-ip> -p 8053 www.example.test`.
+- **Real delegation** needs port 53, because resolvers on the internet query only that port:
+
+  ```bash
+  homecloud serve --dns-port 53 --dns-bind <server public IP>
+  ```
+
+  On Ubuntu and Debian `systemd-resolved` listens on `127.0.0.53:53`, which blocks a wildcard bind, so
+  bind to the public address as above, or turn off its stub listener (`DNSStubListener=no` in
+  `resolved.conf`, then restart `systemd-resolved`). If something already holds the port, HomeCloud
+  refuses to start the DNS server and says which port and what to change. Docker's daemon (root)
+  publishes the port, so the HomeCloud service does not need to run as root. Then create the NS and glue
+  records for your domain at your registrar pointing at the server, and open 53/udp and 53/tcp.
 - Instance private DNS names (`ip-10-88-0-4.internal`, `<db>.rds.internal`) resolve only inside the VPC.
 
 ## 9. Use it from your laptop, the AWS CLI and Terraform
@@ -312,13 +354,16 @@ user (see [Security notes](#13-security-notes)).
 
 ```bash
 homecloud configure --endpoint https://cloud.example.com   # prompts for the access key ID and secret
+# a server with a self-signed certificate: copy its <data-dir>/tls/cert.pem here first
+homecloud configure --endpoint https://homelab:8443 --ca-file ./homelab-cert.pem
 homecloud whoami
 eval "$(homecloud aws-env)"        # prints export lines; add --fish for fish syntax
 aws s3 ls
 ```
 
 `homecloud aws-env` prints `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` and
-`AWS_REGION` (and `AWS_CA_BUNDLE` when the credentials name a CA file). The environment variables
+`AWS_REGION` (and `AWS_CA_BUNDLE` when the credentials name a CA file). `homecloud configure` keeps
+the region and `ca_file` already in the credentials file unless you pass `--region` or `--ca-file`. The environment variables
 `HOMECLOUD_ENDPOINT`, `HOMECLOUD_ACCESS_KEY_ID` and `HOMECLOUD_SECRET_ACCESS_KEY` override the
 credentials file.
 
@@ -414,9 +459,11 @@ that door open:
   Treat everyone with HomeCloud administrator access as an administrator of the server, and do not run
   untrusted workloads with the expectation that the container boundary is a VM boundary.
 - **Change the initial `root` password** (the one printed at first start) and keep the root access
-  key out of daily use. Generate a fresh one with
-  `homecloud serve --reset-root-password` (service stopped), or manage the user's password on its IAM
-  page in the console.
+  key out of daily use. With the service stopped, either choose one
+  (`homecloud admin set-root-password`, which asks twice without echo, or reads one line from a pipe:
+  `printf '%s\n' "$PW" | homecloud admin set-root-password`; it is never taken as an argument) or generate a
+  random one with `homecloud serve --reset-root-password`. You can also manage the user's password on
+  its IAM page in the console.
 - **Create IAM users instead of using the root keys.** For example, an administrator for yourself and
   a limited user for a CI job:
 
@@ -457,11 +504,11 @@ right `config.json` and credentials.
 | `permission denied` on `/var/run/docker.sock` | The user running HomeCloud is not in the `docker` group (`sudo usermod -aG docker <user>`, then restart the service). A system unit runs as the `sudo` user that installed it. |
 | `doctor` says credentials are missing | Run `homecloud serve` once, or `homecloud configure` to point at a remote server. |
 | Service does not start | `systemctl status homecloud` and `journalctl -u homecloud -n 100`. Confirm `docker.service` is running. |
-| `port ... is in use` | Another program uses the S3 (9500), MinIO console (9501) or DNS (8053) port. Pick others with `--s3-port`, `--s3-console-port`, `--dns-port` (saved to `config.json`). |
+| `port ... is in use` | Another program uses the S3 (9500), MinIO console (9501) or DNS (8053) port. Pick others with `--s3-port`, `--s3-console-port`, `--dns-port` (saved to `config.json`). For port 53 see [DNS](#8-dns). |
 | `this Docker host already runs HomeCloud account ...` | Start with the `--data-dir` of that installation, or remove its containers first. One Docker host runs one HomeCloud. |
-| Lost the root password | Stop the service, run `homecloud serve --reset-root-password` in a terminal, copy the new password, stop it with Ctrl-C, start the service. |
+| Lost the root password | Stop the service, then run `homecloud admin set-root-password` (pick one) or `homecloud serve --reset-root-password` (random; copy it, stop with Ctrl-C), and start the service. |
 | Browser cannot connect from outside | Confirm the proxy/port is open in the firewall and provider security group, and that `curl -I https://cloud.example.com/api/v1/health` works from your machine. |
-| CLI or AWS CLI reports a certificate error | Use a real certificate (Caddy, or `--tls-cert`), or point `AWS_CA_BUNDLE` at the server's `<data-dir>/tls/cert.pem` for a self-signed one. |
+| CLI or AWS CLI reports a certificate error | Use a real certificate (Caddy, or `--tls-cert`), or for a self-signed one copy the server's `<data-dir>/tls/cert.pem` to the client and run `homecloud configure --ca-file <file>` (AWS tools: `AWS_CA_BUNDLE`). |
 | First instance or database is slow to start | Images are pulled and the security-group helper image is built on first use; this needs internet access. |
 | `restore` says a server is running | Stop the service first (`sudo systemctl stop homecloud`). |
 

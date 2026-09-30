@@ -183,8 +183,7 @@ func (s *Service) getTopic(name string) (Topic, error) {
 // defaultBaseURL is the API endpoint used in links when no request tells us
 // how clients reach the server.
 func (s *Service) defaultBaseURL() string {
-	_, port, _ := strings.Cut(s.env.Cfg.APIAddr, ":")
-	return fmt.Sprintf("http://%s:%s", s.env.Cfg.PublicHost, port)
+	return s.env.Cfg.PublicBase()
 }
 
 // BaseURL returns the endpoint a client used for r (scheme://host).
