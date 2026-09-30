@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react"
 import useSWR, { mutate as globalMutate, type SWRConfiguration } from "swr"
-import { useRouter, useSearchParams } from "next/navigation"
+import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { toast } from "sonner"
 
 import { ApiError, buildQuery, errorMessage, request, type Query } from "@/lib/api"
@@ -75,6 +75,7 @@ export function useQueryParam(name: string): string {
 /** useSetQueryParam updates a search parameter without adding a history entry. */
 export function useSetQueryParam() {
   const router = useRouter()
+  const pathname = usePathname()
   const sp = useSearchParams()
   return useCallback(
     (name: string, value: string | null) => {
@@ -82,9 +83,9 @@ export function useSetQueryParam() {
       if (value === null || value === "") p.delete(name)
       else p.set(name, value)
       const qs = p.toString()
-      router.replace(`${window.location.pathname}${qs ? `?${qs}` : ""}`, { scroll: false })
+      router.replace(`${pathname}${qs ? `?${qs}` : ""}`, { scroll: false })
     },
-    [router, sp],
+    [router, pathname, sp],
   )
 }
 

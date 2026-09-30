@@ -18,7 +18,7 @@ import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/compon
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { CopyButton } from "@/components/console/copy-button"
 import { useSession } from "@/components/console/auth"
-import { logout } from "@/lib/api"
+import { DEMO, logout } from "@/lib/api"
 import { useApi } from "@/lib/hooks"
 import type { Health } from "@/lib/types/common"
 import { SERVICES, servicesByCategory, type ServiceDef } from "@/lib/services"
@@ -257,7 +257,7 @@ function AccountMenu() {
   const s = useSession()
   const onSignOut = async () => {
     await logout()
-    window.location.href = "/login/"
+    window.location.href = DEMO ? "/" : "/login/"
   }
   return (
     <DropdownMenu>
