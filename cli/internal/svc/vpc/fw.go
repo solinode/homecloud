@@ -251,6 +251,9 @@ func (s *Service) applyJobs(ctx context.Context, jobs []fwJob) {
 
 func (s *Service) applyJob(ctx context.Context, j fwJob) {
 	fail := func(err error) {
+		if ci, e := s.env.Docker.Inspect(j.m.ContainerID); e != nil || !ci.State.Running {
+			return // it went away meanwhile; applied when it starts
+		}
 		s.fw.mu.Lock()
 		if s.fw.applied == nil {
 			s.fw.applied = map[string]fwApplied{}

@@ -44,8 +44,24 @@ func newFilterEnv(t *testing.T) *filterEnv {
 	go func() { v.RunFirewall(ctx); close(done) }()
 	t.Cleanup(func() { cancel(); <-done })
 
-	second := 200 + rand.Intn(50)
-	vpcID := h.AWSJSON(t, "ec2", "create-vpc", "--cidr-block", fmt.Sprintf("10.%d.0.0/16", second))["Vpc"].(map[string]any)["VpcId"].(string)
+	// A /16 nobody else on this Docker host uses.
+	var second int
+	var vpcID string
+	for try := 0; ; try++ {
+		second = 130 + rand.Intn(120)
+		out, err := h.AWSErr(t, "ec2", "create-vpc", "--cidr-block", fmt.Sprintf("10.%d.0.0/16", second))
+		if err == nil {
+			var r struct{ Vpc struct{ VpcId string } }
+			if json.Unmarshal([]byte(out), &r) != nil || r.Vpc.VpcId == "" {
+				t.Fatalf("create-vpc: %s", out)
+			}
+			vpcID = r.Vpc.VpcId
+			break
+		}
+		if try > 20 || !strings.Contains(out, "overlaps") {
+			t.Fatalf("create-vpc: %v %s", err, out)
+		}
+	}
 	t.Cleanup(func() { _ = v.DeleteVPC(vpcID) })
 	sn := h.AWSJSON(t, "ec2", "create-subnet", "--vpc-id", vpcID, "--cidr-block", fmt.Sprintf("10.%d.1.0/24", second))["Subnet"].(map[string]any)["SubnetId"].(string)
 	return &filterEnv{t: t, h: h, vpc: v, vpcID: vpcID, subnet: sn, defSG: v.DefaultSecurityGroup(vpcID)}
