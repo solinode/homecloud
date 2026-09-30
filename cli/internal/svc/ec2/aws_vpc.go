@@ -477,7 +477,7 @@ func reqRules(q *awsapi.Req) []vpc.Rule {
 			x.CIDRv6, x.Description = r["CidrIpv6"], r["Description"]
 			out = append(out, x)
 		}
-		// The query API names the list "Groups" in requests (UserIdGroupPairs is its name in responses).
+		// The EC2 Query protocol names the group pairs "Groups"; "UserIdGroupPairs" is accepted too.
 		for _, r := range append(nested(m, "Groups"), nested(m, "UserIdGroupPairs")...) {
 			x := base
 			x.SourceGroup, x.Description = r["GroupId"], r["Description"]

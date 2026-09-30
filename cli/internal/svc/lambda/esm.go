@@ -50,11 +50,12 @@ type Mapping struct {
 	LastModified          *time.Time `json:"last_modified,omitempty"`
 	CreatedAt             time.Time  `json:"created_at"`
 	// DynamoDB stream mappings (EventSourceARN is a stream ARN; QueueName is empty).
-	StartingPosition     string `json:"starting_position,omitempty"` // TRIM_HORIZON | LATEST
-	Checkpoint           string `json:"checkpoint,omitempty"`        // stream position after the last processed batch
-	MaximumRetryAttempts *int   `json:"maximum_retry_attempts,omitempty"`
-	BisectOnError        bool   `json:"bisect_batch_on_function_error,omitempty"`
-	OnFailure            string `json:"on_failure,omitempty"` // destination for discarded batches
+	StartingPosition     string    `json:"starting_position,omitempty"` // TRIM_HORIZON | LATEST
+	Checkpoint           string    `json:"checkpoint,omitempty"`        // stream position after the last processed batch
+	MaximumRetryAttempts *int      `json:"maximum_retry_attempts,omitempty"`
+	BisectOnError        bool      `json:"bisect_batch_on_function_error,omitempty"`
+	OnFailure            string    `json:"on_failure,omitempty"` // destination for discarded batches
+	Tags                 core.Tags `json:"tags,omitempty"`
 }
 
 func (m Mapping) isStream() bool { return isStreamARN(m.EventSourceARN) }
@@ -284,6 +285,7 @@ type awsMappingIn struct {
 	DestinationConfig              *struct {
 		OnFailure *struct{ Destination string } `json:"OnFailure"`
 	} `json:"DestinationConfig"`
+	Tags map[string]string `json:"Tags"`
 }
 
 // queueName extracts the queue name from an SQS ARN.
@@ -333,6 +335,15 @@ func (s *Service) awsCreateMapping(q *awsapi.Req, _ map[string]string) error {
 	m, err := s.createMapping(q.Authorize, mi)
 	if err != nil {
 		return err
+	}
+	if len(in.Tags) > 0 {
+		m, err = store.Update(s.env.Store, cMappings, m.ID, func(x *Mapping) error {
+			x.Tags = core.Tags(in.Tags)
+			return nil
+		})
+		if err != nil {
+			return err
+		}
 	}
 	q.WriteJSON(http.StatusAccepted, s.mappingOut(m, "Creating"))
 	return nil

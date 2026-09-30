@@ -193,6 +193,15 @@ requests wait up to three seconds for a quick operation to finish before returni
   listed type are not available in templates yet.
 - Deleting an S3 bucket that still holds objects fails the resource (`DELETE_FAILED`), as in AWS.
 
+## Deploy a full app with Terraform
+
+[`examples/terraform/shop`](../examples/terraform/shop/README.md) is a realistic stack written with the
+standard `hashicorp/aws` provider (Terraform or OpenTofu): a VPC with public subnets, an ALB with HTTP and
+HTTPS (ACM certificate validated through Route 53), an ECS Fargate service, RDS Postgres with a managed
+Secrets Manager password, S3, DynamoDB, SNS to SQS to Lambda, and an API Gateway HTTP API. Only the provider's
+`endpoints {}` block points at HomeCloud. `apply`, a second `plan` with no changes, and `destroy` all run
+clean against a fresh install; the README shows how to check each piece.
+
 ## Adding operations (for contributors)
 
 The `internal/awsapi` package verifies signatures, resolves the service from the credential
