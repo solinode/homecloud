@@ -262,7 +262,7 @@ func toError(s *Service, err error) *Error {
 		ce = core.Errf(http.StatusConflict, "Conflict", "the resource was modified concurrently; retry")
 	default:
 		log.Printf("aws %s: internal error: %v", s.Name, err)
-		ce = core.Errf(http.StatusInternalServerError, "InternalError", "%v", err)
+		ce = core.Errf(http.StatusInternalServerError, "InternalError", "%s", core.InternalErrorMessage)
 	}
 	code := ""
 	if s != nil && s.ErrorCode != nil {

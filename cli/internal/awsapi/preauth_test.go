@@ -67,6 +67,20 @@ func TestUnsignedBodyIsCapped(t *testing.T) {
 	}
 }
 
+// Unexpected failures carry file paths and daemon output: they belong in the
+// server log, not in the response, the audit trail or other users' LookupEvents.
+func TestInternalErrorsAreNotEchoed(t *testing.T) {
+	e := toError(&Service{Name: "x"}, errors.New("open /home/svc/.homecloud/state.json: permission denied"))
+	if e.Code != "InternalFailure" || strings.Contains(e.Message, "/home/svc") {
+		t.Fatalf("internal error leaked: %+v", e)
+	}
+	w := httptest.NewRecorder()
+	httpx.WriteError(w, errors.New("docker: dial unix /var/run/docker.sock: connect: permission denied"))
+	if w.Code != 500 || strings.Contains(w.Body.String(), "docker.sock") {
+		t.Fatalf("native API leaked an internal error: %d %s", w.Code, w.Body)
+	}
+}
+
 func TestHostAndTargetMustBeSigned(t *testing.T) {
 	for _, signed := range []string{"x-amz-date", "host;x-amz-date"} {
 		if _, err := ParseSignature(signedReq(t, signed, strings.NewReader(""))); err == nil {

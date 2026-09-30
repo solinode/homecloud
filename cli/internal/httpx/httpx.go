@@ -274,7 +274,7 @@ func WriteError(w http.ResponseWriter, err error) {
 		ce = core.Errf(http.StatusNotFound, "ResourceNotFound", "resource not found")
 	default:
 		log.Printf("internal error: %v", err)
-		ce = core.Errf(http.StatusInternalServerError, "InternalError", "%v", err)
+		ce = core.Errf(http.StatusInternalServerError, "InternalError", "%s", core.InternalErrorMessage)
 	}
 	WriteJSON(w, ce.Status, map[string]any{"error": ce})
 }
