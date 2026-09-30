@@ -81,7 +81,7 @@ By participating in this project, you agree to abide by our Code of Conduct.
 
 If you’re stuck or need clarification, feel free to:
 
-- Open a [Discussion](https://github.com/homecloudhq/homecloud/discussions).
+- Open a [Discussion](https://github.com/solinode/homecloud/discussions).
 - Reach out on [Discord](https://discord.gg/pemra9uaC9).
 
 We’re excited to have you on board. Let’s build something great together!

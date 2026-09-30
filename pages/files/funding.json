@@ -19,7 +19,7 @@
         "url": "https://homecloud.pages.dev"
       },
       "repositoryUrl": {
-        "url": "https://github.com/homecloudhq/homecloud"
+        "url": "https://github.com/solinode/homecloud"
       },
       "licenses": ["spdx:AGPL-3.0"],
       "tags": ["cloud", "self-hosted", "infrastructure", "open-source", "privacy", "devops", "platform"]

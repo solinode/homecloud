@@ -4,7 +4,7 @@
 # Set HOMECLOUD_VERSION (e.g. v0.1.0) to pin a release, INSTALL_DIR to change the target.
 set -eu
 
-REPO="homecloudhq/homecloud"
+REPO="solinode/homecloud"
 INSTALL_DIR="${INSTALL_DIR:-/usr/local/bin}"
 
 os=$(uname -s | tr '[:upper:]' '[:lower:]')

@@ -111,5 +111,5 @@ Published versions are immutable snapshots of `$LATEST` (configuration and a cop
 - Instances are containers, not VMs: they share the host kernel, and their "disk" is the container's writable layer. VM-backed instances (QEMU/KVM) are on the roadmap.
 - Security groups control which ports are published on the host and apply at launch; traffic inside a VPC is unrestricted.
 - Volume sizes are advisory (Docker volumes are not size-capped).
-- The management API is REST/JSON rather than the AWS wire protocols; only S3 is wire-compatible (via MinIO).
+- HomeCloud has two APIs: the native REST/JSON API (`/api/v1`, used by the console and the `homecloud` CLI) and the AWS wire protocols for the services listed in [aws-compat.md](aws-compat.md), used by the AWS CLI, SDKs and Terraform. Services not listed there are reachable through the native API only.
 - HomeCloud runs on one Docker host today.
