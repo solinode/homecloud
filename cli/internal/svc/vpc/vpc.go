@@ -739,7 +739,7 @@ func normalizeRule(r Rule) (Rule, error) {
 		r.Protocol = "tcp"
 	}
 	if r.Protocol != "tcp" && r.Protocol != "udp" {
-		return r, core.BadRequest("protocol must be tcp or udp")
+		return r, core.BadRequest("protocol must be tcp or udp (the EC2 API takes other protocols)")
 	}
 	if r.ToPort == 0 {
 		r.ToPort = r.FromPort
@@ -747,21 +747,24 @@ func normalizeRule(r Rule) (Rule, error) {
 	if r.FromPort < 1 || r.ToPort > 65535 || r.FromPort > r.ToPort {
 		return r, core.BadRequest("invalid port range %d-%d", r.FromPort, r.ToPort)
 	}
-	if r.ToPort-r.FromPort >= maxPublishedRange {
-		return r, core.BadRequest("port ranges are limited to %d ports", maxPublishedRange)
+	if r.SourceGroup != "" {
+		if r.CIDR != "" {
+			return r, core.BadRequest("a rule has one source: a cidr or a source_group")
+		}
+		r.ID = core.NewID("sgr")
+		return r, nil
 	}
 	if r.CIDR == "" {
 		r.CIDR = "0.0.0.0/0"
 	}
-	// Rules become published host ports, which can be bound to every interface
-	// or to loopback only; other source ranges cannot be enforced.
-	switch r.CIDR {
-	case "0.0.0.0/0", "127.0.0.1/32":
-	default:
-		if _, err := netip.ParsePrefix(r.CIDR); err != nil {
-			return r, core.BadRequest("invalid cidr %q", r.CIDR)
-		}
-		return r, core.BadRequest("cidr must be 0.0.0.0/0 (reachable from anywhere) or 127.0.0.1/32 (this host only); HomeCloud cannot filter other source ranges")
+	// 0.0.0.0/0 and 127.0.0.1/32 also become published host ports (bound to
+	// every interface or to loopback only), which limits their port range;
+	// other CIDRs only filter traffic inside the VPC.
+	if p, err := netip.ParsePrefix(r.CIDR); err != nil || !p.Addr().Is4() {
+		return r, core.BadRequest("invalid cidr %q", r.CIDR)
+	}
+	if (r.CIDR == "0.0.0.0/0" || r.CIDR == "127.0.0.1/32") && r.ToPort-r.FromPort >= maxPublishedRange {
+		return r, core.BadRequest("port ranges from %s are limited to %d ports", r.CIDR, maxPublishedRange)
 	}
 	r.ID = core.NewID("sgr")
 	return r, nil
@@ -775,6 +778,9 @@ func (s *Service) addRule(c *httpx.Ctx) (any, error) {
 	r, err := normalizeRule(in)
 	if err != nil {
 		return nil, err
+	}
+	if r.SourceGroup != "" && !store.Has(s.env.Store, cSGs, r.SourceGroup) {
+		return nil, core.NotFound("security group", r.SourceGroup)
 	}
 	g, err := store.Update(s.env.Store, cSGs, c.Param("id"), func(g *SecurityGroup) error {
 		g.Ingress = append(g.Ingress, r)

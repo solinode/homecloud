@@ -55,6 +55,9 @@ type firewall struct {
 // RegisterMembers adds a source of members: the resources of a service that
 // have security groups.
 func (s *Service) RegisterMembers(fn func() []Member) {
+	if s == nil {
+		return
+	}
 	s.fw.mu.Lock()
 	defer s.fw.mu.Unlock()
 	s.fw.providers = append(s.fw.providers, fn)
@@ -75,7 +78,7 @@ func (s *Service) fwMembers() []Member {
 // Call it after anything that changes who may talk to whom: a group's rules,
 // a resource's groups, a resource appearing or disappearing.
 func (s *Service) FirewallChanged() {
-	if s.env.Docker == nil {
+	if s == nil || s.env.Docker == nil {
 		return
 	}
 	s.fw.mu.Lock()
@@ -313,7 +316,7 @@ func (s *Service) fwImage(ctx context.Context) (string, error) {
 // resource is recorded as running (so peers never see it unprotected for
 // longer than the container's own startup).
 func (s *Service) ProtectNow(ctx context.Context, m Member) {
-	if s.env.Docker == nil {
+	if s == nil || s.env.Docker == nil {
 		return
 	}
 	s.fw.passMu.Lock()
