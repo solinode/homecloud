@@ -108,7 +108,7 @@ func (s *Service) Start(ctx context.Context, vpcs []vpc.VPC) error {
 
 	d := s.env.Docker
 	bind := s.env.Cfg.ServiceBindAddr()
-	if d.State(containerName) != "missing" && !d.BoundTo(containerName, bind, "9000/tcp", "9001/tcp") {
+	if d.State(containerName) != "missing" && mismatched(d, bind, "9000/tcp", "9001/tcp") {
 		// Published on other addresses (all of them, before this was configurable):
 		// recreate it; the data lives in a named volume.
 		log.Printf("s3: recreating MinIO to publish its ports on %s only", bind)
@@ -876,4 +876,15 @@ func (s *Service) website(c *httpx.Ctx) (any, error) {
 		return nil, core.Errf(http.StatusNotFound, "NoSuchKey", "%s not found", key)
 	}
 	return nil, s.stream(c, cl, bucket, key, "", false, http.StatusOK)
+}
+
+// mismatched reports whether MinIO is published on addresses other than bind.
+// If Docker can't inspect it right now, the container is left as it is.
+func mismatched(d *runtime.Docker, bind string, ports ...string) bool {
+	ok, err := d.BoundTo(containerName, bind, ports...)
+	if err != nil {
+		log.Printf("s3: inspect MinIO: %v (keeping the container)", err)
+		return false
+	}
+	return !ok
 }

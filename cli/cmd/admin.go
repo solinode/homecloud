@@ -65,8 +65,12 @@ func setRootPassword(dataDir, pw string) error {
 	cfg := core.DefaultConfig()
 	cfg.DataDir = dataDir
 	if b, err := os.ReadFile(cfg.Path("config.json")); err == nil {
-		_ = json.Unmarshal(b, &cfg)
+		if err := json.Unmarshal(b, &cfg); err != nil {
+			return fmt.Errorf("read %s: %w", cfg.Path("config.json"), err)
+		}
 		cfg.DataDir = dataDir
+	} else if !os.IsNotExist(err) {
+		return err
 	}
 	if serverListening(cfg.APIAddr) {
 		return fmt.Errorf("a server is running at %s: stop it first (the change would be overwritten), or use `homecloud serve --reset-root-password`", cfg.APIAddr)

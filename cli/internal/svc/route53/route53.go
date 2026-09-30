@@ -240,7 +240,14 @@ func (s *Service) start(ctx context.Context) error {
 		return fmt.Errorf("no VPCs")
 	}
 	bind := s.env.Cfg.DNSBindAddr()
-	if d.State(containerName) != "missing" && !d.BoundTo(containerName, bind, "53/udp", "53/tcp") {
+	bound, berr := true, error(nil)
+	if d.State(containerName) != "missing" {
+		if bound, berr = d.BoundTo(containerName, bind, "53/udp", "53/tcp"); berr != nil {
+			log.Printf("route53: inspect the DNS server: %v (keeping the container)", berr)
+			bound = true
+		}
+	}
+	if !bound {
 		log.Printf("route53: recreating the DNS server to publish its port on %s only", bind)
 		if err := d.Remove(containerName); err != nil {
 			return fmt.Errorf("recreate CoreDNS: %w", err)

@@ -257,18 +257,22 @@ func (d *Docker) HostPort(id string, containerPort int) int {
 
 // BoundTo reports whether every given container port ("9000/tcp") of the
 // container is published on hostIP only. A container created before HomeCloud
-// bound ports to loopback fails this check and gets recreated.
-func (d *Docker) BoundTo(id, hostIP string, ports ...string) bool {
+// bound ports to loopback fails this check and gets recreated. An error means
+// the container couldn't be inspected, which is not a reason to recreate it.
+func (d *Docker) BoundTo(id, hostIP string, ports ...string) (bool, error) {
 	c, err := d.C.InspectContainer(id)
-	if err != nil || c.HostConfig == nil {
-		return false
+	if err != nil {
+		return false, err
+	}
+	if c.HostConfig == nil {
+		return false, nil
 	}
 	for _, p := range ports {
 		if !bindingsAre(c.HostConfig.PortBindings[docker.Port(p)], hostIP) {
-			return false
+			return false, nil
 		}
 	}
-	return true
+	return true, nil
 }
 
 func bindingsAre(bs []docker.PortBinding, hostIP string) bool {

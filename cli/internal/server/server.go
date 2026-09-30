@@ -402,7 +402,8 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	var handler http.Handler = trust.Wrap(root)
 	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	if workloadLn != nil {
-		defer serveWorkloads(workloadLn, handler, logf)()
+		// Workloads are never proxies: their listeners ignore forwarding headers.
+		defer serveWorkloads(workloadLn, root, logf)()
 		logf("workloads reach the API over plain HTTP at %s (not reachable from outside this machine)", env.ContainerAPI)
 	}
 	errc := make(chan error, 1)
@@ -418,7 +419,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if goruntime.GOOS == "linux" {
 		if host, _, _ := net.SplitHostPort(cfg.APIAddr); host == "127.0.0.1" || host == "localhost" {
 			if gw := dk.BridgeGateway(); gw != "" {
-				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: root, ReadHeaderTimeout: 10 * time.Second}
 				go func() {
 					var err error
 					if cfg.TLSCert != "" {
