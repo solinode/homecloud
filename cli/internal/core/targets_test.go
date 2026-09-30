@@ -5,6 +5,21 @@ import (
 	"testing"
 )
 
+func TestLocalImageRepo(t *testing.T) {
+	for in, want := range map[string]string{
+		"localhost:5500/app:1":    "app",
+		"127.0.0.1:5500/team/app": "team/app",
+		"123456789012.dkr.ecr.us-east-1.amazonaws.com/app@sha256:ab": "app",
+		"123456789012.dkr.ecr.us-east-1.amazonaws.com/a/b:v2":        "a/b",
+		"nginx:alpine": "", "localhost:5501/app": "", "docker.io/library/nginx": "",
+	} {
+		got, ok := LocalImageRepo(in, 5500)
+		if got != want || ok != (want != "") {
+			t.Errorf("%s: %q %v", in, got, ok)
+		}
+	}
+}
+
 func TestBlockedIP(t *testing.T) {
 	for _, s := range []string{"127.0.0.1", "::1", "169.254.169.254", "::ffff:169.254.169.254", "::ffff:127.0.0.1", "0.0.0.0", "0.1.2.3",
 		"100.100.100.200", "192.0.0.192", "fd00:ec2::254", "64:ff9b::7f00:1", "2002:7f00:1::", "fe80::1", "224.0.0.1"} {

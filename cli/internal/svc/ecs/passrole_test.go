@@ -49,6 +49,16 @@ func TestTaskRoleNeedsPassRole(t *testing.T) {
 			t.Fatalf("AWS register with task role %q: %v %s", role, err, out)
 		}
 	}
+	// Images of the local registry need the ECR pull permissions.
+	for _, image := range []string{"localhost:5500/secret:1", "123456789012.dkr.ecr.us-east-1.amazonaws.com/secret@sha256:abc"} {
+		h.Env.Cfg.ECRPort = 5500
+		if code, body := h.NativeAs(t, akid, secret, "POST", "/api/v1/ecs/task-definitions", map[string]any{"family": "img", "image": image}); code != 403 || !strings.Contains(string(body), "ecr:BatchGetImage") {
+			t.Fatalf("image %s: %d %s", image, code, body)
+		}
+	}
+	if code, body := h.NativeAs(t, akid, secret, "POST", "/api/v1/ecs/task-definitions", map[string]any{"family": "img", "image": "nginx:alpine"}); code != 200 {
+		t.Fatalf("a public image was refused: %d %s", code, body)
+	}
 	if code, body := h.NativeAs(t, akid, secret, "POST", "/api/v1/ecs/task-definitions", td("dev-app")); code != 200 {
 		t.Fatalf("a role the caller may pass was refused: %d %s", code, body)
 	}

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -31,6 +32,34 @@ func TargetAction(arn string) string {
 		return "states:StartExecution"
 	}
 	return ""
+}
+
+var ecrHostedImage = regexp.MustCompile(`^[0-9]{12}\.dkr\.ecr\.[a-z0-9-]+\.amazonaws\.com/`)
+
+// LocalImageRepo reports which repository of HomeCloud's own registry an image
+// reference points at: an AWS-style ECR URI ("<account>.dkr.ecr.<region>.amazonaws.com/app:tag")
+// or the registry's local address. Images from elsewhere return ok == false.
+func LocalImageRepo(image string, ecrPort int) (repo string, ok bool) {
+	rest := ""
+	if loc := ecrHostedImage.FindStringIndex(image); loc != nil {
+		rest = image[loc[1]:]
+	} else {
+		for _, h := range []string{"localhost", "127.0.0.1"} {
+			if r, found := strings.CutPrefix(image, fmt.Sprintf("%s:%d/", h, ecrPort)); found {
+				rest = r
+			}
+		}
+	}
+	if rest == "" {
+		return "", false
+	}
+	if i := strings.IndexByte(rest, '@'); i >= 0 {
+		rest = rest[:i]
+	}
+	if i := strings.LastIndexByte(rest, ':'); i > strings.LastIndexByte(rest, '/') {
+		rest = rest[:i]
+	}
+	return rest, rest != ""
 }
 
 // blockedNets are ranges outbound requests made on behalf of users never reach:

@@ -342,6 +342,22 @@ func (s *Service) s3Code(q *awsapi.Req, bucket, key, version string) ([]byte, er
 
 // ---- functions ----
 
+// authorizeImage requires the caller to be allowed to pull an image of
+// HomeCloud's own registry: the function runs it, and its code can read it.
+func (s *Service) authorizeImage(q *awsapi.Req, image string) error {
+	repo, ok := core.LocalImageRepo(image, s.env.Cfg.ECRPort)
+	if !ok {
+		return nil
+	}
+	arn := s.env.ARN("ecr", "repository/"+repo)
+	for _, action := range []string{"ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"} {
+		if err := q.Check(action, arn); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Service) awsCreateFunction(q *awsapi.Req, _ map[string]string) error {
 	var in struct {
 		awsConfigIn
@@ -361,6 +377,9 @@ func (s *Service) awsCreateFunction(q *awsapi.Req, _ map[string]string) error {
 		return err
 	}
 	if err := q.Authorize("lambda:CreateFunction", s.fnARN(in.FunctionName)); err != nil {
+		return err
+	}
+	if err := s.authorizeImage(q, in.Code.ImageUri); err != nil {
 		return err
 	}
 	spec := createSpec{Name: in.FunctionName, configInput: in.config(), PackageType: in.PackageType, ImageURI: in.Code.ImageUri, Publish: in.Publish}
@@ -542,6 +561,9 @@ func (s *Service) awsUpdateCode(q *awsapi.Req, p map[string]string) error {
 		return err
 	}
 	if err := q.Authorize("lambda:UpdateFunctionCode", s.fnARN(name)); err != nil {
+		return err
+	}
+	if err := s.authorizeImage(q, in.ImageUri); err != nil {
 		return err
 	}
 	spec := codeSpec{ImageURI: in.ImageUri, Publish: in.Publish, Revision: in.RevisionId}

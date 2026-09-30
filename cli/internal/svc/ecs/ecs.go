@@ -729,6 +729,16 @@ func (e *ECS) registerTaskDef(az authz, in TaskDefinition) (TaskDefinition, erro
 			return in, err
 		}
 	}
+	// Running the image discloses its contents to the task: pulling from the local
+	// registry needs the same permissions as pulling from ECR.
+	if repo, ok := core.LocalImageRepo(in.Image, e.env.Cfg.ECRPort); ok {
+		arn := e.env.ARN("ecr", "repository/"+repo)
+		for _, action := range []string{"ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"} {
+			if err := az(action, arn); err != nil {
+				return in, err
+			}
+		}
+	}
 	e.tdMu.Lock()
 	defer e.tdMu.Unlock()
 	rev := 1
