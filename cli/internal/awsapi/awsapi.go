@@ -311,7 +311,11 @@ func Match(r *http.Request) bool {
 	return lookupUnsigned(r) != nil
 }
 
-const maxBody = 100 << 20
+const (
+	maxBody = 100 << 20
+	// maxPublicBody bounds what an unsigned (public operation) request may send.
+	maxPublicBody = 1 << 20
+)
 
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
@@ -388,19 +392,49 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		q.Protocol = Query
 	}
 
-	// Read the body (unless the service streams it) and check the signature.
+	// Before buffering a body, make sure the caller is worth it: the signature
+	// must be fresh and name a live access key, and when the client declared the
+	// payload hash the signature is verified before the body is read. Otherwise
+	// anyone could make the server buffer maxBody bytes per connection.
 	payloadHash := ""
+	var secret string
+	var principal *httpx.Principal
+	verified := false
+	now := time.Now()
+	if h.Now != nil {
+		now = h.Now()
+	}
 	if sig != nil {
 		payloadHash = sig.PayloadHash
+		if err := sig.checkTime(now); err != nil {
+			q.fail(err)
+			return
+		}
+		var err error
+		if secret, principal, err = h.Creds.SigningSecret(sig.AccessKeyID, sig.SessionToken); err != nil {
+			q.fail(err)
+			return
+		}
+		if payloadHash != "" && !strings.HasPrefix(payloadHash, "STREAMING-") || sig.Presigned {
+			if err := sig.Verify(r, secret, payloadHash, now); err != nil {
+				q.fail(err)
+				return
+			}
+			verified = true
+		}
 	}
 	if !(q.Svc.StreamBody && q.Protocol == REST) {
-		b, err := io.ReadAll(io.LimitReader(r.Body, maxBody+1))
+		limit := int64(maxBody)
+		if sig == nil {
+			limit = maxPublicBody // only public operations are reachable unsigned
+		}
+		b, err := io.ReadAll(io.LimitReader(r.Body, limit+1))
 		if err != nil {
 			q.fail(Errorf(http.StatusBadRequest, "IncompleteBody", "read body: %v", err))
 			return
 		}
-		if len(b) > maxBody {
-			q.fail(Errorf(http.StatusRequestEntityTooLarge, "RequestEntityTooLarge", "request body exceeds %d MB", maxBody>>20))
+		if int64(len(b)) > limit {
+			q.fail(Errorf(http.StatusRequestEntityTooLarge, "RequestEntityTooLarge", "request body exceeds %d MB", limit>>20))
 			return
 		}
 		q.Body = b
@@ -431,18 +465,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	public := (q.Svc.PublicOps[q.Op] && q.Protocol != REST) || (q.Protocol == REST && q.Svc.Unsigned != nil)
 	if sig != nil {
-		now := time.Now()
-		if h.Now != nil {
-			now = h.Now()
-		}
-		secret, p, err := h.Creds.SigningSecret(sig.AccessKeyID, sig.SessionToken)
-		if err != nil {
-			q.fail(err)
-			return
-		}
-		if err := sig.Verify(r, secret, payloadHash, now); err != nil {
-			q.fail(err)
-			return
+		p := principal
+		if !verified {
+			if err := sig.Verify(r, secret, payloadHash, now); err != nil {
+				q.fail(err)
+				return
+			}
 		}
 		q.Sig, q.Secret, q.P = sig, secret, p
 		p.AddRequestContext(r)
