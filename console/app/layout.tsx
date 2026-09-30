@@ -12,7 +12,7 @@ export const metadata: Metadata = {
   },
   description: "Manage your self-hosted HomeCloud: EC2, S3, VPC, IAM, Secrets Manager, CloudWatch and CloudTrail.",
   applicationName: "HomeCloud Console",
-  icons: { icon: "/favicon.svg" },
+  icons: { icon: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/favicon.svg` },
 }
 
 export const viewport: Viewport = {
