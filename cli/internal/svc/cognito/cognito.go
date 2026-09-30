@@ -163,12 +163,7 @@ func userKey(pool, username string) string { return pool + "/" + strings.ToLower
 func hashToken(t string) string            { h := sha256.Sum256([]byte(t)); return hex.EncodeToString(h[:]) }
 
 func (s *Service) issuer(pool string) string {
-	scheme := "http"
-	if s.env.Cfg.TLSCert != "" {
-		scheme = "https"
-	}
-	_, port, _ := strings.Cut(s.env.Cfg.APIAddr, ":")
-	return fmt.Sprintf("%s://%s:%s/cognito/%s", scheme, s.env.Cfg.PublicHost, port, pool)
+	return s.env.Cfg.PublicBase() + "/cognito/" + pool
 }
 
 func (s *Service) key(p Pool) (*rsa.PrivateKey, error) {

@@ -46,6 +46,10 @@ const (
 	stateEnabled  = "Enabled"
 	stateDisabled = "Disabled"
 	statePending  = "PendingDeletion"
+	stateImport   = "PendingImport" // Origin EXTERNAL without key material
+
+	originKMS      = "AWS_KMS"
+	originExternal = "EXTERNAL"
 
 	usageEncrypt = "ENCRYPT_DECRYPT"
 	usageSign    = "SIGN_VERIFY"
@@ -92,6 +96,21 @@ type Key struct {
 	Tags            core.Tags    `json:"tags,omitempty"`
 	Policy          string       `json:"policy,omitempty"`
 	Grants          []Grant      `json:"grants,omitempty"`
+
+	Origin          string     `json:"origin,omitempty"` // AWS_KMS (default) | EXTERNAL
+	MultiRegion     bool       `json:"multi_region,omitempty"`
+	ExpirationModel string     `json:"expiration_model,omitempty"` // imported material: KEY_MATERIAL_EXPIRES | KEY_MATERIAL_DOES_NOT_EXPIRE
+	ValidTo         *time.Time `json:"valid_to,omitempty"`
+	// MaterialDigest is the SHA-256 of the imported material (encrypted by the
+	// master key), kept after the material is deleted so only the same material can be re-imported.
+	MaterialDigest string `json:"material_digest,omitempty"`
+}
+
+func (k Key) external() bool { return k.Origin == originExternal }
+
+// hasMaterial reports whether the key has usable key material (always true for AWS_KMS keys).
+func (k Key) hasMaterial() bool {
+	return !k.external() || (len(k.Versions) > 0 && k.Versions[0].Material != "")
 }
 
 func (k Key) symmetric() bool { return k.KeySpec == specSym || k.KeySpec == "" }
@@ -199,6 +218,9 @@ func (s *Service) newVersion(spec string, v int) (keyVersion, error) {
 func (s *Service) material(k Key, version int) ([]byte, error) {
 	for _, v := range k.Versions {
 		if v.Version == version {
+			if v.Material == "" {
+				return nil, errf("KMSInvalidStateException", "%s is pending import.", k.ARN)
+			}
 			return s.master.Decrypt(v.Material)
 		}
 	}
@@ -246,16 +268,32 @@ func (s *Service) create(desc string, managed bool, tags core.Tags) (Key, error)
 	return s.createKey(keySpec{Spec: specSym, Usage: usageEncrypt}, desc, managed, tags, "")
 }
 
-type keySpec struct{ Spec, Usage string }
+type keySpec struct {
+	Spec, Usage, Origin string
+	MultiRegion         bool
+}
 
 func (s *Service) createKey(ks keySpec, desc string, managed bool, tags core.Tags, policy string) (Key, error) {
-	v, err := s.newVersion(ks.Spec, 1)
-	if err != nil {
-		return Key{}, err
+	var v keyVersion
+	state := stateEnabled
+	if ks.Origin == originExternal { // material arrives with ImportKeyMaterial
+		v, state = keyVersion{Version: 1, CreatedAt: s.now()}, stateImport
+	} else {
+		var err error
+		if v, err = s.newVersion(ks.Spec, 1); err != nil {
+			return Key{}, err
+		}
 	}
 	id := uuid()
+	if ks.MultiRegion {
+		id = "mrk-" + core.RandHex(32)
+	}
 	k := Key{ID: id, ARN: s.env.ARN("kms", "key/"+id), Description: desc, KeySpec: ks.Spec, KeyUsage: ks.Usage,
-		State: stateEnabled, Managed: managed, CreatedAt: s.now(), Versions: []keyVersion{v}, Tags: tags, Policy: policy}
+		State: state, Managed: managed, CreatedAt: s.now(), Versions: []keyVersion{v}, Tags: tags, Policy: policy,
+		Origin: ks.Origin, MultiRegion: ks.MultiRegion}
+	if k.Origin == originKMS {
+		k.Origin = ""
+	}
 	if managed { // AWS managed keys rotate every year
 		n := k.CreatedAt.AddDate(0, 0, defaultPeriod)
 		k.RotationEnabled, k.NextRotation = true, &n
@@ -321,9 +359,23 @@ func (s *Service) resolve(ref string) (Key, error) {
 		}
 		id = a.KeyID
 	}
-	k, err := store.Get[Key](s.env.Store, cKeys, id)
+	k, err := s.load(id)
 	if err != nil {
 		return k, errf("NotFoundException", "Key '%s' does not exist", s.env.ARN("kms", "key/"+id))
+	}
+	return k, nil
+}
+
+// load reads a key, expiring imported key material whose ValidTo has passed.
+func (s *Service) load(id string) (Key, error) {
+	k, err := store.Get[Key](s.env.Store, cKeys, id)
+	if err != nil {
+		return k, err
+	}
+	if k.external() && k.hasMaterial() && k.ValidTo != nil && !s.now().Before(*k.ValidTo) {
+		if k, err = store.Update(s.env.Store, cKeys, id, func(x *Key) error { dropMaterial(x); return nil }); err != nil {
+			return k, err
+		}
 	}
 	k.ARN = core.CanonicalARN(k.ARN)
 	return k, nil
@@ -351,6 +403,8 @@ func usable(k Key) error {
 		return nil
 	case stateDisabled:
 		return errf("DisabledException", "%s is disabled.", k.ARN)
+	case stateImport:
+		return errf("KMSInvalidStateException", "%s is pending import.", k.ARN)
 	}
 	return errf("KMSInvalidStateException", "%s is pending deletion.", k.ARN)
 }
@@ -471,11 +525,10 @@ func (s *Service) decryptSym(b []byte, ctx map[string]string) ([]byte, string, e
 	if !ok {
 		return nil, "", invalidCiphertext()
 	}
-	k, err := store.Get[Key](s.env.Store, cKeys, id)
+	k, err := s.load(id)
 	if err != nil {
 		return nil, "", invalidCiphertext()
 	}
-	k.ARN = core.CanonicalARN(k.ARN)
 	if err := usable(k); err != nil {
 		return nil, "", err
 	}
@@ -538,6 +591,7 @@ func (s *Service) Maintain() {
 
 func (s *Service) deleteKey(id string) {
 	_ = store.Delete(s.env.Store, cKeys, id)
+	s.dropTokens(id)
 	for _, a := range s.aliasesOf(id) {
 		_ = store.Delete(s.env.Store, cAliases, a)
 	}

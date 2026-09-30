@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
 	goruntime "runtime"
 	"strings"
@@ -94,6 +95,17 @@ if it exits: a launchd agent on macOS (starts at login), a systemd unit on Linux
 			if exe, err = filepath.EvalSymlinks(exe); err != nil {
 				return err
 			}
+			dataDir, err := serviceDataDir(cmd.Flags().Changed("data-dir"), dataDir, os.Geteuid(),
+				os.Getenv("SUDO_USER"), os.Getenv("HOMECLOUD_DATA_DIR"), func(u string) (string, error) {
+					usr, err := user.Lookup(u)
+					if err != nil {
+						return "", err
+					}
+					return usr.HomeDir, nil
+				})
+			if err != nil {
+				return err
+			}
 			dir, err := filepath.Abs(dataDir)
 			if err != nil {
 				return err
@@ -165,6 +177,21 @@ if it exits: a launchd agent on macOS (starts at login), a systemd unit on Linux
 	}
 	svcCmd.AddCommand(install, uninstall, status)
 	RootCmd.AddCommand(svcCmd)
+}
+
+// serviceDataDir picks the data directory a service uses. Run through sudo,
+// the default must come from the invoking user's home (whose data it is), not
+// root's; when that user cannot be resolved the command refuses rather than
+// silently creating a second installation under /root.
+func serviceDataDir(explicit bool, flagValue string, euid int, sudoUser, envDir string, homeOf func(string) (string, error)) (string, error) {
+	if explicit || envDir != "" || euid != 0 || sudoUser == "" || sudoUser == "root" {
+		return flagValue, nil
+	}
+	home, err := homeOf(sudoUser)
+	if err != nil || home == "" {
+		return "", fmt.Errorf("running under sudo as %s, whose home directory can't be found: pass --data-dir explicitly", sudoUser)
+	}
+	return filepath.Join(home, ".homecloud"), nil
 }
 
 func launchdPath() string {

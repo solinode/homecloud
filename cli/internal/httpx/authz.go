@@ -206,9 +206,11 @@ func mergeKeys(base, extra map[string][]string) map[string][]string {
 
 // RequestContext returns the IAM global condition keys that come from the HTTP
 // request itself: aws:SourceIp, aws:SecureTransport, aws:UserAgent, aws:Referer
-// and aws:TlsVersion. The source IP is the peer address of the connection:
-// X-Forwarded-For is not trusted, as HomeCloud has no notion of trusted proxies.
-// aws:SecureTransport is true only when the connection itself is TLS.
+// and aws:TlsVersion. The source IP is the peer address of the connection and
+// aws:SecureTransport is true only when the connection itself is TLS, unless the
+// peer is a trusted proxy (--trusted-proxies): ProxyTrust.Wrap then substitutes
+// the client address from X-Forwarded-For and the scheme from X-Forwarded-Proto.
+// Without trusted proxies the forwarding headers are ignored.
 func RequestContext(r *http.Request) map[string][]string {
 	c := map[string][]string{
 		"aws:sourceip":        {ClientIP(r)},

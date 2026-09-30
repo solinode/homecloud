@@ -104,6 +104,10 @@ func newInfraEnv(t *testing.T, docker bool) *infraEnv {
 	tasks.Routes(h.Router)
 	tasks.RegisterAWS()
 	if docker {
+		// The server runs this loop; it rolls deployments forward and retires old tasks.
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		go tasks.Run(ctx)
 		lb.Resolve = func(id string) (string, string, bool) { return tasks.PrivateIP(id) }
 		dns.Resolve = func(id string) (string, bool) { return lb.PrivateIP(id) }
 	}
@@ -756,9 +760,15 @@ func TestInfraECSService(t *testing.T) {
 	if !strings.HasSuffix(out2["TdArn"], ":task-definition/infra-svc:2") || out2["SvcArn"] != out["SvcArn"] {
 		t.Fatalf("update outputs: %v", out2)
 	}
-	s = list(e.AWSJSON(t, "ecs", "describe-services", "--cluster", "default", "--services", "infra-svc"), "services")[0]
-	if str(s, "status") != "ACTIVE" || s["runningCount"].(float64) != 1 || str(s, "taskDefinition") != out2["TdArn"] {
-		t.Fatalf("service after update: %v", s)
+	// The rolling deployment replaces the task after the update completes.
+	for deadline := time.Now().Add(2 * time.Minute); ; time.Sleep(time.Second) {
+		s = list(e.AWSJSON(t, "ecs", "describe-services", "--cluster", "default", "--services", "infra-svc"), "services")[0]
+		if str(s, "status") == "ACTIVE" && s["runningCount"].(float64) == 1 && str(s, "taskDefinition") == out2["TdArn"] {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("service after update: %v", s)
+		}
 	}
 
 	e.deleted(t, "svc")

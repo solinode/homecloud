@@ -38,6 +38,12 @@ export const TREAT_MISSING: { value: TreatMissingData; label: string }[] = [
   { value: "ignore", label: "Ignore (maintain the alarm state)" },
 ]
 
+const ANOMALY_OPERATORS: Record<string, string> = {
+  LessThanLowerOrGreaterThanUpperThreshold: "outside the anomaly detection band",
+  LessThanLowerThreshold: "below the anomaly detection band",
+  GreaterThanUpperThreshold: "above the anomaly detection band",
+}
+
 /** alarmCondition renders "CPUUtilization > 80 for 3 datapoints within 3 minutes". */
 export function alarmCondition(
   a: Pick<Alarm, "metric" | "comparison_operator" | "threshold" | "evaluation_periods" | "period" | "statistic"> & { datapoints_to_alarm?: number },
@@ -46,6 +52,8 @@ export function alarmCondition(
   const m = a.datapoints_to_alarm || a.evaluation_periods
   const dp = m === a.evaluation_periods ? (m === 1 ? "1 datapoint" : `${m} datapoints`) : `${m} out of ${a.evaluation_periods} datapoints`
   const stat = a.statistic && a.statistic !== "Average" ? ` (${a.statistic})` : ""
+  const band = ANOMALY_OPERATORS[a.comparison_operator]
+  if (band) return `${a.metric || "Metric"}${stat} ${band} for ${dp} within ${within}`
   return `${a.metric}${stat} ${operatorSymbol(a.comparison_operator)} ${a.threshold} for ${dp} within ${within}`
 }
 

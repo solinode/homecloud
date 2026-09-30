@@ -69,9 +69,11 @@ variables. Condition keys:
   `s3:RequestObjectTag`.
 - KMS: `kms:CallerAccount`.
 
-`aws:SourceIp` is the address of the connection; `X-Forwarded-For` is not trusted because
-HomeCloud has no notion of trusted proxies. `aws:SecureTransport` is true only when the
-connection to HomeCloud itself is TLS, so behind a TLS-terminating proxy it is false.
+`aws:SourceIp` is the address of the connection, and `aws:SecureTransport` is true only when the
+connection to HomeCloud itself is TLS. `X-Forwarded-For` and `X-Forwarded-Proto` are ignored unless the
+connection comes from a proxy listed in `--trusted-proxies`; then the rightmost `X-Forwarded-For` entry
+that is not itself a trusted proxy is the source address, and `X-Forwarded-Proto: https` makes
+`aws:SecureTransport` true.
 
 ## Coverage
 
@@ -84,10 +86,10 @@ connection to HomeCloud itself is TLS, so behind a TLS-terminating proxy it is f
 | DynamoDB | dynamodb | awsJson 1.0 | Tables, GSIs/LSIs, all item ops with expressions, batch, transactions, PartiQL, TTL, streams |
 | SQS | sqs | awsJson 1.0 + awsQuery | Standard and FIFO queues, DLQs and redrive, batch ops, long polling, queue policies |
 | SNS | sns | awsQuery | Topics (incl. FIFO), subscriptions (sqs, lambda, http/s, email), filter policies, topic policies, signed messages |
-| Secrets Manager | secretsmanager | awsJson 1.1 | Versions and staging labels, rotation via Lambda, resource policies |
+| Secrets Manager | secretsmanager | awsJson 1.1 | Versions and staging labels, rotation via Lambda, resource policies. Replication to other regions is not available: `AddReplicaRegions` and `ReplicateSecretToRegions` fail with `InvalidRequestException` because HomeCloud serves a single region |
 | SSM Parameter Store | ssm | awsJson 1.1 | Parameters, hierarchies, versions and labels, SecureString |
-| KMS | kms | awsJson 1.1 | Symmetric, RSA, ECC and HMAC keys, aliases, rotation, data keys, key policies, grants (stored) |
-| CloudWatch | monitoring | awsJson 1.0 + awsQuery | Metrics, GetMetricData with math, alarms, dashboards |
+| KMS | kms | awsJson 1.1 | Symmetric, RSA, ECC and HMAC keys, aliases, rotation, data keys, key policies, grants (stored), imported key material (`Origin=EXTERNAL`: `GetParametersForImport`, `ImportKeyMaterial` with RSAES_OAEP and RSA_AES_KEY_WRAP, expiry, `DeleteImportedKeyMaterial`; re-import needs the same material), multi-Region primary keys (`mrk-` ids). HomeCloud is one region, so `ReplicateKey` and `UpdatePrimaryRegion` return `UnsupportedOperationException` |
+| CloudWatch | monitoring | awsJson 1.0 + awsQuery | Metrics, GetMetricData with math (including `FILL(m, value \| REPEAT \| LINEAR)` and `ANOMALY_DETECTION_BAND`), alarms including anomaly detection alarms (`ThresholdMetricId`), anomaly detectors (`PutAnomalyDetector`, `DescribeAnomalyDetectors`, `DeleteAnomalyDetector`; single-metric and metric-math, `ExcludedTimeRanges`, `MetricTimezone`), dashboards |
 | CloudWatch Logs | logs | awsJson 1.1 | Groups, streams, events, filter patterns, Logs Insights, metric and subscription filters |
 | EventBridge | events | awsJson 1.1 | Buses, rules with full pattern syntax, targets with transforms |
 | EventBridge Scheduler | scheduler | restJson1 | Schedules and groups |
