@@ -377,7 +377,12 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		}
 		native.ServeHTTP(w, r)
 	})
-	srv := &http.Server{Addr: cfg.APIAddr, Handler: root, ReadHeaderTimeout: 10 * time.Second}
+	trust, err := httpx.ParseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		return err
+	}
+	var handler http.Handler = trust.Wrap(root)
+	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 	errc := make(chan error, 1)
 	go func() {
 		if cfg.TLSCert != "" {
@@ -391,7 +396,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if goruntime.GOOS == "linux" {
 		if host, _, _ := net.SplitHostPort(cfg.APIAddr); host == "127.0.0.1" || host == "localhost" {
 			if gw := dk.BridgeGateway(); gw != "" {
-				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: root, ReadHeaderTimeout: 10 * time.Second}
+				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: handler, ReadHeaderTimeout: 10 * time.Second}
 				go func() {
 					var err error
 					if cfg.TLSCert != "" {
