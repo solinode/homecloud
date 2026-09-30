@@ -252,9 +252,13 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 			"HC_VM_NET": os.Getenv("HC_VM_NET"), "HC_VM_HOSTFWD": hostFwd(s.vpc.IngressPorts(inst.SecurityGroups, 64)),
 		},
 		ExtraHosts: []string{runtime.HostAlias},
-		// passt isolates itself with a user namespace, which Docker's default
-		// seccomp profile only allows with CAP_SYS_ADMIN.
-		SecurityOpt: []string{"seccomp=unconfined"},
+		// passt sandboxes itself (user, mount and pid namespaces, pivot_root),
+		// which Docker's default seccomp profile and, on Ubuntu, its
+		// docker-default AppArmor profile forbid; the container gets no extra
+		// capability. It also opens a socket for each forwarded port, so it
+		// needs more than the 65536 open files some hosts allow by default.
+		SecurityOpt: []string{"seccomp=unconfined", "apparmor=unconfined"},
+		NoFile:      1048576,
 	}
 	if mach.KVM {
 		spec.Devices = []string{"/dev/kvm"}
@@ -374,7 +378,9 @@ func (s *Service) launchVM(inst Instance, network string) {
 		return
 	}
 	netMode := "passt"
-	if why := s.vmPasstFailure(cid); why != "" {
+	if os.Getenv("HC_VM_NET") == "user" {
+		netMode = "user"
+	} else if why := s.vmPasstFailure(cid); why != "" {
 		netMode = "user"
 		log.Printf("ec2: %s: passt could not start, so the guest uses user-mode networking behind NAT (no private address of its own; only ports allowed at launch are forwarded): %s", inst.ID, why)
 	}

@@ -49,6 +49,11 @@ if [ "${HC_VM_NET:-}" != "user" ]; then
   if [ ! -S /run/passt.sock ] || ! kill -0 "$pid" 2>/dev/null; then
     echo "[homecloud] passt did not start; falling back to user-mode networking:" >&2
     cat /run/passt.log >&2
+    if grep -q "Too many open files" /run/passt.log; then
+      echo "hint: the open-file limit ($(ulimit -Hn)) is too low for passt's port forwarding" >&2
+    elif grep -qE "sandbox|user namespace|remount|pivot_root" /run/passt.log; then
+      echo "hint: the container's seccomp or AppArmor profile blocks passt's sandbox (it needs seccomp=unconfined and apparmor=unconfined)" >&2
+    fi
     HC_VM_NET=user
   fi
 fi

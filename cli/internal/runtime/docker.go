@@ -96,6 +96,7 @@ type RunSpec struct {
 	CapAdd      []string // extra Linux capabilities (e.g. NET_ADMIN)
 	Devices     []string // host devices passed through (e.g. /dev/kvm)
 	SecurityOpt []string // e.g. seccomp=unconfined
+	NoFile      int64    // raise the open-file limit (soft and hard) to this; 0 keeps the default
 	Start       bool
 }
 
@@ -162,6 +163,9 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 	}
 	hc.CapAdd = s.CapAdd
 	hc.SecurityOpt = s.SecurityOpt
+	if s.NoFile > 0 {
+		hc.Ulimits = []docker.ULimit{{Name: "nofile", Soft: s.NoFile, Hard: s.NoFile}}
+	}
 	for _, dev := range s.Devices {
 		hc.Devices = append(hc.Devices, docker.Device{PathOnHost: dev, PathInContainer: dev, CgroupPermissions: "rwm"})
 	}
