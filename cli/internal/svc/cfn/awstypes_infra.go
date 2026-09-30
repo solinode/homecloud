@@ -612,6 +612,7 @@ func infraDBProps(x *xctx, in map[string]any) (map[string]any, error) {
 		id = x.GenName(63, true)
 	}
 	out := map[string]any{"id": id, "engine": strings.ToLower(sv(in, "Engine")), "class": sv(in, "DBInstanceClass")}
+	setInt(out, "_port", in, "Port") // for Post, which sees this request; the native API ignores it
 	for k, n := range map[string]string{"EngineVersion": "engine_version", "MasterUsername": "master_username", "MasterUserPassword": "master_password", "DBName": "db_name"} {
 		if has(in, k) {
 			out[n] = sv(in, k)
@@ -833,18 +834,23 @@ func init() {
 				}
 				out["attributes"] = a
 			}
+			var targets []any
+			for _, t := range lv(in, "Targets") {
+				tm, _ := t.(map[string]any)
+				targets = append(targets, map[string]any{"id": sv(tm, "Id"), "port": infraInt(tm, "Port", port)})
+			}
+			if targets != nil {
+				out["_targets"] = targets
+			}
 			if t := tagMap(in["Tags"]); t != nil {
 				out["tags"] = t
 			}
 			return out, nil
 		},
 		Post: func(x *xctx, id string, in, attrs map[string]any) error {
-			var targets []any
-			for _, t := range lv(in, "Targets") {
-				tm, _ := t.(map[string]any)
-				port := infraInt(tm, "Port", infraInt(in, "Port", 0))
-				targets = append(targets, map[string]any{"id": sv(tm, "Id"), "port": port})
-			}
+			// Post sees the translated request; the targets travel in it (the
+			// native API ignores unknown fields).
+			targets := lv(in, "_targets")
 			if targets == nil {
 				return nil
 			}
@@ -1135,9 +1141,9 @@ func init() {
 		Props: infraDBProps,
 		Post: func(x *xctx, id string, in, attrs map[string]any) error {
 			// The engine listens on its own port; a different Port cannot be honored.
-			if want, ok := iv(in, "Port"); ok {
+			if want, ok := iv(in, "_port"); ok {
 				if got, _ := iv(mv(attrs, "endpoint"), "port"); got != 0 && got != want {
-					return fmt.Errorf("Property Port=%d is not supported by HomeCloud: %s listens on port %d", want, sv(in, "Engine"), got)
+					return fmt.Errorf("Property Port=%d is not supported by HomeCloud: %s listens on port %d", want, sv(in, "engine"), got)
 				}
 			}
 			return nil
