@@ -687,10 +687,8 @@ func init() {
 			case "Arn":
 				return core.ARN(v.Account, "dynamodb", "table/"+v.ID), true
 			case "StreamArn":
-				if ss := lv(v.Attrs, "streams"); len(ss) > 0 {
-					if m, ok := ss[0].(map[string]any); ok && sv(m, "arn") != "" {
-						return sv(m, "arn"), true
-					}
+				if a := attrStr(v, "stream_arn"); a != "" {
+					return a, true
 				}
 				return nil, false
 			}

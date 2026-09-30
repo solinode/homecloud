@@ -16,8 +16,12 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cfn"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/cloudwatch"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/dynamodb"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/events"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/kms"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/s3"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/sfn"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/sns"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/sqs"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ssm"
@@ -94,6 +98,26 @@ func newEnv(t *testing.T, withS3 bool) *env {
 	p := ssm.New(h.Env, k)
 	p.Routes(h.Router)
 	p.RegisterAWS()
+	h.Secrets.Routes(h.Router)
+	h.Secrets.RegisterAWS()
+	ddb, err := dynamodb.New(h.Env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ddb.Routes(h.Router)
+	ddb.RegisterAWS()
+	cw, err := cloudwatch.New(h.Env)
+	if err != nil {
+		t.Fatal(err)
+	}
+	cw.Routes(h.Router)
+	cw.RegisterAWS()
+	ev := events.New(h.Env)
+	ev.Routes(h.Router)
+	ev.RegisterAWS()
+	sf := sfn.New(h.Env)
+	sf.Routes(h.Router)
+	sf.RegisterAWS()
 	if withS3 {
 		addr := startMinIO(t)
 		b := s3.New(h.Env, h.Secrets)
@@ -151,7 +175,13 @@ func (e *env) waitFor(t *testing.T, name string, want ...string) map[string]any 
 				}
 			}
 			if strings.HasSuffix(last, "_COMPLETE") || strings.HasSuffix(last, "_FAILED") {
-				t.Fatalf("stack %s reached %s (%s), want %v", name, last, str(st, "StackStatusReason"), want)
+				var why []string
+				for _, ev := range e.events(t, name) {
+					if strings.HasSuffix(str(ev, "ResourceStatus"), "_FAILED") {
+						why = append(why, str(ev, "LogicalResourceId")+": "+str(ev, "ResourceStatusReason"))
+					}
+				}
+				t.Fatalf("stack %s reached %s (%s), want %v: %v", name, last, str(st, "StackStatusReason"), want, why)
 			}
 		}
 		time.Sleep(100 * time.Millisecond)

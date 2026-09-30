@@ -270,8 +270,8 @@ func (d *decoder) decode(n *yaml.Node) (any, error) {
 		}
 		v = arr
 	case yaml.ScalarNode:
-		if err := n.Decode(&v); err != nil {
-			v = n.Value
+		if err := n.Decode(&v); err != nil || n.ShortTag() == "!!timestamp" {
+			v = n.Value // dates such as 2012-10-17 stay strings
 		}
 		if strings.HasPrefix(n.Tag, "!") && !strings.HasPrefix(n.Tag, "!!") {
 			v = n.Value // arguments of short-form intrinsics (!Ref x) are strings
