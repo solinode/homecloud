@@ -251,6 +251,7 @@ func (s *Service) sync(i Instance) Instance {
 	}
 	if i.State == "running" {
 		i.PublicPorts = s.env.Docker.PublishedPorts(i.ContainerID)
+		s.vmWatchPasst(i)
 	}
 	if want != i.State && !(i.State == "stopping" || i.State == "shutting-down") {
 		reason := ""

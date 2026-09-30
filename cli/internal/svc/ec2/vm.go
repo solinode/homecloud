@@ -2,6 +2,7 @@ package ec2
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"math"
@@ -235,6 +236,10 @@ func (s *Service) vmMachine(inst Instance) vm.Machine {
 func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 	mach := s.vmMachine(inst)
 	base := vm.Bases[inst.VMBase]
+	netEnv := os.Getenv("HC_VM_NET")
+	if inst.VMNetwork == "user" { // passt failed for this instance before: stay on user-mode networking
+		netEnv = "user"
+	}
 	dns := ""
 	if v, err := s.vpc.GetVPC(inst.VpcID); err == nil {
 		dns = vpc.DNSAddress(v.CIDR)
@@ -279,7 +284,7 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 			"HC_VM_BASE": base.CacheName(mach.Arch), "HC_VM_DISK_GB": strconv.Itoa(inst.VMDiskGB), "HC_VM_ARCH": string(mach.Arch), "HC_VM_DNS": dns,
 			"HC_VM_DISKS": strings.Join(disks, " "),
 			// Used only when passt is unavailable (or HC_VM_NET=user is set for the server).
-			"HC_VM_NET": os.Getenv("HC_VM_NET"), "HC_VM_HOSTFWD": hostFwd(s.vpc.IngressPorts(inst.SecurityGroups, 64)),
+			"HC_VM_NET": netEnv, "HC_VM_HOSTFWD": hostFwd(s.vpc.IngressPorts(inst.SecurityGroups, 64)),
 		},
 		ExtraHosts: []string{runtime.HostAlias},
 		// passt sandboxes itself (user and mount namespaces, pivot_root), which
@@ -432,7 +437,18 @@ func (s *Service) launchVM(inst Instance, network string) {
 	inst.ContainerID = cid
 	s.metadataRoute(ctx, cid, inst.VpcID)
 	s.vpc.ProtectNow(ctx, s.member(inst, cid))
-	if err := s.vmWaitReady(inst, since); err != nil {
+	err = s.vmWaitReady(inst, since)
+	if errors.Is(err, errPasstExited) {
+		// passt died while the guest booted: boot it again in user-mode networking.
+		log.Printf("ec2: %s: %v; restarting the guest with user-mode networking", inst.ID, err)
+		if err = s.vmFallbackToUser(inst.ID); err == nil {
+			if cur, gerr := store.Get[Instance](s.env.Store, cInstances, inst.ID); gerr == nil {
+				inst, cid = cur, cur.ContainerID
+				err = s.vmWaitReady(inst, time.Now().Add(-2*time.Second))
+			}
+		}
+	}
+	if err != nil {
 		if out, _ := s.env.Docker.Logs(cid, 30, time.Time{}); out != "" {
 			err = fmt.Errorf("%w: %s", err, tail(out, 1500))
 		}
@@ -441,7 +457,7 @@ func (s *Service) launchVM(inst Instance, network string) {
 		return
 	}
 	netMode := "passt"
-	if os.Getenv("HC_VM_NET") == "user" {
+	if os.Getenv("HC_VM_NET") == "user" || inst.VMNetwork == "user" {
 		netMode = "user"
 	} else if why := s.vmPasstFailure(cid); why != "" {
 		netMode = "user"
@@ -457,6 +473,53 @@ func (s *Service) launchVM(inst Instance, network string) {
 		return nil
 	})
 	s.syncPortsAsync(inst.ID) // groups may have changed while launching
+}
+
+// errPasstExited is what vmWaitReady returns when passt died under a running guest.
+var errPasstExited = errors.New("passt exited")
+
+// vmFallbackToUser records that passt does not work for an instance and
+// rebuilds its container with QEMU's user-mode networking (the guest boots
+// again; it sits behind NAT, and security group changes rebuild it).
+func (s *Service) vmFallbackToUser(id string) error {
+	if _, err := store.Update(s.env.Store, cInstances, id, func(x *Instance) error { x.VMNetwork = "user"; return nil }); err != nil {
+		return err
+	}
+	return s.recreate(id)
+}
+
+var (
+	passtWatchMu   sync.Mutex
+	passtWatchLast = map[string]time.Time{}
+)
+
+// vmWatchPasst looks (at most every 20 seconds per instance) for a passt that
+// died under a running guest, which the VM container's supervisor marks with
+// /run/passt.dead, and restarts the guest in user-mode networking.
+func (s *Service) vmWatchPasst(i Instance) {
+	if !i.IsVM() || i.State != "running" || i.VMNetwork == "user" || i.ContainerID == "" || isBusy(i.ID) {
+		return
+	}
+	passtWatchMu.Lock()
+	if time.Since(passtWatchLast[i.ID]) < 20*time.Second {
+		passtWatchMu.Unlock()
+		return
+	}
+	passtWatchLast[i.ID] = time.Now()
+	passtWatchMu.Unlock()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	res, err := s.env.Docker.Exec(ctx, i.ContainerID, []string{"test", "-f", "/run/passt.dead"}, nil)
+	if err != nil || res.ExitCode != 0 {
+		return
+	}
+	log.Printf("ec2: %s: passt exited under the running guest; restarting it with user-mode networking (the guest reboots, behind NAT)", i.ID)
+	go func() {
+		defer core.Recover("ec2 passt fallback " + i.ID)
+		if err := s.vmFallbackToUser(i.ID); err != nil {
+			log.Printf("ec2: %s: restart in user-mode networking: %v", i.ID, err)
+		}
+	}()
 }
 
 // vmPasstFailure returns why passt did not start in the VM container (what the
@@ -522,7 +585,7 @@ func (s *Service) vmWaitReady(inst Instance, since time.Time) error {
 		}
 		out, _ := s.env.Docker.Logs(inst.ContainerID, 0, since)
 		if strings.Contains(out, "[homecloud] passt exited unexpectedly") {
-			return fmt.Errorf("passt exited, so the guest has no network: %s", tail(out[strings.LastIndex(out, "[homecloud] passt exited unexpectedly"):], 600))
+			return fmt.Errorf("%w, so the guest has no network: %s", errPasstExited, tail(out[strings.LastIndex(out, "[homecloud] passt exited unexpectedly"):], 600))
 		}
 		done, prompt := vm.Ready(out)
 		if done {

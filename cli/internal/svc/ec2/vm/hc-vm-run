@@ -58,19 +58,25 @@ fi
 # namespace (127.0.0.11), so names resolve as they do for container instances.
 dns=""
 if [ -n "${HC_VM_DNS:-}" ]; then dns="-D $HC_VM_DNS --dns-forward $HC_VM_DNS --dns-host 127.0.0.11"; fi
-rm -f /tmp/passt.sock /run/qmp.sock /run/serial.sock /run/qga.sock
+rm -f /run/passt.dead /tmp/passt.sock /run/qmp.sock /run/serial.sock /run/qga.sock
 if [ "${HC_VM_NET:-}" != "user" ]; then
+  # -d logs each flow: it is what tells why passt exited. The log is appended
+  # to /run/passt.log and cut back to its last MiB when it passes 4 MiB.
+  : >/run/passt.log
   # shellcheck disable=SC2086
-  # -d logs each flow to a circular 2 MiB file: it is what tells why passt exited.
-  passt -f -d -l /run/passt.log --log-size 2097152 -s /tmp/passt.sock -t all -u all $dns >/dev/null 2>&1 &
+  passt -f -d -s /tmp/passt.sock -t all -u all $dns >>/run/passt.log 2>&1 &
   pid=$!
+  ( while sleep 20; do
+      [ "$(stat -c %s /run/passt.log 2>/dev/null || echo 0)" -gt 4194304 ] &&
+        tail -c 1048576 /run/passt.log > /run/passt.log.tmp && cat /run/passt.log.tmp > /run/passt.log
+    done ) &
   n=0
   while [ ! -S /tmp/passt.sock ] && [ $n -lt 50 ]; do n=$((n+1)); sleep 0.1; done
   # passt binds its socket (as nobody: /tmp is world-writable, /run is not) and sandboxes itself; it can still exit then.
   sleep 0.5
   if [ ! -S /tmp/passt.sock ] || ! kill -0 "$pid" 2>/dev/null; then
     echo "[homecloud] passt did not start; falling back to user-mode networking:" >&2
-    cat /run/passt.log >&2
+    tail -n 40 /run/passt.log >&2 || true
     if grep -q "Too many open files" /run/passt.log; then
       echo "hint: the open-file limit ($(ulimit -Hn)) is too low for passt's port forwarding" >&2
     elif grep -q "Failed to bind" /run/passt.log; then
@@ -106,6 +112,7 @@ reported=
 while alive "$qemu"; do
   if [ -n "${pid:-}" ] && [ -z "$reported" ] && ! alive "$pid"; then
     reported=1
+    touch /run/passt.dead # HomeCloud looks for this and restarts the guest in user-mode networking
     st=0; wait "$pid" || st=$?
     echo "[homecloud] passt exited unexpectedly (status $st; 137 is SIGKILL, 159 SIGSYS); the guest has lost its network:" >&2
     tail -n 40 /run/passt.log >&2
