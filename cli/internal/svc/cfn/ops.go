@@ -434,6 +434,10 @@ func (s *Service) destroy(ctx context.Context, p *httpx.Principal, st *Stack) er
 		st.Order = slices.Delete(st.Order, i, i+1)
 		s.event(st, id, res.Type, "DELETE_COMPLETE", "", pid)
 	}
+	if kept := s.removeLeftovers(ctx, p, st, strays(st)); len(kept) > 0 {
+		return &resErr{id: kept[0].LogicalID, err: fmt.Errorf("could not delete the old %s", kept[0].PhysicalID)}
+	}
+	st.Rollback = nil
 	return nil
 }
 
@@ -782,7 +786,11 @@ func (s *Service) UpdateStack(ctx context.Context, p *httpx.Principal, ref strin
 // launchUpdate applies req to the stored stack st (which the caller holds s.mu for).
 func (s *Service) launchUpdate(p *httpx.Principal, st Stack, req StackReq, t *Template, ps map[string]any, after func(string)) Stack {
 	prev, _ := Parse(st.Template)
-	st.Rollback = snapshot(&st)
+	snap := snapshot(&st)
+	if st.Rollback != nil {
+		snap.Leftovers = st.Rollback.Leftovers
+	}
+	st.Rollback = snap
 	st.DisableRollback = req.DisableRollback
 	st.Template, st.Parameters, st.Description = req.Template, ps, t.Description
 	if req.Tags != nil || !req.KeepTags {

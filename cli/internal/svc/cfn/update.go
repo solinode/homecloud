@@ -53,6 +53,61 @@ type UpdateState struct {
 	Order            []string              `json:"order"`
 	Resources        map[string]*Resource  `json:"resources"`
 	Steps            []Step                `json:"steps,omitempty"`
+	// Leftovers are old resources of replacements whose update failed without
+	// a rollback; the next successful update or the deletion of the stack removes them.
+	Leftovers []*Resource `json:"leftovers,omitempty"`
+}
+
+// keepLeftovers is what remains of an update state once the update is over.
+func keepLeftovers(u *UpdateState, st *Stack, withReplaced bool) *UpdateState {
+	if u == nil {
+		return nil
+	}
+	left := u.Leftovers
+	if withReplaced {
+		for _, step := range u.Steps {
+			old, cur := u.Resources[step.ID], st.Resources[step.ID]
+			if step.Kind == "replace" && old != nil && old.native() != "" && (cur == nil || cur.native() != old.native()) {
+				left = append(left, old)
+			}
+		}
+	}
+	if len(left) == 0 {
+		return nil
+	}
+	return &UpdateState{Leftovers: left}
+}
+
+// strays lists resources a stack still owns that are not part of it: leftovers
+// of failed updates and the replacements a rollback did not remove yet.
+func strays(st *Stack) []*Resource {
+	u := st.Rollback
+	if u == nil {
+		return nil
+	}
+	out := slices.Clone(u.Leftovers)
+	for _, step := range u.Steps {
+		cur := st.Resources[step.ID]
+		if step.Kind == "replace" && !step.Cleaned && step.New != nil && step.New.native() != "" && (cur == nil || cur.native() != step.New.native()) {
+			out = append(out, step.New)
+		}
+	}
+	return out
+}
+
+// removeLeftovers deletes the old resources earlier failed updates left behind.
+func (s *Service) removeLeftovers(ctx context.Context, p *httpx.Principal, st *Stack, left []*Resource) []*Resource {
+	var kept []*Resource
+	for _, old := range left {
+		s.event(st, old.LogicalID, old.Type, "DELETE_IN_PROGRESS", "", old.PhysicalID)
+		if err := s.deleteResource(ctx, p, old); err != nil {
+			s.event(st, old.LogicalID, old.Type, "DELETE_FAILED", err.Error(), old.PhysicalID)
+			kept = append(kept, old)
+			continue
+		}
+		s.event(st, old.LogicalID, old.Type, "DELETE_COMPLETE", "", old.PhysicalID)
+	}
+	return kept
 }
 
 func clone[T any](v T) T {
@@ -310,7 +365,7 @@ func (s *Service) runUpdate(ctx context.Context, p *httpx.Principal, st *Stack, 
 			s.event(st, id, def.Type, "UPDATE_COMPLETE", "")
 		case "replace":
 			if collides(def.Type, old, pm) {
-				msg := customNameError(old.PhysicalID)
+				msg := customNameError(toStr(old.Properties[nameProp(def.Type)]))
 				old.Status, old.Reason = "UPDATE_FAILED", msg
 				s.event(st, id, old.Type, "UPDATE_FAILED", msg)
 				return fail(upErr(id, errors.New(msg), "update"))
@@ -320,7 +375,7 @@ func (s *Service) runUpdate(ctx context.Context, p *httpx.Principal, st *Stack, 
 			if err != nil {
 				msg := err.Error()
 				if strings.Contains(strings.ToLower(msg), "already exist") {
-					msg = customNameError(old.PhysicalID)
+					msg = customNameError(firstNonEmpty(toStr(old.Properties[nameProp(def.Type)]), old.PhysicalID))
 					err = errors.New(msg)
 				}
 				res.Reason = msg
@@ -404,7 +459,7 @@ func (s *Service) cleanupUpdate(ctx context.Context, p *httpx.Principal, st *Sta
 		s.event(st, id, res.Type, "DELETE_COMPLETE", "", pid)
 	}
 	st.Order = append(slices.Clone(ord), leftover...)
-	st.Rollback = nil
+	st.Rollback = keepLeftovers(&UpdateState{Leftovers: s.removeLeftovers(ctx, p, st, u.Leftovers)}, st, false)
 	return "UPDATE_COMPLETE", ""
 }
 
@@ -412,7 +467,7 @@ func (s *Service) cleanupUpdate(ctx context.Context, p *httpx.Principal, st *Sta
 func (s *Service) failUpdate(ctx context.Context, p *httpx.Principal, st *Stack, err error, disable bool) (string, string) {
 	reason := failedReason(err, "update")
 	if disable {
-		st.Rollback = nil
+		st.Rollback = keepLeftovers(st.Rollback, st, true)
 		return "UPDATE_FAILED", reason
 	}
 	s.stackEvent(st, "UPDATE_ROLLBACK_IN_PROGRESS", reason)
@@ -513,7 +568,7 @@ func (s *Service) rollbackUpdate(ctx context.Context, p *httpx.Principal, st *St
 		}
 	}
 	st.Order = slices.Clone(u.Order)
-	st.Rollback = nil
+	st.Rollback = keepLeftovers(u, st, false)
 	return "UPDATE_ROLLBACK_COMPLETE", ""
 }
 
