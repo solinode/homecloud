@@ -105,7 +105,7 @@ aws ec2 run-instances --image-id ami-ubuntu-24-04-vm --instance-type t3.small --
 ssh -i dev.pem -p <published port> ubuntu@localhost      # after an `ssh` ingress rule opens tcp/22
 ```
 
-The guest has the instance's private IP, the VPC's DNS and the metadata service, and security groups filter its traffic. It runs with KVM acceleration when the Docker host has `/dev/kvm` (Linux) and is emulated otherwise, for example on Docker Desktop and OrbStack for Mac: it works but boots in about a minute. Cloud images (about 600 MB) are downloaded once on first use and cached in a Docker volume. Volumes, snapshots and images of VM disks, the browser terminal and run-command are not available for VM instances yet; see [docs/architecture.md](docs/architecture.md).
+The guest has the instance's private IP, the VPC's DNS and the metadata service, and security groups filter its traffic. It runs with KVM acceleration when the Docker host has `/dev/kvm` (Linux) and is emulated otherwise, for example on Docker Desktop and OrbStack for Mac: it works but boots in about a minute. Cloud images (about 600 MB) are downloaded once on first use and cached in a Docker volume. Extra volumes are virtio disks (`/dev/disk/by-id/virtio-<volume id>`; attaching or detaching one reboots the guest), snapshots and images of VM disks are standalone copies, and backups restore bootable. The browser terminal and run-command are not available for VM instances yet; see [docs/architecture.md](docs/architecture.md).
 
 ---
 
@@ -221,7 +221,7 @@ homecloud upgrade                 # verified update from GitHub releases
 * ✅ **Workflows:** Step Functions
 * ✅ **Infrastructure as code:** CloudFormation-style stacks
 * ✅ **AWS compatibility:** the AWS CLI, SDKs and Terraform work against HomeCloud for IAM/STS, EC2/VPC, S3, Lambda, DynamoDB, SQS, SNS, Secrets Manager, SSM, KMS, CloudWatch, EventBridge, Step Functions, Elastic Load Balancing, Auto Scaling, ECS and ECR
-* 🔄 **Next:** AWS APIs for RDS, API Gateway, Route 53, ACM, EFS, ElastiCache and CloudFormation; stricter security groups and resource policies; volumes, snapshots and a browser terminal for VM instances; multi-node clusters
+* 🔄 **Next:** AWS APIs for RDS, API Gateway, Route 53, ACM, EFS, ElastiCache and CloudFormation; stricter security groups and resource policies; a browser terminal and run-command for VM instances; multi-node clusters
 * 🔄 **Phase 4:** Edge compute and hardware integrations
 
 📍 **[See the open issues](https://github.com/solinode/homecloud/issues)** for everything planned, with a checklist per item.
