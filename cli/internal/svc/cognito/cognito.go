@@ -70,6 +70,9 @@ type Group struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Precedence  int    `json:"precedence"`
+	RoleARN     string `json:"role_arn,omitempty"`
+	// CreatedAt is set by AWS-created groups (CreationDate).
+	CreatedAt time.Time `json:"created_at,omitempty"`
 }
 
 type Client struct {
@@ -895,6 +898,7 @@ func (s *Service) newGroup(pool string, g Group) (Pool, error) {
 		if slices.ContainsFunc(p.Groups, func(x Group) bool { return x.Name == g.Name }) {
 			return core.Errf(http.StatusConflict, "GroupExistsException", "group %q already exists", g.Name)
 		}
+		g.CreatedAt = core.Now()
 		p.Groups = append(p.Groups, g)
 		return nil
 	})
@@ -1136,7 +1140,7 @@ func (s *Service) authenticate(poolID string, in authInput, ip string) (any, err
 			if err := store.Put(s.env.Store, cSessions, hashToken(session), challenge{PoolID: p.ID, ClientID: cl.ID, Username: u.Username, Expires: time.Now().Add(5 * time.Minute)}); err != nil {
 				return nil, err
 			}
-			return map[string]any{"challenge": "NEW_PASSWORD_REQUIRED", "session": session}, nil
+			return map[string]any{"challenge": "NEW_PASSWORD_REQUIRED", "session": session, "username": u.Username}, nil
 		}
 		return s.issue(p, cl, u, true)
 	case "REFRESH_TOKEN_AUTH":

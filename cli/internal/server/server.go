@@ -286,6 +286,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	ecrSvc.RegisterAWS()
 	ecsSvc.RegisterAWS()
 	trailSvc.RegisterAWS()
+	cognitoSvc.RegisterAWS()
 	wireTrail(trailSvc, s3Svc)
 	ecsSvc.Roles, ecsSvc.Params, ecsSvc.RegistryHost = ecsRoles{iamSvc}, ssmSvc, ecrSvc.Host()
 	ecsSvc.Logs = func(group, stream string, ts []time.Time, msgs []string) error {
