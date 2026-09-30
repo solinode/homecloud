@@ -53,12 +53,20 @@ func ValidateResourcePolicy(text string) error {
 	if len(d.Statement) == 0 {
 		return malformed("policy document needs at least one Statement")
 	}
+	if d.Version != "" && d.Version != policyVersion && d.Version != "2008-10-17" {
+		return malformed("The policy failed legacy parsing: Version must be 2012-10-17 or 2008-10-17")
+	}
 	for i, st := range d.Statement {
+		// Sids are not restricted here: S3 and SQS policies in the wild carry dashes and underscores.
+		st.Sid = ""
 		if err := st.validateCommon(i); err != nil {
 			return err
 		}
 		if st.Principal == nil && st.NotPrincipal == nil {
 			return malformed("Statement[%d] needs a Principal", i)
+		}
+		if len(st.Resource) == 0 && len(st.NotResource) == 0 {
+			return malformed("Statement[%d] needs a Resource or NotResource", i)
 		}
 	}
 	return nil

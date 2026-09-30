@@ -1028,11 +1028,28 @@ func (s *Service) putBucketPolicy(a *s3req) error {
 	if err != nil {
 		return err
 	}
+	if err := validateBucketPolicy(b); err != nil {
+		return err
+	}
 	resp, err := s.sendBuffered(a, b, extra)
 	if err != nil {
 		return err
 	}
 	s.forgetPolicy(a.bucket)
+	if resp.StatusCode == http.StatusBadRequest {
+		// MinIO cannot express some policies (ArnLike, aws:PrincipalArn, ...).
+		// HomeCloud evaluates the policy itself, so it keeps the document and
+		// leaves MinIO without one (its own endpoint then grants nothing).
+		resp.Body.Close()
+		cl, err := s.cl()
+		if err != nil {
+			return err
+		}
+		if err := cl.SetBucketPolicy(a.ctx(), a.bucket, ""); err != nil {
+			return s3err(err)
+		}
+		resp = &http.Response{StatusCode: http.StatusNoContent, Header: http.Header{}, Body: io.NopCloser(bytes.NewReader(nil))}
+	}
 	if resp.StatusCode/100 == 2 {
 		cl, _ := s.cl()
 		norm, _ := cl.GetBucketPolicy(a.ctx(), a.bucket)
@@ -1050,6 +1067,16 @@ func (s *Service) getBucketPolicy(a *s3req) error {
 		return err
 	}
 	m := s.meta(a.bucket)
+	if resp.StatusCode == http.StatusNotFound && m.Config["policy"] != "" && m.Config["policyNorm"] == awsapi.HashHex(nil) {
+		// A policy MinIO could not store (see putBucketPolicy).
+		resp.Body.Close()
+		body := []byte(m.Config["policy"])
+		resp.StatusCode, resp.Status = http.StatusOK, "200 OK"
+		resp.Body = io.NopCloser(bytes.NewReader(body))
+		resp.Header.Set("Content-Length", strconv.Itoa(len(body)))
+		resp.Header.Set("Content-Type", "application/json")
+		return s.relay(a, resp)
+	}
 	if resp.StatusCode != http.StatusOK || m.Config["policy"] == "" {
 		return s.relay(a, resp)
 	}

@@ -3,11 +3,16 @@ package s3
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"net/http"
 	"strings"
 	"sync"
 	"time"
 
+	"github.com/homecloudhq/homecloud/cli/internal/awsapi"
+	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/iam"
 )
 
 // Bucket policies are stored in MinIO (so the MinIO endpoint applies them to
@@ -49,6 +54,12 @@ func (s *Service) bucketPolicy(ctx context.Context, bucket string) (string, erro
 		return "", s3err(err)
 	}
 	raw = strings.TrimSpace(raw)
+	// MinIO holds a normalized (or, for policies it cannot express, no) copy of
+	// the policy; the document as it was put is HomeCloud's source of truth
+	// while MinIO still holds what was stored with it.
+	if m := s.meta(bucket); m.Config["policy"] != "" && m.Config["policyNorm"] == awsapi.HashHex([]byte(raw)) {
+		raw = strings.TrimSpace(m.Config["policy"])
+	}
 	s.policies.mu.Lock()
 	if s.policies.m == nil {
 		s.policies.m = map[string]cachedPolicy{}
@@ -62,6 +73,19 @@ func (s *Service) forgetPolicy(bucket string) {
 	s.policies.mu.Lock()
 	delete(s.policies.m, bucket)
 	s.policies.mu.Unlock()
+}
+
+// validateBucketPolicy checks a bucket policy document as PutBucketPolicy
+// receives it.
+func validateBucketPolicy(b []byte) error {
+	if err := iam.ValidateResourcePolicy(string(b)); err != nil {
+		var ce *core.Error
+		if errors.As(err, &ce) {
+			return awsapi.Errorf(http.StatusBadRequest, "MalformedPolicy", "%s", ce.Message)
+		}
+		return awsapi.Errorf(http.StatusBadRequest, "MalformedPolicy", "%v", err)
+	}
+	return nil
 }
 
 // policyProvider makes bucket policies part of authorization on the native API.
