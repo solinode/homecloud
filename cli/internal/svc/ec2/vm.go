@@ -262,6 +262,26 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 	return spec
 }
 
+// vmFwdMatches reports whether a VM container forwards the ports its groups
+// allow. That only matters with user-mode networking (HC_VM_NET=user), where
+// QEMU forwards a fixed list of ports given at creation; with passt every
+// port reaches the guest and nothing needs rebuilding.
+func (s *Service) vmFwdMatches(inst Instance) bool {
+	if !inst.IsVM() || os.Getenv("HC_VM_NET") != "user" {
+		return true
+	}
+	c, err := s.env.Docker.Inspect(inst.ContainerID)
+	if err != nil || c.Config == nil {
+		return true
+	}
+	for _, e := range c.Config.Env {
+		if v, ok := strings.CutPrefix(e, "HC_VM_HOSTFWD="); ok {
+			return v == hostFwd(s.vpc.IngressPorts(inst.SecurityGroups, 64))
+		}
+	}
+	return true
+}
+
 // hostFwd renders ports as QEMU user-mode networking forwards.
 func hostFwd(ports []runtime.Port) string {
 	var b strings.Builder
@@ -419,9 +439,9 @@ func (s *Service) vmWaitReady(inst Instance, since time.Time) error {
 // vmShutdownTimeout is how long the guest gets to power off after the ACPI request.
 func vmShutdownTimeout(inst Instance) time.Duration {
 	if inst.Virtualization == "kvm" {
-		return 2 * time.Minute
+		return 90 * time.Second
 	}
-	return 4 * time.Minute
+	return 3 * time.Minute
 }
 
 // vmPowerOff asks the guest to shut down (ACPI power button through QMP) and
@@ -450,7 +470,8 @@ func (s *Service) vmPowerOff(inst Instance) bool {
 // still there; force skips the graceful part.
 func (s *Service) vmStop(inst Instance, force bool) error {
 	if !force && !s.vmPowerOff(inst) {
-		log.Printf("ec2: %s did not power off in %s; killing it", inst.ID, vmShutdownTimeout(inst))
+		out, _ := s.env.Docker.Logs(inst.ContainerID, 12, time.Time{})
+		log.Printf("ec2: %s did not power off in %s; killing it. Console: %s", inst.ID, vmShutdownTimeout(inst), tail(out, 1500))
 	}
 	return s.env.Docker.Stop(inst.ContainerID, 0)
 }

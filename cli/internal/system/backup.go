@@ -127,6 +127,9 @@ func (b *Backup) Write(ctx context.Context, w io.Writer, volumes bool, logf func
 			if acct := v.Labels[core.LabelAccount]; acct != b.AccountID && (acct != "" || b.OwnVolumesOnly) {
 				continue // another installation's volume
 			}
+			if v.Labels[core.LabelService] == "ec2" && v.Labels[core.LabelResource] == "vm-images" {
+				continue // the cloud image cache: downloaded again when a VM needs it
+			}
 			lb, _ := json.Marshal(v.Labels)
 			if err := addBytes(tw, "volumes/"+v.Name+".json", lb); err != nil {
 				return err

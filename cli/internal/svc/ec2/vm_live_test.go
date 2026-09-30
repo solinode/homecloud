@@ -244,7 +244,8 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	if got := sshRun(t, c, "curl -s -m 10 http://169.254.169.254/latest/meta-data/instance-id"); got != id {
 		t.Errorf("instance-id from the metadata service inside the guest = %q, want %q", got, id)
 	}
-	if got := sshRun(t, c, "ip -4 -o addr show scope global"); !strings.Contains(got, ip+"/") {
+	// (With HC_VM_NET=user, the fallback, the guest sits behind NAT at 10.0.2.15.)
+	if got := sshRun(t, c, "ip -4 -o addr show scope global"); os.Getenv("HC_VM_NET") != "user" && !strings.Contains(got, ip+"/") {
 		t.Errorf("guest addresses %q lack the instance's private address %s", got, ip)
 	}
 	if got := sshRun(t, c, "uname -m"); got != "aarch64" && got != "x86_64" {

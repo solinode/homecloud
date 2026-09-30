@@ -7,7 +7,8 @@
 #   /hc/seed  cloud-init NoCloud files, written by HomeCloud before the first start
 #
 # Environment: HC_VM_BASE (file in /images), HC_VM_DISK_GB, HC_VM_ARCH
-# (aarch64|x86_64), HC_VM_DNS (comma separated resolvers for the guest).
+# (aarch64|x86_64), HC_VM_DNS (the resolver address the guest is given),
+# HC_VM_NET=user and HC_VM_HOSTFWD (user-mode networking, see below).
 # The arguments are the QEMU command line.
 set -eu
 
@@ -40,9 +41,12 @@ rm -f /run/passt.sock /run/qmp.sock
 if [ "${HC_VM_NET:-}" != "user" ]; then
   # shellcheck disable=SC2086
   passt -f -s /run/passt.sock -t all -u all $dns >/run/passt.log 2>&1 &
+  pid=$!
   n=0
   while [ ! -S /run/passt.sock ] && [ $n -lt 50 ]; do n=$((n+1)); sleep 0.1; done
-  if [ ! -S /run/passt.sock ]; then
+  # passt binds its socket first and isolates itself afterwards; it can still exit then.
+  sleep 0.5
+  if [ ! -S /run/passt.sock ] || ! kill -0 "$pid" 2>/dev/null; then
     echo "[homecloud] passt did not start; falling back to user-mode networking:" >&2
     cat /run/passt.log >&2
     HC_VM_NET=user
