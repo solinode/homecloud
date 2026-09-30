@@ -124,6 +124,9 @@ type Instance struct {
 	VMBase         string `json:"vm_base,omitempty"`    // key of the cloud image (vm.Bases)
 	VMUser         string `json:"vm_user,omitempty"`    // the image's default login user
 	VMDiskGB       int    `json:"vm_disk_gb,omitempty"` // root disk size
+	// VMNetwork is "passt" (the guest has the instance's address) or "user"
+	// (passt could not start: the guest is behind NAT with forwarded ports).
+	VMNetwork string `json:"vm_network,omitempty"`
 }
 
 // IsVM reports whether the instance is a virtual machine.

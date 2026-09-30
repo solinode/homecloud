@@ -27,7 +27,7 @@ import (
 //
 // (DOCKER_HOST=unix://$HOME/.orbstack/run/docker.sock on macOS with OrbStack).
 
-const vmTestBudget = 40 * time.Minute // per wait for a guest to boot; TCG is slow
+const vmTestBudget = 12 * time.Minute // per wait for a guest to boot or a rebuild; emulated boots take up to about 5 minutes
 
 // The Ubuntu image is the default; HC_TEST_VM_IMAGE=debian boots Debian instead (faster to boot emulated).
 var vmTestImage, vmTestUser = func() (string, string) {
@@ -43,6 +43,7 @@ type vmInstance struct {
 	PrivateIP      string         `json:"private_ip"`
 	Virtualization string         `json:"virtualization"`
 	VMUser         string         `json:"vm_user"`
+	VMNetwork      string         `json:"vm_network"`
 	PublicPorts    map[string]int `json:"public_ports"`
 	StateReason    string         `json:"state_reason"`
 }
@@ -108,7 +109,7 @@ func (f *filterEnv) startIMDS(t *testing.T) {
 func sshDial(t *testing.T, port int, signer ssh.Signer, user string) *ssh.Client {
 	t.Helper()
 	var c *ssh.Client
-	waitFor(t, "ssh on published port", 10*time.Minute, func() bool {
+	waitFor(t, "ssh on published port", vmTestBudget, func() bool {
 		var err error
 		c, err = ssh.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port), &ssh.ClientConfig{
 			User: user, Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)}, HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: 15 * time.Second,
@@ -212,6 +213,10 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	if i.Virtualization != "kvm" && i.Virtualization != "emulated" || i.VMUser != vmTestUser {
 		t.Fatalf("instance reports virtualization %q, user %q", i.Virtualization, i.VMUser)
 	}
+	if os.Getenv("HC_VM_NET") != "user" && i.VMNetwork != "passt" {
+		logs, _ := h.Env.Docker.Logs(i.ContainerID, 40, time.Time{})
+		t.Fatalf("passt did not run (vm_network=%q): the guest has no private address of its own. Container log:\n%s", i.VMNetwork, logs)
+	}
 	if i.PublicPorts["22/tcp"] == 0 {
 		ci, _ := h.Env.Docker.Inspect(i.ContainerID)
 		if ci != nil {
@@ -293,7 +298,7 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	f.bannerEventually(t, true, helper, ip, "world-open rule")
 	// Revoking it unpublishes the port; the container is rebuilt, so the guest reboots.
 	h.AWS(t, "ec2", "revoke-security-group-ingress", "--group-id", sg, "--protocol", "tcp", "--port", "22", "--cidr", "0.0.0.0/0")
-	waitFor(t, "port unpublished", 10*time.Minute, func() bool { g := f.vmGet(id); return g.State == "running" && len(g.PublicPorts) == 0 })
+	waitFor(t, "port unpublished", vmTestBudget, func() bool { g := f.vmGet(id); return g.State == "running" && len(g.PublicPorts) == 0 })
 	// A rule for the probe's address only lets it in, once the guest is back up.
 	h.AWS(t, "ec2", "authorize-security-group-ingress", "--group-id", sg, "--protocol", "tcp", "--port", "22", "--cidr", helper.ip+"/32")
 	f.bannerEventually(t, true, helper, ip, "rule for the probe")
@@ -309,7 +314,7 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	f.bannerEventually(t, true, helper, ip, "rule for the probe again")
 	// A loopback-only rule publishes the port again (another rebuild); the disk survived.
 	h.AWS(t, "ec2", "authorize-security-group-ingress", "--group-id", sg, "--protocol", "tcp", "--port", "22", "--cidr", "127.0.0.1/32")
-	waitFor(t, "loopback port published", 10*time.Minute, func() bool { return f.vmGet(id).PublicPorts["22/tcp"] > 0 })
+	waitFor(t, "loopback port published", vmTestBudget, func() bool { return f.vmGet(id).PublicPorts["22/tcp"] > 0 })
 	c = sshDial(t, f.vmGet(id).PublicPorts["22/tcp"], signer, vmTestUser)
 	if got := sshRun(t, c, "cat /home/"+vmTestUser+"/keep.txt"); got != "persisted" {
 		t.Errorf("after the rebuild: %q", got)

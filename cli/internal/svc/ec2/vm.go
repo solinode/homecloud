@@ -267,7 +267,7 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 // QEMU forwards a fixed list of ports given at creation; with passt every
 // port reaches the guest and nothing needs rebuilding.
 func (s *Service) vmFwdMatches(inst Instance) bool {
-	if !inst.IsVM() || os.Getenv("HC_VM_NET") != "user" {
+	if !inst.IsVM() || (os.Getenv("HC_VM_NET") != "user" && inst.VMNetwork != "user") {
 		return true
 	}
 	c, err := s.env.Docker.Inspect(inst.ContainerID)
@@ -373,15 +373,50 @@ func (s *Service) launchVM(inst Instance, network string) {
 		fail(err)
 		return
 	}
+	netMode := "passt"
+	if why := s.vmPasstFailure(cid); why != "" {
+		netMode = "user"
+		log.Printf("ec2: %s: passt could not start, so the guest uses user-mode networking behind NAT (no private address of its own; only ports allowed at launch are forwarded): %s", inst.ID, why)
+	}
 	_, _ = store.Update(s.env.Store, cInstances, inst.ID, func(x *Instance) error {
 		if x.State != "pending" { // terminated meanwhile
 			return nil
 		}
+		x.VMNetwork = netMode
 		x.State, x.StateReason = "running", ""
 		x.PublicPorts = s.env.Docker.PublishedPorts(cid)
 		return nil
 	})
 	s.syncPortsAsync(inst.ID) // groups may have changed while launching
+}
+
+// vmPasstFailure returns why passt did not start in the VM container (what the
+// entrypoint printed before falling back to user-mode networking), or "".
+func (s *Service) vmPasstFailure(cid string) string {
+	out, err := s.env.Docker.Logs(cid, 0, time.Time{})
+	if err != nil {
+		return ""
+	}
+	const marker = "[homecloud] passt did not start"
+	i := strings.Index(out, marker)
+	if i < 0 {
+		return ""
+	}
+	out = out[i:]
+	if j := strings.Index(out, "[homecloud] starting"); j > 0 {
+		out = out[:j]
+	}
+	var lines []string
+	for _, l := range strings.Split(out, "\n") {
+		if l = strings.TrimSpace(l); l != "" {
+			// drop the docker log timestamp
+			if _, rest, ok := strings.Cut(l, " "); ok && strings.HasSuffix(l[:strings.IndexByte(l, ' ')], "Z") {
+				l = rest
+			}
+			lines = append(lines, l)
+		}
+	}
+	return strings.Join(lines, "; ")
 }
 
 func tail(s string, n int) string {
