@@ -86,7 +86,7 @@ connection to HomeCloud itself is TLS, so behind a TLS-terminating proxy it is f
 | SNS | sns | awsQuery | Topics (incl. FIFO), subscriptions (sqs, lambda, http/s, email), filter policies, topic policies, signed messages |
 | Secrets Manager | secretsmanager | awsJson 1.1 | Versions and staging labels, rotation via Lambda, resource policies. Replication to other regions is not available: `AddReplicaRegions` and `ReplicateSecretToRegions` fail with `InvalidRequestException` because HomeCloud serves a single region |
 | SSM Parameter Store | ssm | awsJson 1.1 | Parameters, hierarchies, versions and labels, SecureString |
-| KMS | kms | awsJson 1.1 | Symmetric, RSA, ECC and HMAC keys, aliases, rotation, data keys, key policies, grants (stored) |
+| KMS | kms | awsJson 1.1 | Symmetric, RSA, ECC and HMAC keys, aliases, rotation, data keys, key policies, grants (stored), imported key material (`Origin=EXTERNAL`: `GetParametersForImport`, `ImportKeyMaterial` with RSAES_OAEP and RSA_AES_KEY_WRAP, expiry, `DeleteImportedKeyMaterial`; re-import needs the same material), multi-Region primary keys (`mrk-` ids). HomeCloud is one region, so `ReplicateKey` and `UpdatePrimaryRegion` return `UnsupportedOperationException` |
 | CloudWatch | monitoring | awsJson 1.0 + awsQuery | Metrics, GetMetricData with math, alarms, dashboards |
 | CloudWatch Logs | logs | awsJson 1.1 | Groups, streams, events, filter patterns, Logs Insights, metric and subscription filters |
 | EventBridge | events | awsJson 1.1 | Buses, rules with full pattern syntax, targets with transforms |
