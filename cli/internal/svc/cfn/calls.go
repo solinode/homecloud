@@ -313,6 +313,16 @@ func (s *Service) deleteResource(ctx context.Context, p *httpx.Principal, r *Res
 	return err
 }
 
+// updateResource changes a resource in place (old and in are its current and
+// wanted template properties) and returns attributes to merge into its record.
+func (s *Service) updateResource(x *xctx, r *Resource, old, in map[string]any) (map[string]any, error) {
+	a, ok := awsTypes[r.Type]
+	if !ok || a.Update == nil {
+		return nil, fmt.Errorf("Resource type %s cannot be updated in place", r.Type)
+	}
+	return a.Update(x, r, old, in)
+}
+
 func gone(err error) bool {
 	m := err.Error()
 	return strings.Contains(m, "NotFound") || strings.Contains(m, "DoesNotExist") || strings.Contains(m, "does not exist")

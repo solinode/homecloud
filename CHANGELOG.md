@@ -12,6 +12,7 @@
 - `homecloud service install` under `sudo` defaults `--data-dir` to the invoking user's home, not root's (#79).
 - New `homecloud admin set-root-password` sets the root console password to a value read from the terminal or stdin (never an argument), with the server stopped (#79).
 - Cognito user pools support `USER_SRP_AUTH` (Amplify, amazon-cognito-identity-js, pycognito), `ForgotPassword`/`ConfirmForgotPassword` and `AdminResetUserPassword`. Existing users need their password set again (or one `USER_PASSWORD_AUTH` sign-in) before SRP works.
+- CloudFormation updates behave like AWS: queues, topics, parameters, functions, roles, tables, alarms and other resources change in place, replacements create the new resource before deleting the old one, and a failed update rolls back to the previous template (`UPDATE_ROLLBACK_COMPLETE`, `ContinueUpdateRollback`, `DisableRollback`). A replacement that keeps a custom resource name now fails, as in AWS.
 
 ## 0.3.0 (2026-09-30)
 

@@ -130,7 +130,7 @@ Notes:
 `DescribeStackResources`, `DescribeStackResource`, `ListStackResources`, `GetTemplate`,
 `GetTemplateSummary`, `ValidateTemplate`, `CreateChangeSet` (`CREATE` and `UPDATE`),
 `DescribeChangeSet`, `ExecuteChangeSet`, `DeleteChangeSet`, `ListChangeSets`, `ListExports`,
-`ListImports`, `UpdateTerminationProtection`.
+`ListImports`, `UpdateTerminationProtection`, `ContinueUpdateRollback`.
 
 **Templates:** JSON or YAML with the short-form tags. Sections: `Parameters` (String, Number,
 List, CommaDelimitedList, `AWS::SSM::Parameter::Value<...>`; `Default`, `AllowedValues`,
@@ -183,9 +183,31 @@ requests wait up to three seconds for a quick operation to finish before returni
 | CDK | `AWS::CDK::Metadata` (accepted, creates nothing) |
 
 **Differences from AWS:**
-- An update replaces a resource whose properties changed (delete, then create) instead of
-  updating in place, and change sets report `Replacement: True` for it. A failed update ends
-  `UPDATE_FAILED` and is not rolled back (there is no `UPDATE_ROLLBACK_*`).
+- Updates change these in place, where the service behind them can: SQS queue attributes and tags,
+  SNS topic display name, tags and FIFO deduplication, SQS/SNS policies, SSM parameter value and
+  description, Secrets Manager secret value, description and tags (a `GenerateSecretString` secret
+  keeps its value), Lambda code, configuration and reserved concurrency, DynamoDB TTL, stream and tags,
+  S3 versioning, website and tags, IAM role trust policy, managed and inline policies, IAM inline
+  `Policy`, CloudWatch alarm settings, log group retention, EventBridge rule pattern, schedule and
+  targets, ECS service desired count and task definition, security group ingress rules, Route 53
+  record sets. Changing any other property replaces the resource, and change sets report
+  `Replacement` `True`, `False` or `Conditional` per resource, with per-property `Details`. A
+  replacement creates the new resource first and deletes the old one during
+  `UPDATE_COMPLETE_CLEANUP_IN_PROGRESS`, so a replacement that keeps a custom physical name fails as
+  in AWS (`CloudFormation cannot update a stack when a custom-named resource requires replacing`);
+  give the resource a new name or none. Resources the update drops are deleted in the same cleanup
+  phase, after the update succeeded. Types without an in-place update (everything not listed, and
+  the `HC::` types) are always replaced; DynamoDB billing settings are accepted and not applied, as
+  capacity is not metered.
+- A failed update rolls back to the previous template and parameters
+  (`UPDATE_ROLLBACK_IN_PROGRESS`, `UPDATE_ROLLBACK_COMPLETE_CLEANUP_IN_PROGRESS`,
+  `UPDATE_ROLLBACK_COMPLETE`): modified resources get their old properties back and resources the
+  update created are deleted. A rollback that cannot finish ends in `UPDATE_ROLLBACK_FAILED` and
+  resumes with `ContinueUpdateRollback` (`ResourcesToSkip` gives up on a resource). `DisableRollback`
+  on `UpdateStack` or `ExecuteChangeSet` (and `aws cloudformation deploy --disable-rollback`) leaves the
+  stack in `UPDATE_FAILED` with what was done; the old resources of replacements stay until the
+  next successful update or the deletion of the stack. Rollback configuration, monitoring alarms and
+  `CancelUpdateStack` are not supported.
 - Properties HomeCloud cannot express are ignored when harmless and rejected with `Property X is
   not supported by HomeCloud` when they change behavior. Only `us-east-1` exists; stack sets,
   drift detection, macros and transforms (`AWS::Serverless`), nested stacks, custom resources,
