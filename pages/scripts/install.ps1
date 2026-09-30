@@ -2,7 +2,7 @@
 #   irm https://homecloud.pages.dev/scripts/install.ps1 | iex
 # Set $env:HOMECLOUD_VERSION (e.g. v0.1.0) to pin a release.
 $ErrorActionPreference = "Stop"
-$repo = "homecloudhq/homecloud"
+$repo = "solinode/homecloud"
 
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     Write-Host "HomeCloud runs every service on Docker, which is not installed."

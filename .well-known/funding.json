@@ -8,7 +8,7 @@
     "phone": "",
     "description": "I maintain HomeCloud — a self-hosted, open-source cloud platform. This project empowers users to take back control over their compute, storage, and networking infrastructure.",
     "webpageUrl": {
-      "url": "https://github.com/homecloudhq/homecloud"
+      "url": "https://github.com/solinode/homecloud"
     }
   },
   "projects": [
@@ -17,10 +17,10 @@
       "name": "HomeCloud",
       "description": "Self-hosted, open-source cloud platform for compute, storage, networking, and databases. All in one click. No surveillance. No lock-in.",
       "webpageUrl": {
-        "url": "https://github.com/homecloudhq/homecloud"
+        "url": "https://github.com/solinode/homecloud"
       },
       "repositoryUrl": {
-        "url": "https://github.com/homecloudhq/homecloud"
+        "url": "https://github.com/solinode/homecloud"
       },
       "licenses": [
         "spdx:AGPL-3.0"

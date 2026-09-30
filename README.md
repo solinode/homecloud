@@ -202,11 +202,11 @@ homecloud upgrade                 # verified update from GitHub releases
 * ✅ **Containers:** ECS services and tasks, ECR registry, load balancers, shared file systems
 * ✅ **Workflows:** Step Functions
 * ✅ **Infrastructure as code:** CloudFormation-style stacks
-* ✅ **AWS compatibility:** the AWS CLI, SDKs and Terraform work against HomeCloud for IAM/STS, EC2/VPC, S3, Lambda, DynamoDB, SQS, SNS, Secrets Manager, SSM, KMS, CloudWatch, EventBridge and Step Functions
-* 🔄 **Next:** AWS APIs for ELB, Auto Scaling, ECS, ECR, RDS, CloudFormation, Route 53 and API Gateway; VM-backed instances (QEMU/KVM); multi-node clusters
+* ✅ **AWS compatibility:** the AWS CLI, SDKs and Terraform work against HomeCloud for IAM/STS, EC2/VPC, S3, Lambda, DynamoDB, SQS, SNS, Secrets Manager, SSM, KMS, CloudWatch, EventBridge, Step Functions, Elastic Load Balancing, Auto Scaling, ECS and ECR
+* 🔄 **Next:** AWS APIs for RDS, API Gateway, Route 53, ACM, EFS, ElastiCache and CloudFormation; stricter security groups and resource policies; VM-backed instances (QEMU/KVM); multi-node clusters
 * 🔄 **Phase 4:** Edge compute and hardware integrations
 
-📍 **[Explore the full roadmap](https://github.com/orgs/homecloudhq/projects/1/views/1)**
+📍 **[See the open issues](https://github.com/solinode/homecloud/issues)** for everything planned, with a checklist per item.
 
 ---
 

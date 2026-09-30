@@ -21,7 +21,7 @@ import (
 	"github.com/spf13/cobra"
 )
 
-const releaseRepo = "homecloudhq/homecloud"
+const releaseRepo = "solinode/homecloud"
 
 type ghRelease struct {
 	TagName    string `json:"tag_name"`
