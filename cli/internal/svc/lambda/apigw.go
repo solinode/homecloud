@@ -3,11 +3,9 @@ package lambda
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"slices"
-	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
@@ -29,6 +27,18 @@ type API struct {
 	Authorizer  *Authorizer `json:"authorizer,omitempty"`
 	Endpoint    string      `json:"endpoint"`
 	CreatedAt   time.Time   `json:"created_at"`
+
+	// Set for APIs created through the AWS API (apigatewayv2). ProtocolType marks them:
+	// they serve stages, integrations and resource-policy checks; native APIs serve as before.
+	ProtocolType      string         `json:"protocol_type,omitempty"`
+	CorsConfig        map[string]any `json:"cors_config,omitempty"`
+	Version           string         `json:"version,omitempty"`
+	DisableExecuteAPI bool           `json:"disable_execute_api,omitempty"`
+	Integrations      []doc          `json:"integrations,omitempty"`
+	Stages            []doc          `json:"stages,omitempty"`
+	Deployments       []doc          `json:"deployments,omitempty"`
+	Authorizers       []doc          `json:"authorizers,omitempty"`
+	Tags              core.Tags      `json:"tags,omitempty"`
 }
 
 type Route struct {
@@ -38,6 +48,12 @@ type Route struct {
 	FunctionName string `json:"function_name"`
 	// Authorization is NONE or JWT (requires a token from the API's authorizer user pool).
 	Authorization string `json:"authorization,omitempty"`
+	// AWS API fields: the integration a route targets (instead of FunctionName), its
+	// authorizer and scopes, and other route settings kept as sent.
+	IntegrationID string         `json:"integration_id,omitempty"`
+	AuthorizerID  string         `json:"authorizer_id,omitempty"`
+	Scopes        []string       `json:"scopes,omitempty"`
+	Extra         map[string]any `json:"extra,omitempty"`
 }
 
 // Authorizer validates Cognito user pool tokens on routes marked JWT.
@@ -49,7 +65,12 @@ type Authorizer struct {
 // JWTVerifier checks a user pool token (set by the server from the Cognito service).
 type JWTVerifier func(pool, token, audience string) (map[string]any, error)
 
-func (r Route) Key() string { return r.Method + " " + r.Path }
+func (r Route) Key() string {
+	if r.Path == "$default" {
+		return "$default"
+	}
+	return r.Method + " " + r.Path
+}
 
 // matchPath matches a request path against a route template, returning path parameters.
 func matchPath(tmpl, p string) (map[string]string, bool) {
@@ -211,8 +232,7 @@ func (s *Service) apigwRoutes(r *httpx.Router) {
 }
 
 func (s *Service) apiEndpoint(id string) string {
-	_, port, _ := strings.Cut(s.env.Cfg.APIAddr, ":")
-	return fmt.Sprintf("http://%s:%s/apigw/%s", s.env.Cfg.PublicHost, port, id)
+	return s.publicBase() + "/apigw/" + id
 }
 
 func (s *Service) listAPIs(c *httpx.Ctx) (any, error) {
@@ -445,56 +465,4 @@ func (s *Service) deleteRoute(c *httpx.Ctx) (any, error) {
 		return nil, core.NotFound("api", c.Param("id"))
 	}
 	return a, err
-}
-
-// serveAPI dispatches a public request to the best-matching route's function.
-func (s *Service) serveAPI(c *httpx.Ctx) (any, error) {
-	a, err := store.Get[API](s.env.Store, cAPIs, c.Param("id"))
-	if err != nil {
-		return nil, core.Errf(http.StatusNotFound, "NotFound", "no API %q", c.Param("id"))
-	}
-	if a.CORS && c.R.Method == http.MethodOptions {
-		h := c.W.Header()
-		h.Set("Access-Control-Allow-Origin", "*")
-		h.Set("Access-Control-Allow-Methods", "GET, POST, PUT, PATCH, DELETE, OPTIONS")
-		h.Set("Access-Control-Allow-Headers", "*")
-		return c.JSON(http.StatusNoContent, nil)
-	}
-	p := "/" + c.Param("path")
-	routes := append([]Route(nil), a.Routes...)
-	sort.SliceStable(routes, func(i, j int) bool { return specificity(routes[i]) > specificity(routes[j]) })
-	for _, r := range routes {
-		if r.Method != "ANY" && r.Method != c.R.Method {
-			continue
-		}
-		params, ok := matchPath(r.Path, p)
-		if !ok {
-			continue
-		}
-		ev, err := s.httpEvent(c.R, p, r.Key(), a.ID, params)
-		if err != nil {
-			return nil, err
-		}
-		if r.Authorization == "JWT" {
-			tok := strings.TrimSpace(strings.TrimPrefix(c.R.Header.Get("Authorization"), "Bearer "))
-			if a.Authorizer == nil || s.VerifyJWT == nil || tok == "" {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
-			}
-			claims, err := s.VerifyJWT(a.Authorizer.UserPoolID, tok, a.Authorizer.Audience)
-			if err != nil {
-				return c.JSON(http.StatusUnauthorized, map[string]string{"message": "Unauthorized"})
-			}
-			rc := ev["requestContext"].(map[string]any)
-			rc["authorizer"] = map[string]any{"jwt": map[string]any{"claims": claims}}
-		}
-		payload, _ := json.Marshal(ev)
-		res, err := s.Invoke(c.R.Context(), r.FunctionName, payload)
-		if err != nil {
-			return nil, err
-		}
-		c.MarkWritten()
-		respond(c.W, res, a.CORS)
-		return nil, nil
-	}
-	return nil, core.Errf(http.StatusNotFound, "NotFound", "no route matches %s %s", c.R.Method, p)
 }
