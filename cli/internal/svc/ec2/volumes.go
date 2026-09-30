@@ -405,6 +405,7 @@ func (s *Service) recreate(id string) error {
 			log.Printf("ec2: start recreated %s: %v", i.ID, err)
 		} else {
 			s.metadataRoute(ctx, cid, i.VpcID)
+			s.vpc.ProtectNow(ctx, s.member(i, cid))
 		}
 	}
 	old := ""

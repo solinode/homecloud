@@ -85,10 +85,13 @@ type SecurityGroup struct {
 	Name        string `json:"name"`
 	Description string `json:"description"`
 	Ingress     []Rule `json:"ingress"`
-	// Egress rules are recorded, not enforced. Until EgressSet, a group has
-	// AWS's default rule allowing all outbound traffic.
-	Egress    []Rule    `json:"egress,omitempty"`
-	EgressSet bool      `json:"egress_set,omitempty"`
+	// Until EgressSet, a group has AWS's default rule allowing all outbound
+	// traffic; once egress rules were changed they are enforced (fwrules.go).
+	Egress    []Rule `json:"egress,omitempty"`
+	EgressSet bool   `json:"egress_set,omitempty"`
+	// SelfRule marks a default group that got AWS's rule allowing all
+	// inbound traffic from members of the group itself (it can be revoked).
+	SelfRule  bool      `json:"self_rule,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
 	Tags      core.Tags `json:"tags,omitempty"`
 }
@@ -115,6 +118,7 @@ type Service struct {
 	// NetworkChanged is called after a VPC's network was recreated (its
 	// internet access changed); containers were reconnected with their addresses.
 	NetworkChanged func(v VPC)
+	fw             firewall
 }
 
 func New(env *svc.Env) *Service { return &Service{env: env} }
@@ -126,6 +130,7 @@ const maxPublishedRange = 32
 // EnsureDefault creates the default VPC, its subnets and security group on first run,
 // and recreates the Docker network if it went missing.
 func (s *Service) EnsureDefault(ctx context.Context) error {
+	s.seedSelfRules()
 	for _, v := range store.List[VPC](s.env.Store, cVPCs) {
 		if err := s.ensureNetwork(v); err != nil {
 			return fmt.Errorf("vpc %s: %w", v.ID, err)
@@ -167,6 +172,27 @@ func (s *Service) EnsureDefault(ctx context.Context) error {
 	return nil
 }
 
+// selfRule is the rule of a default group that allows all inbound traffic
+// from resources in the group itself.
+func selfRule(groupID string) Rule {
+	return Rule{ID: core.NewID("sgr"), Protocol: "-1", FromPort: -1, ToPort: -1, SourceGroup: groupID}
+}
+
+// seedSelfRules gives default groups that predate security group filtering
+// AWS's self-referencing inbound rule (once; revoking it sticks).
+func (s *Service) seedSelfRules() {
+	for _, g := range store.List[SecurityGroup](s.env.Store, cSGs) {
+		if g.Name != "default" || g.SelfRule {
+			continue
+		}
+		_, _ = store.Update(s.env.Store, cSGs, g.ID, func(x *SecurityGroup) error {
+			x.SelfRule = true
+			x.Ingress = append(x.Ingress, selfRule(x.ID))
+			return nil
+		})
+	}
+}
+
 func (s *Service) overlapsAny(p netip.Prefix, taken map[string]string) string {
 	for c, name := range taken {
 		if q, err := netip.ParsePrefix(c); err == nil && q.Addr().Is4() && q.Overlaps(p) {
@@ -195,7 +221,8 @@ func (s *Service) createVPC(name string, cidr netip.Prefix, internet, def bool) 
 	if err := store.Put(s.env.Store, cVPCs, id, v); err != nil {
 		return v, err
 	}
-	sg := SecurityGroup{ID: core.NewID("sg"), VpcID: id, Name: "default", Description: "default VPC security group", Ingress: []Rule{}, CreatedAt: core.Now()}
+	sg := SecurityGroup{ID: core.NewID("sg"), VpcID: id, Name: "default", Description: "default VPC security group", CreatedAt: core.Now()}
+	sg.Ingress, sg.SelfRule = []Rule{selfRule(sg.ID)}, true
 	if s.AfterCreate != nil {
 		go s.AfterCreate(v)
 	}

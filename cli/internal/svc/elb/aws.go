@@ -503,6 +503,7 @@ func (s *Service) awsSetSecurityGroups(q *awsapi.Req) (any, error) {
 	if _, err := store.Update(s.env.Store, cLBs, lb.Name, func(x *LoadBalancer) error { x.SecurityGroups = in.SecurityGroups; return nil }); err != nil {
 		return nil, err
 	}
+	s.vpc.FirewallChanged()
 	return map[string]any{"SecurityGroupIds": append([]string{}, in.SecurityGroups...)}, nil
 }
 

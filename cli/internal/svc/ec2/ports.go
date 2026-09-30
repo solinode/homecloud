@@ -8,6 +8,7 @@ import (
 
 	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
 )
 
 // Security group rules decide which container ports are published on the
@@ -112,6 +113,7 @@ func (s *Service) groupChanged(sg string) {
 // syncPortsAsync brings an instance's published ports in line with its
 // groups in the background. Changes arriving meanwhile are coalesced.
 func (s *Service) syncPortsAsync(id string) {
+	s.vpc.FirewallChanged() // the instance's groups may have changed
 	portSyncMu.Lock()
 	if portSyncing[id] {
 		portDirty[id] = true
@@ -147,4 +149,20 @@ func (s *Service) syncPorts(id string) {
 	if err := s.recreate(id); err != nil {
 		log.Printf("ec2: apply security groups to %s: %v", id, err)
 	}
+}
+
+// member is an instance as a security group member.
+func (s *Service) member(i Instance, cid string) vpc.Member {
+	return vpc.Member{Kind: "ec2", ID: i.ID, VpcID: i.VpcID, IP: i.PrivateIP, ContainerID: cid, Groups: i.SecurityGroups}
+}
+
+// fwMembers lists the instances whose containers exist, for security group enforcement.
+func (s *Service) fwMembers() []vpc.Member {
+	var out []vpc.Member
+	for _, i := range store.List[Instance](s.env.Store, cInstances) {
+		if i.State != "terminated" && i.State != "shutting-down" && i.ContainerID != "" && i.PrivateIP != "" {
+			out = append(out, s.member(i, i.ContainerID))
+		}
+	}
+	return out
 }

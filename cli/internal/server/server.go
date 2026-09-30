@@ -336,6 +336,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	go trailSvc.Run(ctx)
 	go dnsSvc.Run(ctx)
 	go ec2Svc.RunIMDS(ctx)
+	go vpcSvc.RunFirewall(ctx)
 	go func() {
 		if err := ecrSvc.Start(ctx); err != nil {
 			logf("ecr: %v", err)

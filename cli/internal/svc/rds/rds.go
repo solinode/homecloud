@@ -140,8 +140,29 @@ func (s *Service) Recover() {
 	}
 }
 
+// member is a database or cache node as a security group member.
+func (s *Service) member(i Instance) vpc.Member {
+	m := vpc.Member{Kind: serviceLabel(i.Kind), ID: i.ID, VpcID: i.VpcID, IP: i.Endpoint.PrivateIP, ContainerID: i.ContainerID, Groups: i.SecurityGroups}
+	if i.PubliclyAccessible {
+		m.ExternalTCP = []int{i.Endpoint.Port} // published on the host whatever the groups say
+	}
+	return m
+}
+
+// fwMembers lists the nodes whose containers exist, for security group enforcement.
+func (s *Service) fwMembers() []vpc.Member {
+	var out []vpc.Member
+	for _, i := range store.List[Instance](s.env.Store, cInstances) {
+		if i.ContainerID != "" && i.Endpoint.PrivateIP != "" && i.Status != "deleting" {
+			out = append(out, s.member(i))
+		}
+	}
+	return out
+}
+
 func New(env *svc.Env, v *vpc.Service, sec *secrets.Service) *Service {
 	s := &Service{env: env, vpc: v, secrets: sec, hostCPU: 1}
+	v.RegisterMembers(s.fwMembers)
 	if env.Docker == nil {
 		return s
 	}
@@ -759,6 +780,7 @@ func (s *Service) modifyInstance(id string, in modifyInput) (Instance, error) {
 	if in.BackupRetentionDays != nil && (*in.BackupRetentionDays < 0 || *in.BackupRetentionDays > 35 || (e.dump == nil && *in.BackupRetentionDays > 0)) {
 		return Instance{}, core.BadRequest("backup_retention_days must be 0-35 (and 0 for engines without backup support)")
 	}
+	defer s.vpc.FirewallChanged() // its groups may have changed
 	return store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error {
 		if cl.Name != "" {
 			x.Class, x.VCPUs, x.MemoryMB = cl.Name, cl.VCPUs, cl.MemoryMB
@@ -840,7 +862,9 @@ func (s *Service) deleteInstance(ctx context.Context, id, finalSnap string, dele
 			}
 		}
 	}
-	return store.Delete(s.env.Store, cInstances, i.ID)
+	err = store.Delete(s.env.Store, cInstances, i.ID)
+	s.vpc.FirewallChanged() // its address leaves every group it was in
+	return err
 }
 
 func (s *Service) resetPassword(c *httpx.Ctx) (any, error) {
