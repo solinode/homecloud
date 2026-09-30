@@ -331,7 +331,12 @@ func (s *Service) Authenticate(r *http.Request) (*httpx.Principal, error) {
 	if h := r.Header.Get("Authorization"); strings.HasPrefix(h, "Bearer ") {
 		token = strings.TrimSpace(strings.TrimPrefix(h, "Bearer "))
 	} else if r.Method == http.MethodGet {
-		token = r.URL.Query().Get("access_token") // lets the console link downloads directly
+		// Lets the console link downloads directly. URLs end up in logs and history,
+		// so only a (revocable, expiring) console session may travel in one, never an
+		// access key secret.
+		if t := r.URL.Query().Get("access_token"); strings.HasPrefix(t, "hcs_") {
+			token = t
+		}
 	}
 	if token == "" {
 		return nil, core.Errf(http.StatusUnauthorized, "MissingAuthenticationToken", "request is not signed: send 'Authorization: Bearer <session token | access key id>:<secret>'")

@@ -297,8 +297,11 @@ func (s *Service) ServiceRolePrincipal(ref, service, sessionName string) (*httpx
 
 // SessionToken issues temporary credentials carrying a user's own permissions.
 func (s *Service) SessionToken(p *httpx.Principal, seconds int) (Credentials, error) {
-	if p.RoleName != "" {
-		return Credentials{}, core.Errf(http.StatusForbidden, "AccessDenied", "GetSessionToken cannot be called with temporary role credentials")
+	if p.RoleName != "" || strings.HasPrefix(p.AccessKey, tempKeyPrefix) {
+		// As in AWS, only long-term credentials can mint session tokens; otherwise a
+		// stolen session could be renewed forever, outliving the revocation of the
+		// user's access keys.
+		return Credentials{}, core.Errf(http.StatusForbidden, "AccessDenied", "GetSessionToken cannot be called with temporary credentials")
 	}
 	ttl, err := stsTTL(seconds, nil)
 	if err != nil {
