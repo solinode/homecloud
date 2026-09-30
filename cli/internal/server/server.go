@@ -178,6 +178,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	}
 	ec2Svc := ec2.New(env, vpcSvc)
 	ec2Svc.Recover()
+	cw.GuestUsage = ec2Svc.GuestUsage
 	s3Svc := s3.New(env, secSvc)
 	vpcSvc.AfterCreate = func(v vpc.VPC) {
 		s3Svc.ConnectNetwork(v)

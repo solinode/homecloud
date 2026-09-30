@@ -317,6 +317,7 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	if out := h.AWSJSON(t, "ec2", "get-console-output", "--instance-id", id)["Output"].(string); !strings.Contains(out, "Cloud-init v.") || !strings.Contains(out, "finished at") {
 		t.Errorf("console output lacks cloud-init lines: %.300s", out)
 	}
+	f.vmAccessChecks(t, id) // run-command, guest metrics and the serial terminal
 	c.Close()
 	t.Logf("guest checks passed")
 

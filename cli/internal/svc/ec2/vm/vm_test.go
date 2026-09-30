@@ -30,7 +30,10 @@ func TestQEMUAArch64Emulated(t *testing.T) {
 		"file=/vm/seed.iso,if=none,id=seed,format=raw,readonly=on",
 		"-netdev stream,id=net0,addr.type=unix,addr.path=/tmp/passt.sock,server=off",
 		"virtio-net-pci,netdev=net0,mac=" + m.MAC(),
-		"-chardev stdio,id=ser0,signal=off -serial chardev:ser0",
+		"-chardev socket,id=ser0,path=/run/serial.sock,server=on,wait=off,logfile=/dev/stdout,logappend=on -serial chardev:ser0",
+		"-chardev socket,id=qga0,path=/run/qga.sock,server=on,wait=off",
+		"-device virtio-serial-pci,id=vser0",
+		"-device virtserialport,bus=vser0.0,chardev=qga0,name=org.qemu.guest_agent.0",
 		"-qmp unix:/run/qmp.sock,server=on,wait=off",
 		"-nodefaults",
 	} {

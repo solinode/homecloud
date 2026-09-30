@@ -58,7 +58,7 @@ fi
 # namespace (127.0.0.11), so names resolve as they do for container instances.
 dns=""
 if [ -n "${HC_VM_DNS:-}" ]; then dns="-D $HC_VM_DNS --dns-forward $HC_VM_DNS --dns-host 127.0.0.11"; fi
-rm -f /tmp/passt.sock /run/qmp.sock
+rm -f /tmp/passt.sock /run/qmp.sock /run/serial.sock /run/qga.sock
 if [ "${HC_VM_NET:-}" != "user" ]; then
   # shellcheck disable=SC2086
   passt -f -s /tmp/passt.sock -t all -u all $dns >/run/passt.log 2>&1 &
@@ -95,4 +95,20 @@ if [ "${HC_VM_NET:-}" = "user" ]; then
 fi
 
 echo "[homecloud] starting the virtual machine"
-exec "$@"
+# QEMU runs as a child so that this script can watch passt: if passt exits, the
+# guest has lost its network (passt also exits with QEMU, which is fine).
+"$@" &
+qemu=$!
+trap 'kill -TERM "$qemu" 2>/dev/null' TERM INT
+alive() { [ -r "/proc/$1/status" ] && ! grep -q '^State:[[:space:]]*Z' "/proc/$1/status"; }
+reported=
+while alive "$qemu"; do
+  if [ -n "${pid:-}" ] && [ -z "$reported" ] && ! alive "$pid"; then
+    reported=1
+    echo "[homecloud] passt exited unexpectedly; the guest has lost its network:" >&2
+    cat /run/passt.log >&2
+  fi
+  sleep 2 &
+  wait $!
+done
+wait "$qemu"

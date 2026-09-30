@@ -22,7 +22,7 @@
 - Guests use KVM when the Docker host has `/dev/kvm` and are emulated (slower) otherwise; instances report `virtualization: "kvm"` or `"emulated"`. `DescribeImages` and `DescribeInstances` report `Hypervisor: kvm` for VM images and instances. Cloud images are pinned to a release, verified by checksum and downloaded once into a Docker volume; the runner image is built locally on first use.
 - VM disks: extra EBS volumes (`BlockDeviceMappings`, `AttachVolume`, `DetachVolume`) are virtio disks in the guest; attaching or detaching reboots the guest because Docker cannot add mounts to a running container. `CreateSnapshot` and `CreateImage` flatten a VM's root disk into a standalone copy, instances launch from such images, and `homecloud backup` archives a VM's root disk as a standalone image. After a restore, a VM instance whose container is gone is recreated from its disk and left stopped.
 - VM containers use Docker's default seccomp profile plus `unshare`, `mount`, `umount2` and `pivot_root` (what passt's sandbox needs) instead of an unconfined one; AppArmor is unconfined (`HC_VM_APPARMOR` names a profile instead).
-- Not available for VM instances yet: the browser terminal, run-command and guest-level CloudWatch metrics.
+- VM instances have run-command (through qemu-guest-agent, installed by cloud-init), the browser terminal (the guest's serial console; log in with a password set by user data) and CloudWatch `HC/EC2` metrics measured inside the guest (CPU, memory, network, disk, process count), all under the same IAM actions as container instances.
 - CI boots a VM with KVM on every change.
 
 ## 0.3.0 (2026-09-30)
