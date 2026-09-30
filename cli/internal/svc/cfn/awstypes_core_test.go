@@ -253,6 +253,9 @@ func TestCoreResourceTypes(t *testing.T) {
 	if pol := e.AWS(t, "sns", "get-topic-attributes", "--topic-arn", "arn:aws:sns:us-east-1:"+acct+":core-topic"); !strings.Contains(pol, "sns:Publish") || !strings.Contains(pol, `\"DisplayName\"`) && !strings.Contains(pol, "DisplayName") {
 		t.Fatalf("topic: %s", pol)
 	}
+	if subs := e.AWSJSON(t, "sns", "list-subscriptions-by-topic", "--topic-arn", "arn:aws:sns:us-east-1:"+acct+":core-topic")["Subscriptions"].([]any); len(subs) != 1 {
+		t.Fatalf("inline topic subscription (Post sees the template properties): %v", subs)
+	}
 	if pol := e.AWS(t, "s3api", "get-bucket-policy", "--bucket", "core-bucket-cfn"); !strings.Contains(pol, "s3:GetObject") {
 		t.Fatalf("bucket policy: %s", pol)
 	}

@@ -163,6 +163,7 @@ type created struct {
 func (s *Service) createResource(x *xctx, typ string, props map[string]any) (created, error) {
 	ctx, p := x.ctx, x.p
 	out := created{HC: typ}
+	orig, translated := props, map[string]any{}
 	if !supported(typ) {
 		return out, fmt.Errorf("Resource type %s is not supported by HomeCloud", typ)
 	}
@@ -182,7 +183,7 @@ func (s *Service) createResource(x *xctx, typ string, props map[string]any) (cre
 			if err != nil {
 				return out, err
 			}
-			props = np
+			props, translated = np, np // Post sees the template properties too (translated keys win)
 		}
 	}
 	spec := types[out.HC]
@@ -264,7 +265,7 @@ func (s *Service) createResource(x *xctx, typ string, props map[string]any) (cre
 		}
 	}
 	if a, ok := awsTypes[typ]; ok && a.Post != nil {
-		if err := a.Post(x, id, props, out.Attrs); err != nil {
+		if err := a.Post(x, id, merge(orig, translated), out.Attrs); err != nil {
 			return out, err
 		}
 	}

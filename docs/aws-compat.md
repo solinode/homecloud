@@ -105,6 +105,7 @@ connection to HomeCloud itself is TLS, so behind a TLS-terminating proxy it is f
 | Route 53 | route53 | restXml | Public and private hosted zones (private with VPC association), `ChangeResourceRecordSets` (CREATE/UPSERT/DELETE, applied atomically) for A, AAAA, CNAME, TXT, MX, SRV, NS, CAA, PTR and alias records to load balancers, `ListResourceRecordSets` (with start-at and paging), `GetChange` (always `INSYNC`), Associate/DisassociateVPC, `ListHostedZonesByName`/`ByVPC`, hosted zone comments, tags. Records are served by HomeCloud's DNS, so they resolve (see notes) |
 | Certificate Manager | acm | awsJson 1.1 | `RequestCertificate` (DNS validation; issued at once from HomeCloud's private CA), `ImportCertificate` (and re-import), `DescribeCertificate` (including the DNS validation CNAME records), `ListCertificates`, `GetCertificate`, `ExportCertificate` (private certificates), `DeleteCertificate` (`ResourceInUseException` while a load balancer listener uses it), `RenewCertificate`, tags. Certificate ARNs work in ELBv2 HTTPS listeners |
 | Step Functions | states | awsJson 1.0 | State machines, executions, task tokens, service integrations |
+| CloudFormation | cloudformation | awsQuery | Stacks (create, update, delete, describe, list with status filters, events, resources, `GetTemplate`, `GetTemplateSummary`, `ValidateTemplate`), change sets (`CREATE` and `UPDATE`, so `aws cloudformation deploy`, CDK and Terraform's `aws_cloudformation_stack` work), exports and imports, termination protection, service roles, `TemplateURL` from HomeCloud S3. See [CloudFormation](#cloudformation) |
 
 Notes:
 - Terraform's S3 support prefixes the endpoint host with the account ID, so use `http://localhost:PORT`, not an IP address.
@@ -115,6 +116,82 @@ Notes:
 - `StartSyncExecution` clients must disable host-prefix injection (`AWS_DISABLE_HOST_PREFIX_INJECTION=true`).
 - CloudTrail records every call made over the AWS protocol (reads included) and every mutating or denied call of the native API, kept for 90 days. `LookupEvents` returns them newest first with the AWS event-record JSON in `CloudTrailEvent`; request parameters and response elements are not recorded (they may hold passwords and secrets), so `requestParameters` and `responseElements` are `null`. Calls made without credentials (Cognito sign-in) are not recorded. `EventName` is the IAM action's name, `Username` the calling IAM user, and `ResourceName`/`ResourceType` come from the ARN the call was authorized against. Trails deliver gzipped `{"Records": [...]}` files to their S3 bucket every minute and on `StopLogging`, under `[prefix/]AWSLogs/<account>/CloudTrail/us-east-1/YYYY/MM/DD/<account>_CloudTrail_us-east-1_<time>_<id>.json.gz`, from `StartLogging` on. Not implemented: digest files (log file validation is stored only), data and insight events (event selectors are stored; management events are always recorded), SNS/CloudWatch Logs delivery, organization trails, the bucket policy check, and `LookupEvents` on regions other than us-east-1.
 - Cognito SignUp, ConfirmSignUp, ResendConfirmationCode, InitiateAuth, RespondToAuthChallenge, GetUser, GlobalSignOut, ChangePassword, UpdateUserAttributes, DeleteUser and RevokeToken need no signature (as in AWS; the SDKs send them unsigned); every other Cognito operation needs SigV4 and IAM. A signature that is present must be valid. Sign-in supports `USER_PASSWORD_AUTH`, `ADMIN_USER_PASSWORD_AUTH`/`ADMIN_NO_SRP_AUTH` and `REFRESH_TOKEN_AUTH`; SRP, custom auth, MFA, hosted UI/OAuth flows, identity providers, domains, forgot-password and attribute verification are not implemented (Amplify's default SRP flow needs `USER_PASSWORD_AUTH`). A client's `ExplicitAuthFlows`, when set, is enforced. Tokens are the JWTs the native API issues: RS256, `kid` in the pool's JWKS at `<endpoint>/cognito/<pool-id>/.well-known/jwks.json`, and accepted by API Gateway JWT authorizers. Clients with a secret verify `SECRET_HASH`. HomeCloud sends no e-mail or SMS: a pool confirms self-registered users at once (`UserConfirmed: true`) unless `auto_confirm` is turned off through the native API (`PATCH /api/v1/cognito/user-pools/{id}`), in which case SignUp writes a six-digit code to the server log (never a password) for `ConfirmSignUp`, and an administrator can use `AdminConfirmSignUp`. `AdminCreateUser` cannot e-mail a temporary password: pass `TemporaryPassword` or call `AdminSetUserPassword`. Other pool settings (Lambda triggers, verification messages, recovery settings) are stored and echoed by `DescribeUserPool` but not acted on. A pool created over the AWS protocol requires upper- and lowercase letters, numbers and symbols by default, as AWS does; refresh token lifetimes are rounded up to whole days.
+
+## CloudFormation
+
+`aws cloudformation ...`, `aws cloudformation deploy`, boto3 (including the `stack_create_complete`,
+`stack_update_complete` and `stack_delete_complete` waiters), CDK and Terraform's
+`aws_cloudformation_stack` work against the same engine as the native `/api/v1/cloudformation` API.
+
+**Operations:** `CreateStack`, `UpdateStack`, `DeleteStack`, `DescribeStacks`, `ListStacks`
+(`StackStatusFilter`; deleted stacks stay listed and readable by stack ID), `DescribeStackEvents`,
+`DescribeStackResources`, `DescribeStackResource`, `ListStackResources`, `GetTemplate`,
+`GetTemplateSummary`, `ValidateTemplate`, `CreateChangeSet` (`CREATE` and `UPDATE`),
+`DescribeChangeSet`, `ExecuteChangeSet`, `DeleteChangeSet`, `ListChangeSets`, `ListExports`,
+`ListImports`, `UpdateTerminationProtection`.
+
+**Templates:** JSON or YAML with the short-form tags. Sections: `Parameters` (String, Number,
+List, CommaDelimitedList, `AWS::SSM::Parameter::Value<...>`; `Default`, `AllowedValues`,
+`AllowedPattern`, length and value constraints, `NoEcho`, shown as `****`), `Mappings`,
+`Conditions`, `Resources` (`Condition`, `DependsOn`, `DeletionPolicy` `Retain`/`Delete`,
+`UpdateReplacePolicy` `Retain`), `Outputs` (`Condition`, `Export`). Intrinsics: `Ref`,
+`Fn::GetAtt`, `Fn::Sub`, `Fn::Join`, `Fn::Select`, `Fn::Split`, `Fn::If`, `Fn::Equals`, `Fn::And`,
+`Fn::Or`, `Fn::Not`, `Condition`, `Fn::FindInMap`, `Fn::ImportValue`, `Fn::Base64`, `Fn::GetAZs`,
+`Fn::Length`, `Fn::ToJsonString`. Pseudo parameters: `AWS::AccountId`, `AWS::Region`,
+`AWS::StackName`, `AWS::StackId`, `AWS::Partition`, `AWS::URLSuffix`, `AWS::NoValue`,
+`AWS::NotificationARNs`. `TemplateURL` may name an object in a HomeCloud bucket (virtual-hosted or
+path style); it is read with the caller's permissions. Stack IDs are
+`arn:aws:cloudformation:<region>:<account>:stack/<name>/<uuid>`.
+
+**Authorization:** every operation is authorized as `cloudformation:<Action>` on the stack ARN.
+Resources are created, updated and deleted with the permissions of the calling principal
+(re-read for each call), so a user without `sqs:CreateQueue` cannot make a queue through a stack:
+the stack fails and rolls back with the denied action in the event. With `RoleARN`, the caller
+needs `iam:PassRole` and the role's trust policy must allow `cloudformation.amazonaws.com`; the
+stack then acts as that role.
+
+**Capabilities:** templates with IAM resources need `CAPABILITY_IAM`, or `CAPABILITY_NAMED_IAM`
+when they name a role, user, group or managed policy (`InsufficientCapabilitiesException`).
+
+**Failure handling:** create failures roll back (`ROLLBACK_IN_PROGRESS`, `ROLLBACK_COMPLETE`);
+`DisableRollback`/`OnFailure=DO_NOTHING` keeps what was made (`CREATE_FAILED`),
+`OnFailure=DELETE` removes the stack. A resource type HomeCloud cannot create fails the stack
+with `Resource type X is not supported by HomeCloud` in the events; a malformed type name is
+rejected up front. The AWS CLI and SDK waiters poll with long delays, so create, update and delete
+requests wait up to three seconds for a quick operation to finish before returning.
+
+**Supported resource types** (properties are translated to the native API):
+
+| Service | Types |
+|---|---|
+| S3 | `AWS::S3::Bucket` (versioning, object lock, `PublicRead`, website, tags), `AWS::S3::BucketPolicy` |
+| SQS | `AWS::SQS::Queue` (FIFO, redrive, encryption, tags), `AWS::SQS::QueuePolicy` |
+| SNS | `AWS::SNS::Topic` (with inline subscriptions), `AWS::SNS::Subscription`, `AWS::SNS::TopicPolicy` |
+| DynamoDB | `AWS::DynamoDB::Table` (GSIs, LSIs, streams, TTL, PITR, deletion protection) |
+| Lambda | `AWS::Lambda::Function` (inline ZipFile for Node.js, Python and Ruby, S3 code, images), `Permission`, `Url`, `EventSourceMapping`, `Version`, `Alias`, `LayerVersion` |
+| API Gateway v2 | `AWS::ApiGatewayV2::Api` (HTTP), `Integration` (Lambda proxy), `Route`, `Authorizer` (JWT), `Stage`, `Deployment` |
+| IAM | `AWS::IAM::Role`, `User`, `Group`, `Policy`, `ManagedPolicy`, `InstanceProfile` |
+| SSM, Secrets Manager, KMS | `AWS::SSM::Parameter`, `AWS::SecretsManager::Secret` (including `GenerateSecretString`), `AWS::KMS::Key`, `AWS::KMS::Alias` |
+| Logs, CloudWatch, EventBridge, Step Functions | `AWS::Logs::LogGroup`, `AWS::CloudWatch::Alarm`, `AWS::Events::Rule`, `AWS::StepFunctions::StateMachine` |
+| EC2 | `AWS::EC2::VPC`, `Subnet`, `SecurityGroup`, `SecurityGroupIngress`, `InternetGateway`, `VPCGatewayAttachment`, `RouteTable`, `Route`, `SubnetRouteTableAssociation`, `EIP`, `EIPAssociation`, `Volume`, `Instance` |
+| ELBv2 | `AWS::ElasticLoadBalancingV2::TargetGroup`, `LoadBalancer` (application), `Listener`, `ListenerRule` |
+| ECS, ECR | `AWS::ECS::TaskDefinition`, `AWS::ECS::Service` (default cluster), `AWS::ECR::Repository` |
+| RDS | `AWS::RDS::DBInstance`, `DBSubnetGroup` and `DBParameterGroup` (recorded by the stack only) |
+| Route 53, ACM | `AWS::Route53::HostedZone`, `RecordSet`, `RecordSetGroup`, `AWS::ACM::Certificate` |
+| CDK | `AWS::CDK::Metadata` (accepted, creates nothing) |
+
+**Differences from AWS:**
+- An update replaces a resource whose properties changed (delete, then create) instead of
+  updating in place, and change sets report `Replacement: True` for it. A failed update ends
+  `UPDATE_FAILED` and is not rolled back (there is no `UPDATE_ROLLBACK_*`).
+- Properties HomeCloud cannot express are ignored when harmless and rejected with `Property X is
+  not supported by HomeCloud` when they change behavior. Only `us-east-1` exists; stack sets,
+  drift detection, macros and transforms (`AWS::Serverless`), nested stacks, custom resources,
+  stack policies, `ResourceSignal`/wait conditions, `Fn::Cidr`, import change sets, resource
+  import and `CancelUpdateStack` are not supported. Tags on a stack are stored but not
+  propagated to its resources. `AWS::ECS::Cluster`, EFS, ElastiCache and other services without a
+  listed type are not available in templates yet.
+- Deleting an S3 bucket that still holds objects fails the resource (`DELETE_FAILED`), as in AWS.
 
 ## Adding operations (for contributors)
 
