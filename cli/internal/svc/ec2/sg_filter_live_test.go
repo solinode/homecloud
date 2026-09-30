@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
-	"github.com/homecloudhq/homecloud/cli/internal/runtime"
+	"github.com/homecloudhq/homecloud/cli/internal/dockertest"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
 )
@@ -28,12 +28,8 @@ type filterEnv struct {
 
 func newFilterEnv(t *testing.T) *filterEnv {
 	t.Helper()
-	d, err := runtime.New()
-	if err != nil || d.C.Ping() != nil {
-		t.Skip("Docker not available")
-	}
 	h := awstest.New(t)
-	h.Env.Docker = d
+	h.Env.Docker = dockertest.Start(t)
 	v := vpc.New(h.Env)
 	e := ec2.New(h.Env, v)
 	e.RegisterAWS()

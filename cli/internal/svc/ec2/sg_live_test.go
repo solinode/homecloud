@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
-	"github.com/homecloudhq/homecloud/cli/internal/runtime"
+	"github.com/homecloudhq/homecloud/cli/internal/dockertest"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
 )
@@ -17,16 +17,15 @@ import (
 // liveHarness starts EC2 and VPC on real Docker, or skips.
 func liveHarness(t *testing.T) *awstest.Harness {
 	t.Helper()
-	d, err := runtime.New()
-	if err != nil || d.C.Ping() != nil {
-		t.Skip("Docker not available")
-	}
 	h := awstest.New(t)
-	h.Env.Docker = d
+	h.Env.Docker = dockertest.Start(t)
 	v := vpc.New(h.Env)
-	if err := v.EnsureDefault(t.Context()); err != nil {
-		t.Skipf("default vpc: %v", err)
-	}
+	dockertest.DefaultVPC(t, v.EnsureDefault)
+	t.Cleanup(func() {
+		for _, x := range v.List() {
+			_ = v.DeleteVPC(x.ID)
+		}
+	})
 	e := ec2.New(h.Env, v)
 	e.RegisterAWS()
 	v.Routes(h.Router)
