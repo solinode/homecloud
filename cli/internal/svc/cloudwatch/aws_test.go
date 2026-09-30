@@ -322,6 +322,12 @@ func TestCloudWatchAWSCLI(t *testing.T) {
 		"--statistic", "Average", "--period", "45", "--evaluation-periods", "1", "--threshold", "1", "--comparison-operator", "GreaterThanThreshold"); err == nil {
 		t.Fatalf("bad period accepted: %s", out)
 	}
+	// The datapoints above were stamped when the test started; under -race the
+	// evaluation window can move past them, so publish a fresh breaching value.
+	for _, d := range []time.Duration{-70 * time.Second, -10 * time.Second} {
+		h.AWS(t, "cloudwatch", "put-metric-data", "--namespace", "App", "--metric-name", "Latency", "--dimensions", "Service=api",
+			"--value", "900", "--unit", "Milliseconds", "--timestamp", time.Now().UTC().Add(d).Format(time.RFC3339))
+	}
 	s.evaluateAlarms()
 	al := h.AWSJSON(t, "cloudwatch", "describe-alarms", "--alarm-names", "high-latency")
 	a := al["MetricAlarms"].([]any)[0].(map[string]any)
