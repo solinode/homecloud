@@ -305,14 +305,27 @@ func v1Event(v2 map[string]any, r *http.Request, rt Route, path string) map[stri
 
 var hopHeaders = []string{"Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "Te", "Trailer", "Transfer-Encoding", "Upgrade", "Host"}
 
+// maxPayload is the largest request body an HTTP API accepts, as in AWS.
+const maxPayload = 10 << 20
+
+// escapeSegments path-escapes each segment of a decoded path, keeping the separators,
+// so characters such as ? and # can't change the backend URL's query or fragment.
+func escapeSegments(p string) string {
+	parts := strings.Split(p, "/")
+	for i, s := range parts {
+		parts[i] = url.PathEscape(s)
+	}
+	return strings.Join(parts, "/")
+}
+
 // proxyHTTP forwards the request to an HTTP_PROXY integration and relays its response.
 func (s *Service) proxyHTTP(c *httpx.Ctx, integ doc, r Route, p string, params map[string]string) (any, error) {
 	target := dStr(integ, "integrationUri")
 	for k, v := range params {
-		target = strings.NewReplacer("{"+k+"}", url.PathEscape(v), "{"+k+"+}", v).Replace(target)
+		target = strings.NewReplacer("{"+k+"}", url.PathEscape(v), "{"+k+"+}", escapeSegments(v)).Replace(target)
 	}
 	if r.Path == "$default" {
-		target = strings.TrimRight(target, "/") + p
+		target = strings.TrimRight(target, "/") + escapeSegments(p)
 	}
 	q := c.R.URL.Query()
 	q.Del("access_token")
@@ -329,7 +342,7 @@ func (s *Service) proxyHTTP(c *httpx.Ctx, integ doc, r Route, p string, params m
 	}
 	ctx, cancel := context.WithTimeout(c.R.Context(), timeout)
 	defer cancel()
-	req, err := http.NewRequestWithContext(ctx, method, target, io.LimitReader(c.R.Body, 10<<20))
+	req, err := http.NewRequestWithContext(ctx, method, target, http.MaxBytesReader(c.W, c.R.Body, maxPayload))
 	if err != nil {
 		return gwMessage(c, http.StatusInternalServerError, "Internal Server Error")
 	}
@@ -340,6 +353,9 @@ func (s *Service) proxyHTTP(c *httpx.Ctx, integ doc, r Route, p string, params m
 	cli := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	resp, err := cli.Do(req)
 	if err != nil {
+		if tooBig := (*http.MaxBytesError)(nil); errors.As(err, &tooBig) {
+			return gwMessage(c, http.StatusRequestEntityTooLarge, "Request Entity Too Large")
+		}
 		if errors.Is(err, context.DeadlineExceeded) {
 			return gwMessage(c, http.StatusGatewayTimeout, "Gateway Timeout")
 		}
