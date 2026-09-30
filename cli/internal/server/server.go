@@ -453,6 +453,11 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 func vpcList(st *store.Store) []vpc.VPC { return store.List[vpc.VPC](st, "vpc_vpcs") }
 
+// inlineObjectCSP is the policy of object bytes shown from the native API: an
+// opaque origin, no scripts, forms or navigation, and only inline styles and
+// data:/same-origin media.
+const inlineObjectCSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: 'self'; media-src data: 'self'; font-src data:; form-action 'none'; base-uri 'none'"
+
 // sandboxUserContent isolates responses whose bytes come from users (static
 // websites, function URLs, HTTP APIs and inline object views). They share an
 // origin with the console, so without a sandbox a page could read the console's
@@ -460,13 +465,19 @@ func vpcList(st *store.Store) []vpc.VPC { return store.List[vpc.VPC](st, "vpc_vp
 func sandboxUserContent(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if strings.HasPrefix(p, "/website/") || strings.HasPrefix(p, "/lambda-url/") || strings.HasPrefix(p, "/apigw/") ||
-			(strings.HasPrefix(p, "/api/v1/s3/") && strings.HasSuffix(p, "/object")) {
+		if strings.HasPrefix(p, "/api/v1/s3/") && strings.HasSuffix(p, "/object") {
+			// The console opens objects with ?access_token=<session> in the URL, which
+			// a script in the object could read from its own location and send away.
+			// So inline views run no scripts, load nothing from elsewhere and send no Referer.
+			w.Header().Set("Content-Security-Policy", inlineObjectCSP)
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+		} else if strings.HasPrefix(p, "/website/") || strings.HasPrefix(p, "/lambda-url/") || strings.HasPrefix(p, "/apigw/") {
 			w.Header().Set("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads")
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 		}
 		if strings.HasPrefix(p, "/api/") {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Referrer-Policy", "no-referrer")
 		}
 		h.ServeHTTP(w, r)
 	})
