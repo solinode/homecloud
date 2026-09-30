@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
@@ -63,7 +64,17 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 		Use:   "configure",
 		Short: "Set the endpoint and access key the CLI uses",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cur, _ := client.Load()
+			cur := client.LoadFile()
+			if p.CAFile != "" {
+				abs, err := filepath.Abs(p.CAFile)
+				if err != nil {
+					return err
+				}
+				if _, err := os.ReadFile(abs); err != nil {
+					return fmt.Errorf("--ca-file: %w", err)
+				}
+				p.CAFile = abs
+			}
 			if p.Endpoint == "" {
 				p.Endpoint = prompt("Endpoint", cur.Endpoint)
 			}
@@ -73,7 +84,8 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 			if p.SecretAccessKey == "" {
 				p.SecretAccessKey = prompt("Secret access key", "")
 			}
-			if err := client.Save(p); err != nil {
+			// Settings not given here (region, ca_file, and a secret left blank) stay as they were.
+			if err := client.Save(client.Merge(cur, p)); err != nil {
 				return err
 			}
 			fmt.Println("saved to", client.CredentialsFile())
@@ -83,6 +95,8 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 	configureCmd.Flags().StringVar(&p.Endpoint, "endpoint", "", "API endpoint, e.g. http://homelab:8080")
 	configureCmd.Flags().StringVar(&p.AccessKeyID, "access-key-id", "", "access key ID")
 	configureCmd.Flags().StringVar(&p.SecretAccessKey, "secret-access-key", "", "secret access key")
+	configureCmd.Flags().StringVar(&p.Region, "region", "", "region the server runs in")
+	configureCmd.Flags().StringVar(&p.CAFile, "ca-file", "", "PEM file with the CA (or self-signed certificate) of an HTTPS server")
 	RootCmd.AddCommand(configureCmd)
 
 	RootCmd.AddCommand(&cobra.Command{
