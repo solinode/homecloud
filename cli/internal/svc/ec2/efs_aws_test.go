@@ -67,7 +67,9 @@ func TestEFSAWSLifecycle(t *testing.T) {
 		"--tags", "Key=Name,Value=shared-data", "Key=env,Value=qa")
 	id := strOf(fs, "FileSystemId")
 	t.Cleanup(func() {
-		var left struct{ MountTargets []struct{ MountTargetId string } }
+		var left struct {
+			MountTargets []struct{ MountTargetId string }
+		}
 		if o, err := h.AWSErr(t, "efs", "describe-mount-targets", "--file-system-id", id); err == nil && json.Unmarshal([]byte(o), &left) == nil {
 			for _, m := range left.MountTargets {
 				_, _ = h.AWSErr(t, "efs", "delete-mount-target", "--mount-target-id", m.MountTargetId)

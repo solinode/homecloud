@@ -14,7 +14,7 @@ import (
 type fakeQueues struct{}
 
 func (fakeQueues) Receive(string, int, time.Duration) ([]lambda.QueueMessage, error) { return nil, nil }
-func (fakeQueues) Delete(string, string) error                                        { return nil }
+func (fakeQueues) Delete(string, string) error                                       { return nil }
 func (fakeQueues) QueueARN(q string) (string, bool) {
 	return "arn:aws:sqs:us-east-1:000000000000:" + q, true
 }
