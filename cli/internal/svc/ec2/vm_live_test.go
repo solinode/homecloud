@@ -147,7 +147,7 @@ func (f *filterEnv) vmDiagnose(id string) string {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	probe := "timeout 5 bash -c 'exec 3<>/dev/tcp/" + i.PrivateIP + "/22; head -c 60 <&3' 2>&1; echo; iptables -S INPUT 2>&1 | head -20"
-	if res, err := f.h.Env.Docker.Exec(ctx, i.ContainerID, []string{"/bin/sh", "-c", "cat /proc/net/tcp6 | head -8; echo; ls -l /tmp; cat /run/passt.log | head -5; echo banner-from-inside:; " + probe}, nil); err == nil {
+	if res, err := f.h.Env.Docker.Exec(ctx, i.ContainerID, []string{"/bin/sh", "-c", "cat /proc/net/tcp6 | head -8; echo; ls -l /tmp; cat /run/passt.log | head -40; echo banner-from-inside:; " + probe}, nil); err == nil {
 		b.WriteString(res.Stdout + res.Stderr)
 	}
 	return b.String()

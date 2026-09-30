@@ -69,7 +69,7 @@ jobs:
           sudo udevadm trigger --name-match=kvm
           ls -l /dev/kvm
       - name: VM instances
-        run: go test -count=1 -timeout 40m -v -run 'TestVMInstanceLifecycle' ./internal/svc/ec2
+        run: go test -count=1 -timeout 40m -v -run 'TestVMInstanceLifecycle|TestVMDisksImagesAndBackup' ./internal/svc/ec2
         env:
           HC_TEST_VM: "1"
 

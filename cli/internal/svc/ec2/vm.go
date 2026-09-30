@@ -264,8 +264,10 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 		Image:  vm.RunnerTag(),
 		Cmd:    mach.Command(),
 		Labels: runtime.Labels("ec2", inst.ID, map[string]string{"homecloud.name": inst.Name, "homecloud.virtualization": inst.Virtualization}),
-		// QEMU's own threads and the guest's memory map need a little more than the guest sees.
-		NanoCPUs: int64(min(float64(mach.VCPUs)+0.5, s.hostCPU) * 1e9),
+		// QEMU's own threads (I/O, emulation, the main loop), passt and the helpers
+		// share the container's quota with the guest's vCPUs: a quota the vCPUs
+		// alone exhaust starves passt, and the guest's DHCP and connections time out.
+		NanoCPUs: int64(min(float64(mach.VCPUs)+1.5, s.hostCPU) * 1e9),
 		MemoryMB: inst.MemoryMB + 512,
 		Ports:    s.portsFor(inst),
 		Mounts:   mounts,
