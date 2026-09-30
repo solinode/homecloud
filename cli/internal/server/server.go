@@ -158,7 +158,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		logf("first start: created account %s", boot.AccountID)
 		logf("  console sign-in   user: root   password: %s", boot.RootPassword)
 		logf("  CLI credentials written to %s", CredentialsPath(cfg.DataDir))
-		logf("  (the password is shown only once; reset it with `homecloud serve --reset-root-password`)")
+		logf("  (the password is shown only once; reset it with `homecloud serve --reset-root-password`, or choose one with `homecloud admin set-root-password` while the server is stopped)")
 	}
 	if opts.ResetRootPassword {
 		pw, err := iamSvc.ResetRootPassword()
