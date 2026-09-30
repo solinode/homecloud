@@ -495,3 +495,32 @@ func TestSecretsNativeAPI(t *testing.T) {
 		t.Fatalf("native random password: %s", p)
 	}
 }
+
+func TestSecretsReplicationRejected(t *testing.T) {
+	h, _, _, _ := setup(t)
+	expectErr(t, h, "single region", "secretsmanager", "create-secret", "--name", "r", "--secret-string", "x",
+		"--add-replica-regions", "Region=eu-west-1")
+	expectErr(t, h, "ResourceNotFoundException", "secretsmanager", "describe-secret", "--secret-id", "r")
+	h.AWS(t, "secretsmanager", "create-secret", "--name", "r", "--secret-string", "x")
+	expectErr(t, h, "InvalidRequestException", "secretsmanager", "replicate-secret-to-regions", "--secret-id", "r",
+		"--add-replica-regions", "Region=eu-west-1")
+	expectErr(t, h, "InvalidParameterException", "secretsmanager", "remove-regions-from-replication", "--secret-id", "r",
+		"--remove-replica-regions", "eu-west-1")
+	expectErr(t, h, "not a replica", "secretsmanager", "stop-replication-to-replica", "--secret-id", "r")
+	expectErr(t, h, "ResourceNotFoundException", "secretsmanager", "replicate-secret-to-regions", "--secret-id", "nope",
+		"--add-replica-regions", "Region=eu-west-1")
+	if d := h.AWSJSON(t, "secretsmanager", "describe-secret", "--secret-id", "r"); d["ReplicationStatus"] != nil {
+		t.Fatalf("unexpected replication status: %v", d)
+	}
+	// IAM is checked before the region error: read-only users are denied.
+	akid, secret := h.User(t, "ro", "ReadOnlyAccess")
+	for _, args := range [][]string{
+		{"secretsmanager", "replicate-secret-to-regions", "--secret-id", "r", "--add-replica-regions", "Region=eu-west-1"},
+		{"secretsmanager", "remove-regions-from-replication", "--secret-id", "r", "--remove-replica-regions", "eu-west-1"},
+		{"secretsmanager", "stop-replication-to-replica", "--secret-id", "r"},
+	} {
+		if out, err := h.AWSAs(t, akid, secret, "", args...); err == nil || !strings.Contains(out, "AccessDeniedException") {
+			t.Fatalf("%v as read-only: %v %s", args, err, out)
+		}
+	}
+}
