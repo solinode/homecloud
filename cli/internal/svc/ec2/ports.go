@@ -12,7 +12,7 @@ import (
 )
 
 // Security group rules decide which container ports are published on the
-// host. Docker cannot change the published ports of an existing container, so
+// host (filtering inside the VPC is the vpc package's firewall). Docker cannot change the published ports of an existing container, so
 // when a group's rules change (or an instance's groups do) each affected
 // instance whose published ports no longer match is recreated from a snapshot
 // of its disk (see recreate): the writable layer, volumes, private IP, ID and

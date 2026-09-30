@@ -199,8 +199,12 @@ type RoleSource interface {
 }
 
 func New(env *svc.Env, cw *cloudwatch.Service, v *vpc.Service) *Service {
-	return &Service{env: env, cw: cw, vpc: v, pools: map[string]*pool{}, async: make(chan *asyncEvent, 10000),
+	s := &Service{env: env, cw: cw, vpc: v, pools: map[string]*pool{}, async: make(chan *asyncEvent, 10000),
 		urlKey: []byte(core.NewSecret(32)), now: time.Now}
+	if v != nil {
+		v.RegisterMembers(s.fwMembers)
+	}
+	return s
 }
 
 // authorizer checks that the caller may perform action on resource.

@@ -2,9 +2,10 @@
 //
 // A VPC is one bridge network spanning the VPC CIDR. Subnets are ranges of it,
 // and resources launched into a subnet get a static IP from that range, so
-// everything inside a VPC can reach everything else by private IP or DNS name.
-// Security group ingress rules decide which ports are published on the host,
-// which is how resources become reachable from outside the VPC.
+// everything inside a VPC can reach everything else by private IP or DNS name
+// that its security groups allow (fwrules.go, fw.go). Security group ingress
+// rules also decide which ports are published on the host, which is how
+// resources become reachable from outside the VPC.
 package vpc
 
 import (
