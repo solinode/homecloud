@@ -45,6 +45,7 @@ func gwHarness(t *testing.T, docker bool) (*awstest.Harness, *lambda.Service) {
 	}
 	l := lambda.New(h.Env, cw, v)
 	l.Roles = roles{h.IAM}
+	l.HTTP = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }} // tests proxy to 127.0.0.1
 	l.RegisterAWS()
 	l.Routes(h.Router)
 	return h, l

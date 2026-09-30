@@ -350,7 +350,7 @@ func (s *Service) proxyHTTP(c *httpx.Ctx, integ doc, r Route, p string, params m
 	for _, h := range hopHeaders {
 		req.Header.Del(h)
 	}
-	cli := &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
+	cli := s.HTTP
 	resp, err := cli.Do(req)
 	if err != nil {
 		if tooBig := (*http.MaxBytesError)(nil); errors.As(err, &tooBig) {

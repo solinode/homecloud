@@ -180,6 +180,9 @@ type Service struct {
 	// ResolveImage maps an image URI (e.g. an ECR repository URI) to one the
 	// local Docker engine can pull.
 	ResolveImage func(uri string) string
+	// HTTP carries HTTP_PROXY integration requests; it refuses loopback, link-local
+	// and metadata addresses at dial time (tests point it at local backends).
+	HTTP *http.Client
 }
 
 // Credentials are temporary credentials for a function's execution role.
@@ -199,7 +202,7 @@ type RoleSource interface {
 
 func New(env *svc.Env, cw *cloudwatch.Service, v *vpc.Service) *Service {
 	s := &Service{env: env, cw: cw, vpc: v, pools: map[string]*pool{}, async: make(chan *asyncEvent, 10000),
-		urlKey: []byte(core.NewSecret(32)), now: time.Now}
+		urlKey: []byte(core.NewSecret(32)), now: time.Now, HTTP: core.SafeClient(0, 0)}
 	if v != nil {
 		v.RegisterMembers(s.fwMembers)
 	}
