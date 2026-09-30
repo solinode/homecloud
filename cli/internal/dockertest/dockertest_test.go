@@ -1,6 +1,7 @@
 package dockertest
 
 import (
+	"os/exec"
 	"testing"
 	"time"
 
@@ -68,8 +69,12 @@ func TestRemoveAndSweepScope(t *testing.T) {
 	time.Sleep(1100 * time.Millisecond)
 	// Narrowed to this test's two accounts so concurrent packages are untouched.
 	sweep(d, time.Second, func(a string) bool { return a == mine || a == other }, t.Logf)
-	if volumeExists(d, vMine) || volumeExists(d, vOther) || networkExists(d, nName) {
-		t.Error("sweep left stale test-labelled objects behind")
+	if volumeExists(d, vMine) || volumeExists(d, vOther) {
+		t.Error("sweep left stale test-labelled volumes behind")
+	}
+	// Network ages come from the docker CLI; without it the sweep leaves networks alone.
+	if _, err := exec.LookPath("docker"); err == nil && networkExists(d, nName) {
+		t.Error("sweep left a stale test-labelled network behind")
 	}
 	if !volumeExists(d, vReal) || !volumeExists(d, vNone) {
 		t.Error("sweep removed objects that are not test-labelled")
