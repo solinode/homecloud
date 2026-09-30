@@ -1,13 +1,12 @@
 package rds_test
 
 import (
-	"context"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
-	"github.com/homecloudhq/homecloud/cli/internal/runtime"
+	"github.com/homecloudhq/homecloud/cli/internal/dockertest"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/rds"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
 )
@@ -146,17 +145,10 @@ func TestAWSIAM(t *testing.T) {
 // withDocker adds real containers and the default VPC; the test skips without Docker.
 func withDocker(t *testing.T) (*awstest.Harness, *vpc.Service, []string) {
 	t.Helper()
-	d, err := runtime.New()
-	if err != nil {
-		t.Skip("docker not available: ", err)
-	}
 	h := awstest.New(t)
-	h.Env.Docker = d
-	runtime.Account = "rdstest" + h.Env.AccountID
+	h.Env.Docker = dockertest.Start(t)
 	v := vpc.New(h.Env)
-	if err := v.EnsureDefault(context.Background()); err != nil {
-		t.Skip("cannot create the default VPC: ", err)
-	}
+	dockertest.DefaultVPC(t, v.EnsureDefault)
 	t.Cleanup(func() {
 		for _, x := range v.List() {
 			_ = v.DeleteVPC(x.ID)

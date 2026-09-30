@@ -4,15 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"os/exec"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
-	"github.com/homecloudhq/homecloud/cli/internal/core"
+	"github.com/homecloudhq/homecloud/cli/internal/dockertest"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
-	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/acm"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cfn"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ecs"
@@ -42,35 +40,13 @@ func newInfraEnv(t *testing.T, docker bool) *infraEnv {
 	h := awstest.New(t)
 	ie := &infraEnv{}
 	if docker {
-		d, err := runtime.New()
-		if err != nil {
-			t.Skip("docker not available: ", err)
-		}
-		h.Env.Docker = d
-		runtime.Account = "cfninfra" + strings.ToLower(core.RandHex(4))
+		h.Env.Docker = dockertest.Start(t)
 	}
 	v := vpc.New(h.Env)
 	ie.VPC = v
 	if docker {
-		if err := v.EnsureDefault(context.Background()); err != nil {
-			t.Skip("cannot create the default VPC: ", err)
-		}
-		acct := runtime.Account
+		dockertest.DefaultVPC(t, v.EnsureDefault)
 		t.Cleanup(func() {
-			for _, kind := range [][]string{{"ps", "-aq"}, {"volume", "ls", "-q"}} {
-				out, _ := exec.Command("docker", append(kind, "--filter", "label="+core.LabelAccount+"="+acct)...).Output()
-				if ids := strings.Fields(string(out)); len(ids) > 0 {
-					rm := "rm"
-					if kind[0] == "volume" {
-						rm = "volume"
-					}
-					args := []string{rm, "-f"}
-					if kind[0] == "volume" {
-						args = []string{"volume", "rm", "-f"}
-					}
-					_ = exec.Command("docker", append(args, ids...)...).Run()
-				}
-			}
 			for _, x := range v.List() {
 				_ = v.DeleteVPC(x.ID)
 			}
