@@ -227,6 +227,9 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	sfnSvc := sfn.New(env)
 	cfnSvc := cfn.New(env)
 	cfnSvc.Refresh = iamSvc.Refresh
+	cfnSvc.RolePrincipal = func(roleARN string) (*httpx.Principal, error) {
+		return iamSvc.ServiceRolePrincipal(roleARN, "cloudformation.amazonaws.com", "HomeCloudCloudFormation")
+	}
 	cfnSvc.Recover()
 	cognitoSvc := cognito.New(env, secSvc)
 	asgSvc := autoscaling.New(env, ec2Svc, elbSvc, cw)
@@ -269,6 +272,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		s.Routes(rt)
 	}
 	iamSvc.RegisterAWS()
+	cfnSvc.RegisterAWS()
 	sqsSvc.RegisterAWS()
 	snsSvc.RegisterAWS()
 	secSvc.RegisterAWS()
