@@ -45,6 +45,7 @@ calls from inside them reach HomeCloud.
 | EC2 Auto Scaling | autoscaling | awsQuery | Groups from EC2 launch templates, target-tracking policies (average CPU), target group attachment, tags, suspend/resume, scaling activities |
 | Elastic Container Registry | ecr | awsJson 1.1 | Repositories, images (list, describe, batch get/delete), `get-login-password` for `docker login` against the HomeCloud registry, lifecycle and repository policies (stored, not enforced), tag mutability and scan settings (stored), tags |
 | Elastic Container Service | ecs | awsJson 1.1 | Clusters, task definitions (one container per task; images, ports, environment, Secrets Manager and SSM secrets, `awslogs` to CloudWatch Logs, task role credentials), services (Fargate/awsvpc, ELBv2 target group, rolling deployments with deployment status), RunTask/StopTask, capacity providers (FARGATE), tags |
+| Relational Database Service | rds | awsQuery | PostgreSQL, MySQL and MariaDB instances backed by containers: create, describe (with filters), modify, delete (final snapshot), reboot, start, stop; DB snapshots and restore; DB subnet groups; DB parameter groups (stored, not applied to the engine); `ManageMasterUserPassword` (the secret lives in Secrets Manager); engine versions and orderable options; tags. Multi-AZ, read replicas, clusters (Aurora) and engine upgrades are not supported |
 | Step Functions | states | awsJson 1.0 | State machines, executions, task tokens, service integrations |
 
 Notes:

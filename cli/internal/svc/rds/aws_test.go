@@ -163,6 +163,7 @@ func withDocker(t *testing.T) (*awstest.Harness, *vpc.Service, []string) {
 		}
 	})
 	rds.New(h.Env, v, h.Secrets).RegisterAWS()
+	h.Secrets.RegisterAWS()
 	var subs []string
 	for _, s := range v.Subnets() {
 		subs = append(subs, s.ID)
