@@ -63,7 +63,7 @@ export function RuleFields({
           </SelectContent>
         </Select>
       </div>
-      <div className="flex flex-col gap-1 sm:col-span-2">
+      <div className="flex flex-col gap-1 sm:col-span-3">
         <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-proto`}>
           Protocol
         </label>
@@ -81,7 +81,7 @@ export function RuleFields({
           </SelectContent>
         </Select>
       </div>
-      <div className="flex flex-col gap-1 sm:col-span-2">
+      <div className="flex flex-col gap-1 sm:col-span-3">
         <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-from`}>
           From port
         </label>
@@ -100,7 +100,7 @@ export function RuleFields({
         />
         {errs.from && <span className="text-destructive text-xs">{errs.from}</span>}
       </div>
-      <div className="flex flex-col gap-1 sm:col-span-2">
+      <div className="flex flex-col gap-1 sm:col-span-3">
         <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-to`}>
           To port
         </label>
@@ -116,7 +116,7 @@ export function RuleFields({
         />
         {errs.to && <span className="text-destructive text-xs">{errs.to}</span>}
       </div>
-      <div className="col-span-2 flex flex-col gap-1 sm:col-span-3">
+      <div className="col-span-2 flex flex-col gap-1 sm:col-span-6">
         <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-source`}>
           Source
         </label>
@@ -162,7 +162,7 @@ export function RuleFields({
         {errs.cidr && <span className="text-destructive text-xs">{errs.cidr}</span>}
         {errs.group && <span className="text-destructive text-xs">{errs.group}</span>}
       </div>
-      <div className="col-span-2 flex flex-col gap-1 sm:col-span-12">
+      <div className="col-span-2 flex flex-col gap-1 sm:col-span-6">
         <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-desc`}>
           Description <span className="font-normal">- optional</span>
         </label>
