@@ -479,9 +479,39 @@ func sandboxUserContent(h http.Handler) http.Handler {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 			w.Header().Set("Referrer-Policy", "no-referrer")
 		}
+		if csp := w.Header().Get("Content-Security-Policy"); csp != "" {
+			// Functions and HTTP integrations choose their own response headers: pin
+			// the sandbox so they cannot replace it and run on the console's origin.
+			w = &pinnedHeaders{ResponseWriter: w, pins: map[string]string{"Content-Security-Policy": csp, "X-Content-Type-Options": "nosniff"}}
+		}
 		h.ServeHTTP(w, r)
 	})
 }
+
+// pinnedHeaders re-applies fixed headers just before the response is written,
+// whatever the handler set in between.
+type pinnedHeaders struct {
+	http.ResponseWriter
+	pins map[string]string
+}
+
+func (p *pinnedHeaders) pin() {
+	for k, v := range p.pins {
+		p.Header().Set(k, v)
+	}
+}
+func (p *pinnedHeaders) WriteHeader(code int) { p.pin(); p.ResponseWriter.WriteHeader(code) }
+func (p *pinnedHeaders) Write(b []byte) (int, error) {
+	p.pin()
+	return p.ResponseWriter.Write(b)
+}
+func (p *pinnedHeaders) Flush() {
+	p.pin()
+	if f, ok := p.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+func (p *pinnedHeaders) Unwrap() http.ResponseWriter { return p.ResponseWriter }
 
 // withCORS allows the console dev server and other origins to call the API.
 // Credentials travel in the Authorization header, never cookies, so a wildcard is safe.
