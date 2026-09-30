@@ -48,6 +48,9 @@ type Harness struct {
 	// Audit records every audited call (action, resource); read it with AuditLog.
 	Audit   []string
 	auditMu sync.Mutex
+	// AuditHook, when set before the first request, also receives every audited
+	// call (CloudTrail's Record).
+	AuditHook httpx.AuditFunc
 	// barrier orders a test's setup writes (fields set on services after New)
 	// before the requests that read them; the race detector can't see that
 	// ordering through the AWS CLI subprocess.
@@ -83,6 +86,9 @@ func New(t *testing.T) *Harness {
 		h.auditMu.Lock()
 		h.Audit = append(h.Audit, action+" "+resource)
 		h.auditMu.Unlock()
+		if h.AuditHook != nil {
+			h.AuditHook(p, action, resource, r, status, took)
+		}
 	}
 	h.Router = &httpx.Router{Mux: h.Mux, Auth: im, Account: env.AccountID, Audit: audit}
 	im.Routes(h.Router)

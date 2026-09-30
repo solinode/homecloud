@@ -460,7 +460,7 @@ var builtinPolicies = []builtinPolicy{
 		allowAll("iam:CreateServiceLinkedRole", "iam:DeleteServiceLinkedRole", "iam:ListRoles", "organizations:DescribeOrganization", "account:ListRegions", "account:GetAccountInformation"),
 	)},
 	{"ReadOnlyAccess", "/", "Read-only access to every service (secret values excluded).", docs(
-		allowAll("*:Describe*", "*:List*", "*:Get*"),
+		allowAll("*:Describe*", "*:List*", "*:Get*", "cloudtrail:LookupEvents", "cognito-idp:AdminGetUser", "cognito-idp:AdminListGroupsForUser"),
 		Statement{Effect: "Deny", Action: StringList{"secretsmanager:GetSecretValue", "kms:Decrypt"}, Resource: StringList{"*"}},
 	)},
 	{"IAMFullAccess", "/", "Full access to users, groups, roles, policies and access keys.", doc("Allow", "iam:*", "organizations:DescribeAccount", "organizations:DescribeOrganization", "organizations:DescribeOrganizationalUnit", "organizations:DescribePolicy", "organizations:ListChildren", "organizations:ListParents", "organizations:ListPoliciesForTarget", "organizations:ListRoots", "organizations:ListPolicies", "organizations:ListTargetsForPolicy")},
