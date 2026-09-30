@@ -976,7 +976,17 @@ func (s *Service) client(p Pool, id, secret string) (Client, error) {
 // attempt records a sign-in attempt for key and reports whether it is allowed.
 // Attempts are counted before the password check so parallel guesses cannot
 // slip past the limit; a success clears the record.
-func (s *Service) attempt(key string) bool {
+func (s *Service) attempt(key string) bool { return s.attemptLimit(key, 10) }
+
+const (
+	// maxAccountAttempts bounds password guesses per user across all addresses in
+	// the window; maxSignUps bounds self sign-ups per pool (each costs a bcrypt hash).
+	maxAccountAttempts = 40
+	maxSignUps         = 120
+)
+
+// attemptLimit is attempt with a limit of max attempts per window.
+func (s *Service) attemptLimit(key string, max int) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	recent := s.fails[key][:0]
@@ -985,7 +995,7 @@ func (s *Service) attempt(key string) bool {
 			recent = append(recent, t)
 		}
 	}
-	if len(recent) >= 10 {
+	if len(recent) >= max {
 		s.fails[key] = recent
 		return false
 	}
@@ -1044,6 +1054,9 @@ func (s *Service) selfSignUp(poolID string, in authInput) (User, error) {
 	}
 	if _, err := s.client(p, in.ClientID, in.ClientSecret); err != nil {
 		return User{}, err
+	}
+	if !s.attemptLimit("signup/"+p.ID, maxSignUps) {
+		return User{}, core.Errf(http.StatusTooManyRequests, "TooManyRequestsException", "too many sign-ups; try again later")
 	}
 	status := "UNCONFIRMED"
 	if p.AutoConfirm {
@@ -1130,7 +1143,9 @@ func (s *Service) authenticate(poolID string, in authInput, ip string) (any, err
 	switch in.Flow {
 	case "", "USER_PASSWORD_AUTH":
 		tk := p.ID + "/" + strings.ToLower(in.Username) + "/" + ip
-		if !s.attempt(tk) {
+		// The per-address limit alone is bypassed by rotating addresses: also bound
+		// the guesses an account can receive from everywhere together.
+		if !s.attemptLimit(p.ID+"/acct/"+strings.ToLower(in.Username), maxAccountAttempts) || !s.attempt(tk) {
 			return nil, core.Errf(http.StatusTooManyRequests, "TooManyRequestsException", "too many failed attempts; try again later")
 		}
 		u, err := store.Get[User](s.env.Store, cUsers, userKey(p.ID, in.Username))

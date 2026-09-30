@@ -167,7 +167,7 @@ func (s *Service) srpInitiate(p Pool, cl Client, username, srpA, ip string) (map
 		return nil, invalid("Invalid SRP_A")
 	}
 	rk := p.ID + "/srp/" + strings.ToLower(username) + "/" + ip
-	if !s.attempt(rk) {
+	if !s.attemptLimit(p.ID+"/acct/"+strings.ToLower(username), maxAccountAttempts) || !s.attempt(rk) {
 		return nil, core.Errf(http.StatusTooManyRequests, "TooManyRequestsException", "too many failed attempts; try again later")
 	}
 	st := &srpPending{pool: p.ID, client: cl.ID, username: username, rateKey: rk, a: a, b: randInt(512), expires: time.Now().Add(srpChallengeTTL)}
