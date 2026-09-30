@@ -52,6 +52,11 @@ type Certificate struct {
 	KeyCT      string    `json:"key_ct,omitempty"`
 	CreatedAt  time.Time `json:"created_at"`
 	Tags       core.Tags `json:"tags,omitempty"`
+	// ValidationMethod is recorded for DNS/EMAIL requests. Certificates are
+	// issued at once by the private CA, so validation is reported as SUCCESS.
+	ValidationMethod string    `json:"validation_method,omitempty"`
+	IdempotencyToken string    `json:"idempotency_token,omitempty"`
+	IssuedAt         time.Time `json:"issued_at,omitempty"`
 }
 
 func (c Certificate) view() Certificate {
@@ -73,6 +78,8 @@ type Service struct {
 	mu      sync.Mutex
 	// InUse reports whether a load balancer uses a certificate (set by ELB).
 	InUse func(arn string) bool
+	// UsedBy lists the load balancer ARNs using a certificate (set by ELB).
+	UsedBy func(arn string) []string
 	// OnRenew is told when a certificate's material changes (ELB reloads listeners).
 	OnRenew func(arn string)
 }
@@ -209,33 +216,54 @@ func (s *Service) issue(domain string, sans []string, days int) (Certificate, er
 		KeyCT: s.secrets.Encrypt(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: kb})), CreatedAt: core.Now()}, nil
 }
 
+type requestInput struct {
+	DomainName       string    `json:"domain_name"`
+	SANs             []string  `json:"subject_alternative_names"`
+	ValidDays        int       `json:"valid_days"`
+	Tags             core.Tags `json:"tags"`
+	ValidationMethod string    `json:"validation_method"`
+	IdempotencyToken string    `json:"idempotency_token"`
+}
+
 func (s *Service) request(c *httpx.Ctx) (any, error) {
-	var in struct {
-		DomainName string    `json:"domain_name"`
-		SANs       []string  `json:"subject_alternative_names"`
-		ValidDays  int       `json:"valid_days"`
-		Tags       core.Tags `json:"tags"`
-	}
+	var in requestInput
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	cert, err := s.requestCert(in)
+	if err != nil {
+		return nil, err
+	}
+	return cert.view(), nil
+}
+
+// requestCert issues a certificate from the private CA and stores it. It is
+// shared by the native and AWS APIs.
+func (s *Service) requestCert(in requestInput) (Certificate, error) {
 	for _, d := range append([]string{in.DomainName}, in.SANs...) {
 		if net.ParseIP(d) == nil && !domainRe.MatchString(d) {
-			return nil, core.BadRequest("%q is not a valid domain name or IP address", d)
+			return Certificate{}, core.BadRequest("%q is not a valid domain name or IP address", d)
 		}
 	}
 	if in.ValidDays == 0 {
 		in.ValidDays = 395
 	}
 	if in.ValidDays < 1 || in.ValidDays > 825 {
-		return nil, core.BadRequest("valid_days must be 1-825")
+		return Certificate{}, core.BadRequest("valid_days must be 1-825")
+	}
+	if in.IdempotencyToken != "" {
+		for _, x := range store.List[Certificate](s.env.Store, cCerts) {
+			if x.IdempotencyToken == in.IdempotencyToken && x.DomainName == in.DomainName {
+				return x, nil
+			}
+		}
 	}
 	cert, err := s.issue(in.DomainName, in.SANs, in.ValidDays)
 	if err != nil {
-		return nil, err
+		return Certificate{}, err
 	}
-	cert.Tags = in.Tags
-	return cert.view(), store.Put(s.env.Store, cCerts, cert.ID, cert)
+	cert.Tags, cert.ValidationMethod, cert.IdempotencyToken, cert.IssuedAt = in.Tags, in.ValidationMethod, in.IdempotencyToken, cert.CreatedAt
+	return cert, store.Put(s.env.Store, cCerts, cert.ID, cert)
 }
 
 func (s *Service) importCert(c *httpx.Ctx) (any, error) {
@@ -248,30 +276,59 @@ func (s *Service) importCert(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	pair, err := tls.X509KeyPair([]byte(in.Certificate+"\n"+in.Chain), []byte(in.PrivateKey))
+	cert, err := s.importPEM("", in.Certificate, in.PrivateKey, in.Chain, in.Tags)
 	if err != nil {
-		return nil, core.BadRequest("certificate and private key do not form a valid pair: %v", err)
+		return nil, err
+	}
+	return cert.view(), nil
+}
+
+// importPEM stores a certificate issued elsewhere. With an existing ARN it
+// replaces that certificate's material in place (re-import), keeping its tags.
+func (s *Service) importPEM(arn, certPEM, keyPEM, chainPEM string, tags core.Tags) (Certificate, error) {
+	pair, err := tls.X509KeyPair([]byte(certPEM+"\n"+chainPEM), []byte(keyPEM))
+	if err != nil {
+		return Certificate{}, core.BadRequest("certificate and private key do not form a valid pair: %v", err)
 	}
 	leaf, err := x509.ParseCertificate(pair.Certificate[0])
 	if err != nil {
-		return nil, core.BadRequest("invalid certificate: %v", err)
+		return Certificate{}, core.BadRequest("invalid certificate: %v", err)
 	}
 	if time.Now().After(leaf.NotAfter) {
-		return nil, core.BadRequest("certificate expired on %s", leaf.NotAfter.Format(time.DateOnly))
+		return Certificate{}, core.BadRequest("certificate expired on %s", leaf.NotAfter.Format(time.DateOnly))
 	}
-	id := uuid()
+	id, created := uuid(), core.Now()
+	if arn != "" {
+		old, err := s.byARN(arn)
+		if err != nil {
+			return Certificate{}, err
+		}
+		if old.Type != "IMPORTED" {
+			return Certificate{}, core.BadRequest("only imported certificates can be re-imported")
+		}
+		id, created = old.ID, old.CreatedAt
+		if tags == nil {
+			tags = old.Tags
+		}
+	}
 	domain := leaf.Subject.CommonName
 	if domain == "" && len(leaf.DNSNames) > 0 {
 		domain = leaf.DNSNames[0]
 	}
 	cert := Certificate{ARN: s.env.ARN("acm", "certificate/"+id), ID: id, DomainName: domain, SANs: leafSANs(leaf), Type: "IMPORTED", Status: "ISSUED",
 		Issuer: leaf.Issuer.CommonName, NotBefore: leaf.NotBefore.UTC(), NotAfter: leaf.NotAfter.UTC(), Serial: hex.EncodeToString(leaf.SerialNumber.Bytes()),
-		CertPEM: strings.TrimSpace(in.Certificate) + "\n", ChainPEM: strings.TrimSpace(in.Chain), KeyCT: s.secrets.Encrypt([]byte(in.PrivateKey)),
-		CreatedAt: core.Now(), Tags: in.Tags}
+		CertPEM: strings.TrimSpace(certPEM) + "\n", ChainPEM: strings.TrimSpace(chainPEM), KeyCT: s.secrets.Encrypt([]byte(keyPEM)),
+		CreatedAt: created, IssuedAt: core.Now(), Tags: tags}
 	if cert.ChainPEM != "" {
 		cert.ChainPEM += "\n"
 	}
-	return cert.view(), store.Put(s.env.Store, cCerts, id, cert)
+	if err := store.Put(s.env.Store, cCerts, id, cert); err != nil {
+		return Certificate{}, err
+	}
+	if arn != "" && s.OnRenew != nil {
+		go s.OnRenew(cert.ARN)
+	}
+	return cert, nil
 }
 
 func (s *Service) get(c *httpx.Ctx) (any, error) {
@@ -290,21 +347,30 @@ func (s *Service) renew(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, core.Errf(http.StatusNotFound, "ResourceNotFoundException", "certificate %q does not exist", c.Param("id"))
 	}
-	if cert.Type != "PRIVATE" {
-		return nil, core.BadRequest("imported certificates are renewed by importing a new one")
-	}
-	fresh, err := s.issue(cert.DomainName, cert.SANs, int(cert.NotAfter.Sub(cert.NotBefore).Hours()/24))
+	fresh, err := s.renewCert(cert)
 	if err != nil {
 		return nil, err
 	}
+	return fresh.view(), nil
+}
+
+func (s *Service) renewCert(cert Certificate) (Certificate, error) {
+	if cert.Type != "PRIVATE" {
+		return Certificate{}, core.BadRequest("imported certificates are renewed by importing a new one")
+	}
+	fresh, err := s.issue(cert.DomainName, cert.SANs, int(cert.NotAfter.Sub(cert.NotBefore).Hours()/24))
+	if err != nil {
+		return Certificate{}, err
+	}
 	fresh.ARN, fresh.ID, fresh.CreatedAt, fresh.Tags = cert.ARN, cert.ID, cert.CreatedAt, cert.Tags
+	fresh.ValidationMethod, fresh.IdempotencyToken, fresh.IssuedAt = cert.ValidationMethod, cert.IdempotencyToken, core.Now()
 	if err := store.Put(s.env.Store, cCerts, cert.ID, fresh); err != nil {
-		return nil, err
+		return Certificate{}, err
 	}
 	if s.OnRenew != nil {
 		go s.OnRenew(cert.ARN)
 	}
-	return fresh.view(), nil
+	return fresh, nil
 }
 
 func (s *Service) delete(c *httpx.Ctx) (any, error) {
@@ -312,10 +378,14 @@ func (s *Service) delete(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, core.Errf(http.StatusNotFound, "ResourceNotFoundException", "certificate %q does not exist", c.Param("id"))
 	}
+	return nil, s.deleteCert(cert)
+}
+
+func (s *Service) deleteCert(cert Certificate) error {
 	if s.InUse != nil && s.InUse(cert.ARN) {
-		return nil, core.Errf(http.StatusConflict, "ResourceInUseException", "certificate is used by a load balancer listener")
+		return core.Errf(http.StatusConflict, "ResourceInUseException", "certificate is used by a load balancer listener")
 	}
-	return nil, store.Delete(s.env.Store, cCerts, cert.ID)
+	return store.Delete(s.env.Store, cCerts, cert.ID)
 }
 
 func (s *Service) caCert(c *httpx.Ctx) (any, error) {
