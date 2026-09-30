@@ -156,6 +156,16 @@ func (c Config) ServiceBindAddr() string {
 	return "127.0.0.1"
 }
 
+// ServiceDialHost is the address HomeCloud itself uses to reach MinIO on the
+// host: loopback, or the bind address when MinIO is published on one specific
+// non-loopback address.
+func (c Config) ServiceDialHost() string {
+	if ip := net.ParseIP(c.ServiceBindAddr()); ip != nil && !ip.IsUnspecified() {
+		return ip.String()
+	}
+	return "127.0.0.1"
+}
+
 // DNSBindAddr is where the DNS server's port is published on the host.
 func (c Config) DNSBindAddr() string {
 	if c.DNSBind != "" {

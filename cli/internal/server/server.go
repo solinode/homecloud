@@ -370,6 +370,10 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 	native := withCORS(sandboxUserContent(mux))
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, s3.PresignPrefix) {
+			s3Svc.ServePresigned(w, r)
+			return
+		}
 		// AWS SDK/CLI requests (SigV4-signed, or X-Amz-Target) take the AWS protocols.
 		if awsapi.Match(r) && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 			awsHandler.ServeHTTP(w, r)

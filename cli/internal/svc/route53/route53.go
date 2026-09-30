@@ -237,6 +237,13 @@ func (s *Service) start(ctx context.Context) error {
 	if len(vpcs) == 0 {
 		return fmt.Errorf("no VPCs")
 	}
+	bind := s.env.Cfg.DNSBindAddr()
+	if d.State(containerName) != "missing" && !d.BoundTo(containerName, bind, "53/udp", "53/tcp") {
+		log.Printf("route53: recreating the DNS server to publish its port on %s only", bind)
+		if err := d.Remove(containerName); err != nil {
+			return fmt.Errorf("recreate CoreDNS: %w", err)
+		}
+	}
 	if d.State(containerName) == "missing" {
 		first := vpcs[0]
 		files := s.render()
@@ -244,7 +251,7 @@ func (s *Service) start(ctx context.Context) error {
 			Name: containerName, Image: image, Cmd: []string{"-conf", "/etc/coredns/Corefile"},
 			Labels: runtime.Labels("route53", "server", nil), Restart: "unless-stopped", MemoryMB: 128,
 			Network: first.Network, IP: vpc.DNSAddress(first.CIDR), Aliases: []string{"dns.internal"},
-			Ports: []runtime.Port{{ContainerPort: 53, HostPort: s.env.Cfg.DNSPort, Protocol: "udp"}, {ContainerPort: 53, HostPort: s.env.Cfg.DNSPort, Protocol: "tcp"}},
+			Ports: []runtime.Port{{ContainerPort: 53, HostPort: s.env.Cfg.DNSPort, Protocol: "udp", HostIP: bind}, {ContainerPort: 53, HostPort: s.env.Cfg.DNSPort, Protocol: "tcp", HostIP: bind}},
 		})
 		if err != nil {
 			return fmt.Errorf("start CoreDNS: %w", err)
