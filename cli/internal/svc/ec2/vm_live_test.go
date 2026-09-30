@@ -2,7 +2,6 @@ package ec2_test
 
 import (
 	"context"
-	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -28,11 +27,15 @@ import (
 //
 // (DOCKER_HOST=unix://$HOME/.orbstack/run/docker.sock on macOS with OrbStack).
 
-const (
-	vmTestImage  = "ami-ubuntu-24-04-vm"
-	vmTestUser   = "ubuntu"
-	vmTestBudget = 40 * time.Minute // per wait for a guest to boot; TCG is slow
-)
+const vmTestBudget = 40 * time.Minute // per wait for a guest to boot; TCG is slow
+
+// The Ubuntu image is the default; HC_TEST_VM_IMAGE=debian boots Debian instead (faster to boot emulated).
+var vmTestImage, vmTestUser = func() (string, string) {
+	if os.Getenv("HC_TEST_VM_IMAGE") == "debian" {
+		return "ami-debian-12-vm", "debian"
+	}
+	return "ami-ubuntu-24-04-vm", "ubuntu"
+}()
 
 type vmInstance struct {
 	State          string         `json:"state"`
@@ -77,7 +80,6 @@ func (f *filterEnv) startIMDS(t *testing.T) {
 	srv := &http.Server{Handler: mux}
 	go srv.Serve(ln)
 	f.h.Env.ContainerAPI = fmt.Sprintf("http://host.docker.internal:%d", ln.Addr().(*net.TCPAddr).Port)
-	f.ec2.IMDSContainer = fmt.Sprintf("hc-test-imds-%d", time.Now().UnixNano()%1e9)
 	ctx, cancel := context.WithCancel(context.Background())
 	done := make(chan struct{})
 	go func() { f.ec2.RunIMDS(ctx); close(done) }()
@@ -162,6 +164,19 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	f := newFilterEnv(t)
 	h := f.h
 	f.ec2.VMImageVolume = "hc-test-vm-images"
+	// Our own metadata service container, named before anything can attach the
+	// default one (a real installation's) to the test VPC.
+	f.ec2.IMDSContainer = fmt.Sprintf("hc-test-imds-%d", time.Now().UnixNano()%1e9)
+	// Published ports need a VPC with an internet gateway (otherwise its network is internal).
+	f.vpc.NetworkChanged = f.ec2.NetworkChanged
+	igw := h.AWSJSON(t, "ec2", "create-internet-gateway")["InternetGateway"].(map[string]any)["InternetGatewayId"].(string)
+	h.AWS(t, "ec2", "attach-internet-gateway", "--internet-gateway-id", igw, "--vpc-id", f.vpcID)
+	rtb := h.AWSJSON(t, "ec2", "describe-route-tables", "--filters", "Name=vpc-id,Values="+f.vpcID)["RouteTables"].([]any)[0].(map[string]any)["RouteTableId"].(string)
+	h.AWS(t, "ec2", "create-route", "--route-table-id", rtb, "--destination-cidr-block", "0.0.0.0/0", "--gateway-id", igw)
+	t.Cleanup(func() {
+		_, _ = h.AWSErr(t, "ec2", "detach-internet-gateway", "--internet-gateway-id", igw, "--vpc-id", f.vpcID)
+		_, _ = h.AWSErr(t, "ec2", "delete-internet-gateway", "--internet-gateway-id", igw)
+	})
 	f.startIMDS(t)
 
 	// A key pair, and a security group that lets SSH in from anywhere (published on the host).
@@ -198,6 +213,10 @@ func TestVMInstanceLifecycle(t *testing.T) {
 		t.Fatalf("instance reports virtualization %q, user %q", i.Virtualization, i.VMUser)
 	}
 	if i.PublicPorts["22/tcp"] == 0 {
+		ci, _ := h.Env.Docker.Inspect(i.ContainerID)
+		if ci != nil {
+			t.Logf("port bindings %v, network ports %v", ci.HostConfig.PortBindings, ci.NetworkSettings.Ports)
+		}
 		t.Fatalf("ssh not published: %v", i.PublicPorts)
 	}
 	// The root volume is an EBS volume attached at /dev/xvda with the requested size.
@@ -240,15 +259,16 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	sshRun(t, c, "echo persisted > /home/"+vmTestUser+"/keep.txt && sync")
 
 	// The serial console is the instance's console output.
-	out := h.AWSJSON(t, "ec2", "get-console-output", "--instance-id", id)["Output"].(string)
-	if raw, err := base64.StdEncoding.DecodeString(out); err != nil || !strings.Contains(string(raw), "Cloud-init v.") {
-		t.Errorf("console output lacks cloud-init lines (%v): %.300s", err, out)
+	// (The AWS CLI decodes the base64 output itself.)
+	if out := h.AWSJSON(t, "ec2", "get-console-output", "--instance-id", id)["Output"].(string); !strings.Contains(out, "Cloud-init v.") || !strings.Contains(out, "finished at") {
+		t.Errorf("console output lacks cloud-init lines: %.300s", out)
 	}
 	// Commands inside a VM are not available yet, with a clear error.
 	if msg, err := h.AWSErr(t, "ec2", "create-image", "--instance-id", id, "--name", "vm-img"); err == nil || !strings.Contains(msg, "not supported yet") {
 		t.Errorf("create-image of a VM: %v %s", err, msg)
 	}
 	c.Close()
+	t.Logf("guest checks passed")
 
 	// Stop and start keep the disk.
 	h.AWS(t, "ec2", "stop-instances", "--instance-ids", id)
@@ -266,6 +286,7 @@ func TestVMInstanceLifecycle(t *testing.T) {
 		t.Errorf("after start, instance-id from metadata = %q", got)
 	}
 	c.Close()
+	t.Logf("stop/start kept the disk")
 
 	// Security groups apply to the guest. With the world-open rule the probe reaches SSH.
 	f.bannerEventually(t, true, helper, ip, "world-open rule")
@@ -293,6 +314,7 @@ func TestVMInstanceLifecycle(t *testing.T) {
 		t.Errorf("after the rebuild: %q", got)
 	}
 	c.Close()
+	t.Logf("security group rules and the rebuild verified")
 
 	// Terminate removes the container and the root volume.
 	cid := f.vmGet(id).ContainerID

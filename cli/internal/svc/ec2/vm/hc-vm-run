@@ -37,14 +37,29 @@ fi
 dns=""
 if [ -n "${HC_VM_DNS:-}" ]; then dns="-D $HC_VM_DNS --dns-forward $HC_VM_DNS --dns-host 127.0.0.11"; fi
 rm -f /run/passt.sock /run/qmp.sock
-# shellcheck disable=SC2086
-passt -f -s /run/passt.sock -t all -u all $dns >/run/passt.log 2>&1 &
-n=0
-while [ ! -S /run/passt.sock ] && [ $n -lt 50 ]; do n=$((n+1)); sleep 0.1; done
-if [ ! -S /run/passt.sock ]; then
-  echo "[homecloud] passt did not start:" >&2
-  cat /run/passt.log >&2
-  exit 1
+if [ "${HC_VM_NET:-}" != "user" ]; then
+  # shellcheck disable=SC2086
+  passt -f -s /run/passt.sock -t all -u all $dns >/run/passt.log 2>&1 &
+  n=0
+  while [ ! -S /run/passt.sock ] && [ $n -lt 50 ]; do n=$((n+1)); sleep 0.1; done
+  if [ ! -S /run/passt.sock ]; then
+    echo "[homecloud] passt did not start; falling back to user-mode networking:" >&2
+    cat /run/passt.log >&2
+    HC_VM_NET=user
+  fi
+fi
+if [ "${HC_VM_NET:-}" = "user" ]; then
+  # QEMU's user-mode networking: the guest sits behind NAT at 10.0.2.15 and
+  # only the ports HC_VM_HOSTFWD lists (",hostfwd=tcp::22-:22,...", the ports
+  # the security groups allow when the container was created) reach it.
+  n=$#
+  while [ "$n" -gt 0 ]; do
+    a=$1; shift; n=$((n-1))
+    case "$a" in
+      stream,id=net0,*) a="user,id=net0${HC_VM_HOSTFWD:-}" ;;
+    esac
+    set -- "$@" "$a"
+  done
 fi
 
 echo "[homecloud] starting the virtual machine"

@@ -248,6 +248,8 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 		Hostname: strings.TrimSuffix(inst.PrivateDNS, ".internal"),
 		Env: map[string]string{
 			"HC_VM_BASE": base.CacheName(mach.Arch), "HC_VM_DISK_GB": strconv.Itoa(inst.VMDiskGB), "HC_VM_ARCH": string(mach.Arch), "HC_VM_DNS": dns,
+			// Used only when passt is unavailable (or HC_VM_NET=user is set for the server).
+			"HC_VM_NET": os.Getenv("HC_VM_NET"), "HC_VM_HOSTFWD": hostFwd(s.vpc.IngressPorts(inst.SecurityGroups, 64)),
 		},
 		ExtraHosts: []string{runtime.HostAlias},
 		// passt isolates itself with a user namespace, which Docker's default
@@ -258,6 +260,15 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 		spec.Devices = []string{"/dev/kvm"}
 	}
 	return spec
+}
+
+// hostFwd renders ports as QEMU user-mode networking forwards.
+func hostFwd(ports []runtime.Port) string {
+	var b strings.Builder
+	for _, p := range ports {
+		fmt.Fprintf(&b, ",hostfwd=%s::%d-:%d", p.Protocol, p.ContainerPort, p.ContainerPort)
+	}
+	return b.String()
 }
 
 // vmSeed is the cloud-init seed of an instance, as files to copy into its container.
