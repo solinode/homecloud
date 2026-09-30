@@ -17,7 +17,7 @@ import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { useApi } from "@/lib/hooks"
 import type { Instance } from "@/lib/types"
-import { INSTANCES_PATH, PublicPorts, instanceHref, pollInterval, useInstanceActions } from "./instance-actions"
+import { INSTANCES_PATH, InstanceKindBadge, PublicPorts, instanceKind, instanceHref, pollInterval, useInstanceActions } from "./instance-actions"
 
 const STATES = ["all", "pending", "running", "stopping", "stopped", "shutting-down", "terminated"] as const
 
@@ -39,13 +39,14 @@ const columns: Column<Instance>[] = [
     value: (i) => i.id,
   },
   { id: "state", header: "Instance state", cell: (i) => <StatusBadge status={i.state} />, value: (i) => i.state },
+  { id: "kind", header: "Type", cell: (i) => <InstanceKindBadge instance={i} />, value: (i) => instanceKind(i) },
   { id: "type", header: "Instance type", cell: (i) => <span className="font-mono text-[13px]">{i.instance_type}</span>, value: (i) => i.instance_type },
   {
     id: "image",
     header: "Image",
     cell: (i) => (
       <span className="font-mono text-[13px]" title={i.image_id}>
-        {i.image_ref}
+        {i.image_ref || i.image_id}
       </span>
     ),
     value: (i) => `${i.image_ref} ${i.image_id}`,
@@ -138,7 +139,7 @@ export function InstancesList() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title="Instances"
-        description="Virtual servers running as resource-limited containers in your VPC subnets."
+        description="Virtual servers in your VPC subnets, running as resource-limited containers or as virtual machines."
         breadcrumbs={[{ label: "EC2", href: "/ec2/" }, { label: "Instances" }]}
       />
       <DataTable
