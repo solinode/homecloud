@@ -23,6 +23,17 @@ export interface Snapshot {
   tags?: Tags
 }
 
+export interface ElasticIP {
+  allocation_id: string
+  public_ip: string
+  domain: string
+  association_id?: string
+  instance_id?: string
+  private_ip?: string
+  created_at: string
+  tags?: Tags
+}
+
 export interface InternetGateway {
   id: string
   vpc_id?: string

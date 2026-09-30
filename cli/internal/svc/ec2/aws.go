@@ -67,7 +67,12 @@ func (s *Service) RegisterAWS() {
 		"DescribeSnapshots":                    s.awsDescribeSnapshots,
 		"DeleteSnapshot":                       s.awsDeleteSnapshot,
 		"DescribeNetworkInterfaces":            s.awsDescribeNetworkInterfaces,
+		"AllocateAddress":                      s.awsAllocateAddress,
 		"DescribeAddresses":                    s.awsDescribeAddresses,
+		"ReleaseAddress":                       s.awsReleaseAddress,
+		"AssociateAddress":                     s.awsAssociateAddress,
+		"DisassociateAddress":                  s.awsDisassociateAddress,
+		"ModifyNetworkInterfaceAttribute":      s.awsModifyNetworkInterfaceAttribute,
 	}
 	s.vpcOps(ops)
 	s.ltOps(ops)
@@ -1102,6 +1107,7 @@ func (s *Service) awsModifyInstanceAttribute(q *awsapi.Req) (any, error) {
 		if _, err := store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error { x.SecurityGroups = groups; return nil }); err != nil {
 			return nil, err
 		}
+		s.syncPortsAsync(i.ID)
 	}
 	for _, m := range q.Structs("BlockDeviceMapping") {
 		if d, ok := m["Ebs.DeleteOnTermination"]; ok {
@@ -1311,7 +1317,7 @@ func (s *Service) awsDeleteKeyPair(q *awsapi.Req) (any, error) {
 
 var resourceTypes = map[string]string{
 	"i": "instance", "vol": "volume", "vpc": "vpc", "subnet": "subnet", "sg": "security-group", "ami": "image",
-	"key": "key-pair", "snap": "snapshot", "igw": "internet-gateway", "rtb": "route-table", "lt": "launch-template",
+	"key": "key-pair", "snap": "snapshot", "igw": "internet-gateway", "rtb": "route-table", "lt": "launch-template", "eipalloc": "elastic-ip",
 }
 
 func resourceType(id string) string {
@@ -1354,6 +1360,8 @@ func (s *Service) setTags(id string, fn func(t core.Tags)) error {
 		_, err = store.Update(s.env.Store, cIGWs, id, func(x *InternetGateway) error { plain(&x.Tags); return nil })
 	case "route-table":
 		_, err = store.Update(s.env.Store, cRouteTables, id, func(x *RouteTable) error { plain(&x.Tags); return nil })
+	case "elastic-ip":
+		_, err = store.Update(s.env.Store, cAddresses, id, func(x *Address) error { plain(&x.Tags); return nil })
 	case "launch-template":
 		_, err = store.Update(s.env.Store, cLaunchTemplates, id, func(x *LaunchTemplate) error { plain(&x.Tags); return nil })
 	default:
@@ -1703,10 +1711,31 @@ func (s *Service) awsDescribeNetworkInterfaces(q *awsapi.Req) (any, error) {
 	return map[string]any{"networkInterfaceSet": items}, nil
 }
 
-// awsDescribeAddresses: HomeCloud has no Elastic IPs.
-func (s *Service) awsDescribeAddresses(q *awsapi.Req) (any, error) {
-	if err := q.Authorize("ec2:DescribeAddresses", "*"); err != nil {
+// awsModifyNetworkInterfaceAttribute changes the security groups of an
+// instance's primary interface; the other attributes are accepted and ignored.
+func (s *Service) awsModifyNetworkInterfaceAttribute(q *awsapi.Req) (any, error) {
+	id := q.Param("NetworkInterfaceId")
+	if err := q.Authorize("ec2:ModifyNetworkInterfaceAttribute", q.ARN("ec2", "network-interface/"+id)); err != nil {
 		return nil, err
 	}
-	return map[string]any{"addressesSet": awsapi.Items{}}, nil
+	var inst *Instance
+	for _, i := range s.list() {
+		if i.State != "terminated" && eniID(i.ID) == id {
+			inst = &i
+			break
+		}
+	}
+	if inst == nil {
+		return nil, core.Errf(http.StatusBadRequest, "InvalidNetworkInterfaceID.NotFound", "The networkInterface ID '%s' does not exist", id)
+	}
+	if groups := q.List("SecurityGroupId"); len(groups) > 0 {
+		if err := s.vpc.CheckGroups(inst.VpcID, groups); err != nil {
+			return nil, err
+		}
+		if _, err := store.Update(s.env.Store, cInstances, inst.ID, func(x *Instance) error { x.SecurityGroups = groups; return nil }); err != nil {
+			return nil, err
+		}
+		s.syncPortsAsync(inst.ID)
+	}
+	return map[string]any{"return": true}, nil
 }
