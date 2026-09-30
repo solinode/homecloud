@@ -161,6 +161,8 @@ func singleKey(d SingleMetricDetector) string {
 }
 
 func mathKey(qs []MetricDataQuery) string {
+	qs = append([]MetricDataQuery(nil), qs...)
+	sort.Slice(qs, func(i, j int) bool { return qs[i].Id < qs[j].Id })
 	var sb strings.Builder
 	for _, q := range qs {
 		fmt.Fprintf(&sb, "%s|%s|", q.Id, q.Expression)
