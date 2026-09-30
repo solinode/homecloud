@@ -48,6 +48,7 @@ type firewall struct {
 	running   bool                 // an async sync loop is running
 	dirty     bool                 // a change arrived while it ran
 	passMu    sync.Mutex           // serialises sync passes
+	imageMu   sync.Mutex           // guards image and imageTry; held while the helper image builds
 	image     string
 	imageTry  time.Time
 }
@@ -292,9 +293,11 @@ func (s *Service) applyJob(ctx context.Context, j fwJob) {
 }
 
 // fwImage builds the helper image on first use.
+// It holds its own lock, not s.fw.mu, so a slow first build doesn't block
+// API requests that only need to record a change.
 func (s *Service) fwImage(ctx context.Context) (string, error) {
-	s.fw.mu.Lock()
-	defer s.fw.mu.Unlock()
+	s.fw.imageMu.Lock()
+	defer s.fw.imageMu.Unlock()
 	if s.fw.image != "" {
 		return s.fw.image, nil
 	}
@@ -328,3 +331,7 @@ func (s *Service) ProtectNow(ctx context.Context, m Member) {
 	s.applyJobs(ctx, jobs)
 	s.FirewallChanged() // the new address may appear in other members' rules
 }
+
+// Callers of ProtectNow whose member list doesn't include the new resource yet
+// must call FirewallChanged again once it does, so peers' group-sourced rules
+// pick up its address without waiting for the periodic pass.

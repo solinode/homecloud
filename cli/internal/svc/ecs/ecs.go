@@ -195,7 +195,14 @@ func New(env *svc.Env, v *vpc.Service, lb *elb.Service, sec *secrets.Service) *E
 
 // member is a task as a security group member.
 func (e *ECS) member(t Task, cid string) vpc.Member {
-	return vpc.Member{Kind: "ecs", ID: t.ID, VpcID: t.VpcID, IP: t.PrivateIP, ContainerID: cid, Groups: t.SecurityGroups}
+	groups := t.SecurityGroups
+	if groups == nil && t.Service != "" {
+		// Tasks started before tasks recorded their groups carry their service's.
+		if s, err := store.Get[Service](e.env.Store, cServices, t.Service); err == nil {
+			groups = s.SecurityGroups
+		}
+	}
+	return vpc.Member{Kind: "ecs", ID: t.ID, VpcID: t.VpcID, IP: t.PrivateIP, ContainerID: cid, Groups: groups}
 }
 
 // fwMembers lists the running tasks, for security group enforcement.
@@ -393,6 +400,7 @@ func (e *ECS) launch(ctx context.Context, ls launchSpec) (Task, error) {
 		x.ContainerID, x.LastStatus, x.StartedAt, x.PublicPorts = cid, "RUNNING", &n, e.env.Docker.PublishedPorts(cid)
 		return nil
 	})
+	e.vpc.FirewallChanged() // the task is now a member: peers allowing its groups learn its address
 	return t, nil
 }
 

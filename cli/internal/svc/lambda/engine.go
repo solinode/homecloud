@@ -173,6 +173,9 @@ func (s *Service) acquire(ctx context.Context, cfg Function, lim int, wait time.
 			e.busy = true
 			p.envs = append(p.envs, e)
 			s.mu.Unlock()
+			if e.inVPC {
+				s.vpc.FirewallChanged() // peers allowing this function's groups learn its address now
+			}
 			return e, nil
 		}
 		ch := p.changed
