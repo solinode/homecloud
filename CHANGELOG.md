@@ -2,6 +2,15 @@
 
 ## Unreleased
 
+- `homecloud configure` accepts `--ca-file` and `--region`, and keeps the region and `ca_file` already in the credentials file when it rewrites it (#79).
+- With `--addr 0.0.0.0:8080` (or `[::]`) the credentials file records `127.0.0.1` (or the public URL) as the endpoint instead of `0.0.0.0`; an existing file is repaired at the next start (#79).
+- New `--public-url` (config `public_url`): API Gateway endpoints, function URLs, queue URLs, Cognito issuers and website links use it, and function URLs and queue URLs now follow the API's scheme (https with built-in TLS). Unset, links are unchanged (#79).
+- New `--trusted-proxies` (CIDR list, default none): behind a trusted proxy, `X-Forwarded-For` (rightmost untrusted entry) and `X-Forwarded-Proto` feed `aws:SourceIp`, `aws:SecureTransport`, the audit trail and the sign-in throttle (#79).
+- With built-in TLS, functions, tasks and instances reach the API over a plain-HTTP endpoint bound only to the Docker bridge (loopback on Docker Desktop) instead of `https://host.docker.internal`, whose name no certificate covers (#79).
+- MinIO, its console and the DNS server are published on `127.0.0.1` by default, since Docker bypasses ufw; `--s3-bind` and `--dns-bind` expose them. Existing containers are recreated at the next start, and presigned URLs from the console are served through the API under `/_s3/` (#79).
+- `--dns-port 53` is supported and documented for real delegation; if the port is taken the server says so and how to free it (#79).
+- `homecloud service install` under `sudo` defaults `--data-dir` to the invoking user's home, not root's (#79).
+- New `homecloud admin set-root-password` sets the root console password to a value read from the terminal or stdin (never an argument), with the server stopped (#79).
 - Cognito user pools support `USER_SRP_AUTH` (Amplify, amazon-cognito-identity-js, pycognito), `ForgotPassword`/`ConfirmForgotPassword` and `AdminResetUserPassword`. Existing users need their password set again (or one `USER_PASSWORD_AUTH` sign-in) before SRP works.
 
 ## 0.3.0 (2026-09-30)
