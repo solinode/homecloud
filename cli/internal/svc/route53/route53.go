@@ -7,6 +7,7 @@ package route53
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"net"
@@ -18,6 +19,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"syscall"
 	"time"
 
 	"github.com/homecloudhq/homecloud/cli/internal/core"
@@ -245,6 +247,9 @@ func (s *Service) start(ctx context.Context) error {
 		}
 	}
 	if d.State(containerName) == "missing" {
+		if err := checkPortFree(bind, s.env.Cfg.DNSPort); err != nil {
+			return err
+		}
 		first := vpcs[0]
 		files := s.render()
 		cid, err := d.Run(ctx, runtime.RunSpec{
@@ -270,6 +275,42 @@ func (s *Service) start(ctx context.Context) error {
 	s.mu.Unlock()
 	log.Printf("route53: DNS ready (public zones on udp/tcp port %d)", s.env.Cfg.DNSPort)
 	return nil
+}
+
+// checkPortFree fails with an actionable message when another process already
+// holds the DNS port (on Ubuntu, port 53 is typically systemd-resolved). A
+// permission error is not a conflict: Docker's daemon runs as root and binds
+// low ports even when HomeCloud does not.
+func checkPortFree(bind string, port int) error {
+	addr := net.JoinHostPort(bind, strconv.Itoa(port))
+	var inUse error
+	if l, err := net.Listen("tcp", addr); err != nil {
+		if errors.Is(err, syscall.EADDRINUSE) {
+			inUse = err
+		}
+	} else {
+		l.Close()
+	}
+	if inUse == nil {
+		if pc, err := net.ListenPacket("udp", addr); err != nil {
+			if errors.Is(err, syscall.EADDRINUSE) {
+				inUse = err
+			}
+		} else {
+			pc.Close()
+		}
+	}
+	if inUse == nil {
+		return nil
+	}
+	return fmt.Errorf("DNS port %s is already in use by another process: %s", addr, portBusyHint(port))
+}
+
+func portBusyHint(port int) string {
+	if port == 53 {
+		return "on Ubuntu and Debian that is usually systemd-resolved: set DNSStubListener=no in its resolved.conf and restart it, or publish on one address with --dns-bind <public IP> (the stub only listens on 127.0.0.53), or use another port with --dns-port"
+	}
+	return "choose another port with --dns-port (8053 is the default)"
 }
 
 func (s *Service) copy(ctx context.Context, cid string, files map[string]string) error {
@@ -414,7 +455,11 @@ func (s *Service) get(c *httpx.Ctx) (any, error) {
 		nameservers = append(nameservers, vpc.DNSAddress(v.CIDR)+" ("+v.Name+" VPC)")
 	}
 	if !z.Private {
-		nameservers = append(nameservers, fmt.Sprintf("%s:%d (LAN)", s.env.Cfg.PublicHost, s.env.Cfg.DNSPort))
+		if ip := net.ParseIP(s.env.Cfg.DNSBindAddr()); ip != nil && ip.IsLoopback() {
+			nameservers = append(nameservers, fmt.Sprintf("%s:%d (this host only; publish it with --dns-bind)", ip, s.env.Cfg.DNSPort))
+		} else {
+			nameservers = append(nameservers, fmt.Sprintf("%s:%d (LAN)", s.env.Cfg.PublicHost, s.env.Cfg.DNSPort))
+		}
 	}
 	return map[string]any{"zone": z, "name_servers": nameservers}, nil
 }
