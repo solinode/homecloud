@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- CloudWatch anomaly detection: `PutAnomalyDetector`, `DescribeAnomalyDetectors`, `DeleteAnomalyDetector`, `ANOMALY_DETECTION_BAND(m, stddevs)` in `GetMetricData` (upper and lower series) and anomaly alarms (`ThresholdMetricId` with `LessThanLowerOrGreaterThanUpperThreshold`, `LessThanLowerThreshold`, `GreaterThanUpperThreshold`; the detector is created automatically). The band is mean +/- k standard deviations of the metric's last 14 days, by hour of week, hour of day or a rolling window depending on how much history exists, and is absent below 10 datapoints or one hour of history; it is not AWS's machine learning model. `FILL(m, LINEAR)` interpolates between neighbouring datapoints.
 - Cognito user pools support `USER_SRP_AUTH` (Amplify, amazon-cognito-identity-js, pycognito), `ForgotPassword`/`ConfirmForgotPassword` and `AdminResetUserPassword`. Existing users need their password set again (or one `USER_PASSWORD_AUTH` sign-in) before SRP works.
 - CloudFormation updates behave like AWS: queues, topics, parameters, functions, roles, tables, alarms and other resources change in place, replacements create the new resource before deleting the old one, and a failed update rolls back to the previous template (`UPDATE_ROLLBACK_COMPLETE`, `ContinueUpdateRollback`, `DisableRollback`). A replacement that keeps a custom resource name now fails, as in AWS.
 
