@@ -28,6 +28,36 @@ type Profile struct {
 
 func CredentialsFile() string { return filepath.Join(core.DefaultDataDir(), "credentials") }
 
+// LoadFile reads the credentials file only (no environment overrides).
+func LoadFile() Profile {
+	var p Profile
+	if b, err := os.ReadFile(CredentialsFile()); err == nil {
+		_ = json.Unmarshal(b, &p)
+	}
+	return p
+}
+
+// Merge returns cur with every non-empty field of set applied, so rewriting the
+// credentials file keeps what the caller did not change (region, ca_file).
+func Merge(cur, set Profile) Profile {
+	if set.Endpoint != "" {
+		cur.Endpoint = set.Endpoint
+	}
+	if set.AccessKeyID != "" {
+		cur.AccessKeyID = set.AccessKeyID
+	}
+	if set.SecretAccessKey != "" {
+		cur.SecretAccessKey = set.SecretAccessKey
+	}
+	if set.Region != "" {
+		cur.Region = set.Region
+	}
+	if set.CAFile != "" {
+		cur.CAFile = set.CAFile
+	}
+	return cur
+}
+
 // Load reads credentials from the environment, falling back to the credentials file.
 func Load() (Profile, error) {
 	var p Profile

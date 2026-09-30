@@ -6,7 +6,6 @@ import (
 	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
-	"fmt"
 	"net/http"
 	"os"
 	"slices"
@@ -19,14 +18,7 @@ import (
 )
 
 // publicBase is the API's base URL as clients reach it.
-func (s *Service) publicBase() string {
-	_, port, _ := strings.Cut(s.env.Cfg.APIAddr, ":")
-	scheme := "http"
-	if s.env.Cfg.TLSCert != "" {
-		scheme = "https"
-	}
-	return fmt.Sprintf("%s://%s:%s", scheme, s.env.Cfg.PublicHost, port)
-}
+func (s *Service) publicBase() string { return s.env.Cfg.PublicBase() }
 
 // ---- function URLs ----
 

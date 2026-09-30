@@ -55,6 +55,10 @@ func (s *Service) RegisterAWS() {
 			"ValidateResourcePolicy":   s.awsValidateResourcePolicy,
 			"RotateSecret":             s.awsRotateSecret,
 			"CancelRotateSecret":       s.awsCancelRotateSecret,
+
+			"ReplicateSecretToRegions":     s.awsReplicateSecretToRegions,
+			"RemoveRegionsFromReplication": s.awsRemoveRegionsFromReplication,
+			"StopReplicationToReplica":     s.awsStopReplicationToReplica,
 		},
 	})
 }
@@ -173,10 +177,13 @@ func (s *Service) awsCreateSecret(q *awsapi.Req) (any, error) {
 		secretValue
 		Tags                        []awsTag
 		ForceOverwriteReplicaSecret bool
-		AddReplicaRegions           []any // replication is not supported; ignored
+		AddReplicaRegions           []any
 	}
 	if err := q.Bind(&in); err != nil {
 		return nil, err
+	}
+	if len(in.AddReplicaRegions) > 0 {
+		return nil, errNoReplication()
 	}
 	val, has, bin, err := in.get()
 	if err != nil {
@@ -828,4 +835,60 @@ func (s *Service) Reference(az func(action, resource string) error, ref, version
 		val = base64.StdEncoding.EncodeToString(p)
 	}
 	return Reference{Name: sec.Name, ARN: sec.ARN, Value: val, Binary: v.Binary, VersionID: v.ID, Stages: v.Stages, CreatedAt: v.CreatedAt, Source: string(src)}, nil
+}
+
+// errNoReplication is returned for every replication request: HomeCloud
+// serves a single region, so a replica has nowhere to live.
+func errNoReplication() error {
+	return awsapi.Errorf(http.StatusBadRequest, "InvalidRequestException",
+		"HomeCloud serves a single region (%s); secret replication is not available.", core.Region)
+}
+
+func (s *Service) awsReplicateSecretToRegions(q *awsapi.Req) (any, error) {
+	var in struct {
+		SecretId                    string
+		AddReplicaRegions           []any
+		ForceOverwriteReplicaSecret bool
+	}
+	if err := q.Bind(&in); err != nil {
+		return nil, err
+	}
+	if len(in.AddReplicaRegions) == 0 {
+		return nil, awsapi.Errorf(http.StatusBadRequest, "InvalidParameterException", "AddReplicaRegions must contain at least one region.")
+	}
+	if _, err := s.lookup(q.Authorize, "secretsmanager:ReplicateSecretToRegions", in.SecretId); err != nil {
+		return nil, err
+	}
+	return nil, errNoReplication()
+}
+
+func (s *Service) awsRemoveRegionsFromReplication(q *awsapi.Req) (any, error) {
+	var in struct {
+		SecretId             string
+		RemoveReplicaRegions []string
+	}
+	if err := q.Bind(&in); err != nil {
+		return nil, err
+	}
+	if len(in.RemoveReplicaRegions) == 0 {
+		return nil, awsapi.Errorf(http.StatusBadRequest, "InvalidParameterException", "RemoveReplicaRegions must contain at least one region.")
+	}
+	sec, err := s.lookup(q.Authorize, "secretsmanager:RemoveRegionsFromReplication", in.SecretId)
+	if err != nil {
+		return nil, err
+	}
+	return nil, awsapi.Errorf(http.StatusBadRequest, "InvalidParameterException",
+		"Secret %s is not replicated to %s.", sec.Name, strings.Join(in.RemoveReplicaRegions, ", "))
+}
+
+func (s *Service) awsStopReplicationToReplica(q *awsapi.Req) (any, error) {
+	var in struct{ SecretId string }
+	if err := q.Bind(&in); err != nil {
+		return nil, err
+	}
+	sec, err := s.lookup(q.Authorize, "secretsmanager:StopReplicationToReplica", in.SecretId)
+	if err != nil {
+		return nil, err
+	}
+	return nil, awsapi.Errorf(http.StatusBadRequest, "InvalidRequestException", "Secret %s is not a replica secret.", sec.Name)
 }

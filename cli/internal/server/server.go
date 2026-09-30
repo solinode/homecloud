@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,6 +117,19 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		scheme0 = "https"
 	}
 	env.ContainerAPI = scheme0 + "://host.docker.internal:" + apiPort
+	var workloadLn net.Listener
+	if cfg.TLS() {
+		// Workloads can't verify the API's certificate under host.docker.internal:
+		// give them a plain-HTTP endpoint only they can reach.
+		if addr, ok := workloadListenAddr(goruntime.GOOS, dk.BridgeGateway()); ok {
+			if ln, err := net.Listen("tcp", addr); err != nil {
+				logf("workload endpoint on %s: %v (workloads will call the HTTPS API)", addr, err)
+			} else {
+				workloadLn = ln
+				env.ContainerAPI = "http://host.docker.internal:" + strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+			}
+		}
+	}
 
 	secSvc, err := secrets.New(env)
 	if err != nil {
@@ -132,8 +146,9 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		scheme = "https"
 	}
 	endpoint := scheme + "://" + cfg.APIAddr
+	fixWildcardEndpoint(cfg)
 	if boot != nil {
-		creds := Credentials{Endpoint: endpoint, AccessKeyID: boot.AccessKeyID, SecretAccessKey: boot.SecretKey, Region: cfg.Region}
+		creds := Credentials{Endpoint: ClientEndpoint(cfg), AccessKeyID: boot.AccessKeyID, SecretAccessKey: boot.SecretKey, Region: cfg.Region}
 		if cfg.TLSCert == cfg.Path("tls", "cert.pem") {
 			creds.CAFile = cfg.TLSCert // self-signed: let the CLI trust it
 		}
@@ -143,7 +158,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		logf("first start: created account %s", boot.AccountID)
 		logf("  console sign-in   user: root   password: %s", boot.RootPassword)
 		logf("  CLI credentials written to %s", CredentialsPath(cfg.DataDir))
-		logf("  (the password is shown only once; reset it with `homecloud serve --reset-root-password`)")
+		logf("  (the password is shown only once; reset it with `homecloud serve --reset-root-password`, or choose one with `homecloud admin set-root-password` while the server is stopped)")
 	}
 	if opts.ResetRootPassword {
 		pw, err := iamSvc.ResetRootPassword()
@@ -369,6 +384,10 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 	native := withCORS(sandboxUserContent(mux))
 	root := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if strings.HasPrefix(r.URL.Path, s3.PresignPrefix) {
+			s3Svc.ServePresigned(w, r)
+			return
+		}
 		// AWS SDK/CLI requests (SigV4-signed, or X-Amz-Target) take the AWS protocols.
 		if awsapi.Match(r) && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 			awsHandler.ServeHTTP(w, r)
@@ -376,7 +395,17 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		}
 		native.ServeHTTP(w, r)
 	})
-	srv := &http.Server{Addr: cfg.APIAddr, Handler: root, ReadHeaderTimeout: 10 * time.Second}
+	trust, err := httpx.ParseTrustedProxies(cfg.TrustedProxies)
+	if err != nil {
+		return err
+	}
+	var handler http.Handler = trust.Wrap(root)
+	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	if workloadLn != nil {
+		// Workloads are never proxies: their listeners ignore forwarding headers.
+		defer serveWorkloads(workloadLn, root, logf)()
+		logf("workloads reach the API over plain HTTP at %s (not reachable from outside this machine)", env.ContainerAPI)
+	}
 	errc := make(chan error, 1)
 	go func() {
 		if cfg.TLSCert != "" {
