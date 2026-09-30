@@ -13,6 +13,7 @@ import (
 	"net/http"
 	"os"
 	goruntime "runtime"
+	"strconv"
 	"strings"
 	"time"
 
@@ -116,6 +117,19 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		scheme0 = "https"
 	}
 	env.ContainerAPI = scheme0 + "://host.docker.internal:" + apiPort
+	var workloadLn net.Listener
+	if cfg.TLS() {
+		// Workloads can't verify the API's certificate under host.docker.internal:
+		// give them a plain-HTTP endpoint only they can reach.
+		if addr, ok := workloadListenAddr(goruntime.GOOS, dk.BridgeGateway()); ok {
+			if ln, err := net.Listen("tcp", addr); err != nil {
+				logf("workload endpoint on %s: %v (workloads will call the HTTPS API)", addr, err)
+			} else {
+				workloadLn = ln
+				env.ContainerAPI = "http://host.docker.internal:" + strconv.Itoa(ln.Addr().(*net.TCPAddr).Port)
+			}
+		}
+	}
 
 	secSvc, err := secrets.New(env)
 	if err != nil {
@@ -387,6 +401,10 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	}
 	var handler http.Handler = trust.Wrap(root)
 	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	if workloadLn != nil {
+		defer serveWorkloads(workloadLn, handler, logf)()
+		logf("workloads reach the API over plain HTTP at %s (not reachable from outside this machine)", env.ContainerAPI)
+	}
 	errc := make(chan error, 1)
 	go func() {
 		if cfg.TLSCert != "" {
