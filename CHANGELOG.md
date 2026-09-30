@@ -20,7 +20,8 @@
 ### EC2
 - VM instances: `ami-ubuntu-24-04-vm` and `ami-debian-12-vm` boot the official cloud image as a QEMU virtual machine with its own kernel, systemd and cloud-init. The VM runs inside a container attached to the instance's VPC network with its private IP, so DNS, the metadata service, security groups and published ports work as for container instances; passt gives the guest the container's address and forwards inbound ports. Key pairs, user data (scripts and `#cloud-config`), the root block device size, stop/start/reboot, console output and terminate work through the same EC2 API, CLI, console and Terraform.
 - Guests use KVM when the Docker host has `/dev/kvm` and are emulated (slower) otherwise; instances report `virtualization: "kvm"` or `"emulated"`. `DescribeImages` and `DescribeInstances` report `Hypervisor: kvm` for VM images and instances. Cloud images are pinned to a release, verified by checksum and downloaded once into a Docker volume; the runner image is built locally on first use.
-- Not available for VM instances yet: extra volumes, snapshots and images of VM disks, the browser terminal, run-command, CloudWatch metrics, backup.
+- VM instances have run-command (through qemu-guest-agent, installed by cloud-init), the browser terminal (the guest's serial console; log in with a password set by user data) and CloudWatch `HC/EC2` metrics measured inside the guest (CPU, memory, network, disk, process count), all under the same IAM actions as container instances.
+- Not available for VM instances yet: extra volumes, snapshots and images of VM disks, backup.
 - CI boots a VM with KVM on every change.
 
 ## 0.3.0 (2026-09-30)
