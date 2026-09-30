@@ -42,6 +42,7 @@ func (s *Service) Routes(r *httpx.Router) {
 	r.Handle("PUT /api/v1/lambda/functions/{name}/event-invoke-config", "lambda:PutFunctionEventInvokeConfig", s.putInvokeConfigRoute, res)
 	r.Handle("DELETE /api/v1/lambda/functions/{name}/event-invoke-config", "lambda:DeleteFunctionEventInvokeConfig", s.deleteInvokeConfigRoute, res)
 	r.Handle("GET /api/v1/lambda/functions/{name}/policy", "lambda:GetPolicy", s.policyRoute, res)
+	s.permissionRoutes(r)
 	lres := httpx.Res("arn:aws:lambda:{region}:{account}:layer:{layer}")
 	r.Handle("GET /api/v1/lambda/layers", "lambda:ListLayers", s.listLayersRoute)
 	r.Handle("POST /api/v1/lambda/layers", "lambda:PublishLayerVersion", s.publishLayerRoute, httpx.Deferred())
