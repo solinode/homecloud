@@ -6,6 +6,14 @@ import (
 	"strconv"
 )
 
+// Sockets inside the VM container: the guest's serial console (one client at a
+// time), the qemu-guest-agent channel and its virtio-serial port name.
+const (
+	SerialSocket = "/run/serial.sock"
+	QGASocket    = "/run/qga.sock"
+	QGAChannel   = "org.qemu.guest_agent.0"
+)
+
 // Machine is a guest's hardware.
 type Machine struct {
 	Name     string // instance ID
@@ -25,8 +33,9 @@ func (m Machine) MAC() string {
 // prepares /vm/disk.qcow2, /vm/seed.iso, /vm/efivars.fd and the passt socket
 // before it starts QEMU.
 //
-// The guest's serial console goes to QEMU's stdout, i.e. the container's log,
-// which is what GetConsoleOutput returns. QMP listens on /run/qmp.sock for the
+// The guest's serial console is served on SerialSocket (the browser terminal)
+// and logged to QEMU's stdout, i.e. the container's log, which is what
+// GetConsoleOutput returns. The guest agent's channel is QGASocket. QMP listens on /run/qmp.sock for the
 // power controls (hc-vm-ctl).
 func (m Machine) Args() []string {
 	vcpus := max(1, m.VCPUs)
@@ -66,7 +75,15 @@ func (m Machine) Args() []string {
 		"-device", "virtio-net-pci,netdev=net0,mac="+m.MAC()+",romfile=",
 		"-device", "virtio-rng-pci",
 		"-display", "none", "-monitor", "none",
-		"-chardev", "stdio,id=ser0,signal=off", "-serial", "chardev:ser0",
+		// The serial console is a socket the browser terminal attaches to;
+		// logfile tees everything the guest prints to QEMU's stdout (the
+		// container's log) whether or not anyone is attached.
+		"-chardev", "socket,id=ser0,path="+SerialSocket+",server=on,wait=off,logfile=/dev/stdout,logappend=on",
+		"-serial", "chardev:ser0",
+		// qemu-guest-agent's channel (run-command, guest metrics).
+		"-chardev", "socket,id=qga0,path="+QGASocket+",server=on,wait=off",
+		"-device", "virtio-serial-pci,id=vser0",
+		"-device", "virtserialport,bus=vser0.0,chardev=qga0,name="+QGAChannel,
 		"-qmp", "unix:/run/qmp.sock,server=on,wait=off",
 	)
 	return args
