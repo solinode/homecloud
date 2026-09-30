@@ -23,6 +23,9 @@ func (s *Service) terminal(c *httpx.Ctx) (any, error) {
 	if i.State != "running" {
 		return nil, core.Errf(http.StatusConflict, "IncorrectInstanceState", "instance %s is %s", i.ID, i.State)
 	}
+	if i.IsVM() {
+		return nil, errVMUnsupported("the browser terminal for")
+	}
 	c.MarkWritten()
 	ws := websocket.Server{Handler: func(conn *websocket.Conn) {
 		defer conn.Close()

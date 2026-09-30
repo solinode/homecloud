@@ -207,6 +207,9 @@ func (s *Service) AttachVolume(volumeID, instanceID, device string) (Volume, err
 	if i.State != "running" && i.State != "stopped" {
 		return Volume{}, core.Errf(http.StatusBadRequest, "IncorrectState", "Instance '%s' is not 'running' or 'stopped'.", i.ID)
 	}
+	if i.IsVM() {
+		return Volume{}, errVMUnsupported("attaching volumes to")
+	}
 	for _, a := range i.Volumes {
 		if a.Device == device {
 			return Volume{}, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "Attachment point %s is already in use", device)
@@ -276,6 +279,9 @@ func (s *Service) DetachVolume(volumeID, instanceID, device string, force bool) 
 	i, err := s.get(v.AttachedTo)
 	if err != nil {
 		return v, err
+	}
+	if i.IsVM() {
+		return v, errVMUnsupported("detaching volumes from")
 	}
 	v, err = store.Update(s.env.Store, cVolumes, v.ID, func(x *Volume) error { x.AttachState = "detaching"; return nil })
 	if err != nil {
@@ -359,6 +365,9 @@ func (s *Service) recreate(id string) error {
 	}
 	if i.ContainerID == "" || i.State == "terminated" {
 		return nil
+	}
+	if i.IsVM() {
+		return s.rebuildVM(i)
 	}
 	v, err := s.vpc.GetVPC(i.VpcID)
 	if err != nil {

@@ -116,7 +116,18 @@ type Instance struct {
 	// differs from the AMI (a volume attach recreates the container from a
 	// snapshot of its disk).
 	RootImage string `json:"root_image,omitempty"`
+
+	// Virtual machine instances (an AMI with a VMBase): "kvm" when the guest
+	// runs with hardware acceleration, "emulated" when the Docker host has no
+	// /dev/kvm and QEMU emulates the CPU (slow). Empty for container instances.
+	Virtualization string `json:"virtualization,omitempty"`
+	VMBase         string `json:"vm_base,omitempty"`    // key of the cloud image (vm.Bases)
+	VMUser         string `json:"vm_user,omitempty"`    // the image's default login user
+	VMDiskGB       int    `json:"vm_disk_gb,omitempty"` // root disk size
 }
+
+// IsVM reports whether the instance is a virtual machine.
+func (i Instance) IsVM() bool { return i.Virtualization != "" }
 
 type Volume struct {
 	ID               string    `json:"id"`
@@ -159,6 +170,12 @@ type Service struct {
 	// Roles resolves instance profiles and issues their role's credentials (IAM).
 	Roles Roles
 	imds  *imds
+	// IMDSContainer names the metadata service container (default homecloud-imds).
+	// Tests running beside a real installation use their own.
+	IMDSContainer string
+	// VMImageVolume is the Docker volume caching downloaded cloud images.
+	VMImageVolume string
+	vm            vmState
 }
 
 // Roles is what EC2 needs from IAM for instance profiles.
@@ -323,7 +340,11 @@ type RunInput struct {
 	Tags             core.Tags    `json:"tags"`
 	Volumes          []VolumeSpec `json:"volumes"`
 	FileSystems      []FSMount    `json:"file_systems"`
-	// KeyName puts a key pair's public key in root's authorized_keys.
+	// RootVolume sizes the root disk of a VM instance (default 8 GiB) and
+	// whether it is deleted on termination. Container instances ignore it.
+	RootVolume *VolumeSpec `json:"root_volume,omitempty"`
+	// KeyName puts a key pair's public key in root's authorized_keys (the
+	// default user's, for VM images).
 	KeyName string `json:"key_name"`
 	// IAMInstanceProfile (name or ARN) gives the instance its role's credentials
 	// through the metadata service. The caller must be allowed iam:PassRole.
@@ -370,14 +391,14 @@ func (s *Service) image(id string) (Image, error) {
 	for _, im := range catalog {
 		if im.ID == id {
 			im.Owner, im.State = "homecloud", "available"
-			return im, nil
+			return im.normalized(), nil
 		}
 	}
 	im, err := store.Get[Image](s.env.Store, cImages, id)
 	if err != nil {
 		return im, core.NotFound("image", id)
 	}
-	return im, nil
+	return im.normalized(), nil
 }
 
 // checkTags rejects user tags in the reserved hc: namespace (used by HomeCloud
@@ -435,6 +456,12 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 	img, err := s.image(in.ImageID)
 	if err != nil {
 		return nil, err
+	}
+	var vmPlan vmPlan
+	if img.IsVM() {
+		if vmPlan, err = s.planVM(in, img); err != nil {
+			return nil, err
+		}
 	}
 	var key KeyPair
 	if in.KeyName != "" {
@@ -535,6 +562,12 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 			Monitoring: in.Attrs.Monitoring, EBSOptimized: in.Attrs.EBSOptimized, ReservationID: reservation, LaunchIndex: n,
 			ClientToken: in.Attrs.ClientToken, LaunchTemplateID: in.Attrs.LaunchTemplateID, LaunchTemplateVersion: in.Attrs.LaunchTemplateVersion,
 		}
+		vols := in.Volumes
+		if img.IsVM() {
+			inst.Virtualization, inst.VMBase, inst.VMUser, inst.VMDiskGB = vmPlan.virtualization, img.VMBase, vmPlan.user, vmPlan.diskGB
+			inst.ImageRef = "" // a VM image has no Docker image
+			vols = append([]VolumeSpec{vmPlan.root}, vols...)
+		}
 		if inst.ShutdownBehavior == "" {
 			inst.ShutdownBehavior = "stop"
 		}
@@ -546,7 +579,7 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 			s.releaseVolumes(inst)
 			s.vpc.Release(id)
 		}
-		for _, v := range in.Volumes {
+		for _, v := range vols {
 			del := v.VolumeID == ""
 			if v.DeleteOnTermination != nil {
 				del = *v.DeleteOnTermination
@@ -585,7 +618,11 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 			return launched, err
 		}
 		launched = append(launched, inst)
-		go s.launch(inst, pl.Network)
+		if inst.IsVM() {
+			go s.launchVM(inst, pl.Network)
+		} else {
+			go s.launch(inst, pl.Network)
+		}
 	}
 	return launched, nil
 }
@@ -608,6 +645,9 @@ func checkMetadata(m MetadataOptions) error {
 
 // runSpec is the container of an instance.
 func (s *Service) runSpec(inst Instance, network string) runtime.RunSpec {
+	if inst.IsVM() {
+		return s.vmRunSpec(inst, network)
+	}
 	mounts := []runtime.Mount{}
 	for _, v := range inst.Volumes {
 		mounts = append(mounts, runtime.Mount{Volume: volumeName(v.VolumeID), Target: v.MountPath})
@@ -685,27 +725,30 @@ func (s *Service) bootFiles(inst Instance) (map[string][]byte, error) {
 	return files, nil
 }
 
+// failLaunch terminates an instance whose launch failed and releases what it claimed.
+func (s *Service) failLaunch(inst Instance, err error) {
+	log.Printf("ec2: launch %s failed: %v", inst.ID, err)
+	already := false
+	_, _ = store.Update(s.env.Store, cInstances, inst.ID, func(x *Instance) error {
+		if x.State == "terminated" { // terminated while launching: already cleaned up
+			already = true
+			return nil
+		}
+		n := core.Now()
+		x.State, x.StateReason, x.TerminatedAt = "terminated", "Server.LaunchFailure: "+err.Error(), &n
+		return nil
+	})
+	if !already {
+		s.releaseVolumes(inst)
+		s.vpc.Release(inst.ID)
+	}
+}
+
 // launch creates and boots the instance's container in the background.
 func (s *Service) launch(inst Instance, network string) {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
 	defer cancel()
-	fail := func(err error) {
-		log.Printf("ec2: launch %s failed: %v", inst.ID, err)
-		already := false
-		_, _ = store.Update(s.env.Store, cInstances, inst.ID, func(x *Instance) error {
-			if x.State == "terminated" { // terminated while launching: already cleaned up
-				already = true
-				return nil
-			}
-			n := core.Now()
-			x.State, x.StateReason, x.TerminatedAt = "terminated", "Server.LaunchFailure: "+err.Error(), &n
-			return nil
-		})
-		if !already {
-			s.releaseVolumes(inst)
-			s.vpc.Release(inst.ID)
-		}
-	}
+	fail := func(err error) { s.failLaunch(inst, err) }
 	cid, err := s.env.Docker.Run(ctx, s.runSpec(inst, network))
 	if err != nil {
 		fail(err)
@@ -800,6 +843,9 @@ func (s *Service) reboot(c *httpx.Ctx) (any, error) { return s.RebootInstance(c.
 // StartInstance starts a stopped instance.
 func (s *Service) StartInstance(id string) (any, error) {
 	return s.transition(id, []string{"stopped"}, func(i Instance) error {
+		if i.IsVM() {
+			return s.vmStart(i)
+		}
 		if err := s.env.Docker.Start(i.ContainerID); err != nil {
 			return err
 		}
@@ -817,12 +863,20 @@ func (s *Service) StopInstance(id string, force bool) (any, error) {
 	if force {
 		timeout = 0
 	}
-	return s.transition(id, []string{"running"}, func(i Instance) error { return s.env.Docker.Stop(i.ContainerID, timeout) }, "stopping", "stopped")
+	return s.transition(id, []string{"running"}, func(i Instance) error {
+		if i.IsVM() {
+			return s.vmStop(i, force)
+		}
+		return s.env.Docker.Stop(i.ContainerID, timeout)
+	}, "stopping", "stopped")
 }
 
 // RebootInstance restarts a running instance.
 func (s *Service) RebootInstance(id string) (any, error) {
 	return s.transition(id, []string{"running"}, func(i Instance) error {
+		if i.IsVM() {
+			return s.vmReboot(i)
+		}
 		if err := s.env.Docker.Restart(i.ContainerID); err != nil {
 			return err
 		}
@@ -980,6 +1034,19 @@ func (s *Service) ChangeType(id, typ string) (Instance, error) {
 	if i.State != "stopped" || i.ContainerID == "" {
 		return i, core.Errf(http.StatusConflict, "IncorrectInstanceState", "the instance %s must be stopped to change its type", i.ID)
 	}
+	if i.IsVM() {
+		// The guest's CPU and memory are QEMU arguments: rebuild the container.
+		if _, err := store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error {
+			x.InstanceType, x.VCPUs, x.MemoryMB = it.Name, it.VCPUs, it.MemoryMB
+			return nil
+		}); err != nil {
+			return i, err
+		}
+		if err := s.recreateVM(i.ID); err != nil {
+			return i, fmt.Errorf("resize virtual machine: %w", err)
+		}
+		return s.get(i.ID)
+	}
 	mem := it.MemoryMB * 1024 * 1024
 	if err := s.env.Docker.C.UpdateContainer(i.ContainerID, docker.UpdateContainerOptions{
 		Memory: int(mem), MemorySwap: int(mem * 2), CPUPeriod: 100000, CPUQuota: int(min(it.VCPUs, s.hostCPU) * 100000),
@@ -1053,6 +1120,9 @@ func (s *Service) runCommand(c *httpx.Ctx) (any, error) {
 	if i.State != "running" {
 		return nil, core.Errf(http.StatusConflict, "InvalidInstanceState", "instance %s is %s", i.ID, i.State)
 	}
+	if i.IsVM() {
+		return nil, errVMUnsupported("running commands inside")
+	}
 	if in.Timeout <= 0 || in.Timeout > 600 {
 		in.Timeout = 60
 	}
@@ -1074,12 +1144,7 @@ func (s *Service) runCommand(c *httpx.Ctx) (any, error) {
 // ---- images ----
 
 func (s *Service) listImages(c *httpx.Ctx) (any, error) {
-	out := []Image{}
-	for _, im := range catalog {
-		im.Owner, im.State = "homecloud", "available"
-		out = append(out, im)
-	}
-	return append(out, store.List[Image](s.env.Store, cImages)...), nil
+	return s.allImages(), nil
 }
 
 func (s *Service) getImage(c *httpx.Ctx) (any, error) { return s.image(c.Param("id")) }
@@ -1129,6 +1194,9 @@ func (s *Service) CreateImage(instanceID, name, description string, tags core.Ta
 	}
 	if i.ContainerID == "" || i.State == "terminated" {
 		return Image{}, core.Errf(http.StatusConflict, "IncorrectInstanceState", "instance %s has no disk to capture", i.ID)
+	}
+	if i.IsVM() {
+		return Image{}, errVMUnsupported("creating images from")
 	}
 	if name == "" {
 		name = i.ID + "-image"

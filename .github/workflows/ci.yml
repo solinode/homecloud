@@ -47,6 +47,32 @@ jobs:
             GOOS=${p%/*} GOARCH=${p#*/} CGO_ENABLED=0 go build -o /dev/null .
           done
 
+  vm:
+    # Boots a real virtual machine (the Ubuntu cloud image under QEMU/KVM inside a
+    # Docker container) through the EC2 API and checks SSH, cloud-init user data,
+    # the metadata service, stop/start, security groups and cleanup. Only this
+    # test runs here; the rest of the suite is in the go job.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    defaults:
+      run:
+        working-directory: cli
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+          ls -l /dev/kvm
+      - name: VM instances
+        run: go test -count=1 -timeout 40m -v -run 'TestVMInstanceLifecycle' ./internal/svc/ec2
+        env:
+          HC_TEST_VM: "1"
+
   console:
     runs-on: ubuntu-latest
     defaults:

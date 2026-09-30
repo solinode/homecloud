@@ -70,7 +70,7 @@ A web console modeled on the one you know, with a page for every service. It is 
 
 | Service | AWS equivalent | What you get |
 | --- | --- | --- |
-| **Compute** | EC2, EBS, AMIs | Instances with CPU/memory limits from `t3.nano` to `r5.large`, 10 base images (Ubuntu, Debian, Amazon Linux, Rocky, Fedora, Alpine, …), user data, key pairs, start/stop/reboot/resize, volumes and snapshots, capture an instance as a new image, run-command, a shell in the browser, and an instance metadata service (IMDSv1/v2) that hands role credentials to SDKs inside instances |
+| **Compute** | EC2, EBS, AMIs | Instances with CPU/memory limits from `t3.nano` to `r5.large`, 10 container images (Ubuntu, Debian, Amazon Linux, Rocky, Fedora, Alpine, …) and 2 **VM images** (Ubuntu 24.04 and Debian 12 cloud images booted as real virtual machines, see below), user data, key pairs, start/stop/reboot/resize, volumes and snapshots, capture an instance as a new image, run-command, a shell in the browser, and an instance metadata service (IMDSv1/v2) that hands role credentials to SDKs inside instances |
 | **Auto Scaling** | EC2 Auto Scaling | Groups that keep a desired number of instances across subnets, replace unhealthy ones, register them with load balancers and scale on CPU or memory targets |
 | **Shared files** | EFS | File systems that any number of instances mount at the same time |
 | **Containers** | ECS (Fargate), ECR | Versioned task definitions with secrets injected from Secrets Manager, services that keep N tasks running with rolling deployments and load-balancer registration, one-off tasks, and a private image registry you `docker push` to |
@@ -93,6 +93,19 @@ A web console modeled on the one you know, with a page for every service. It is 
 | **Audit** | CloudTrail | A record of every change and every denied request, with who, what, when and from where |
 
 Everything runs as containers on Docker, labelled so HomeCloud never touches containers it didn't create. See **[docs/architecture.md](docs/architecture.md)** for how each service is built, **[docs/aws-compat.md](docs/aws-compat.md)** for the AWS APIs it speaks and **[docs/api.md](docs/api.md)** for the native API reference.
+
+### VM instances
+
+Most instances are containers, but `ami-ubuntu-24-04-vm` and `ami-debian-12-vm` boot the official cloud image as a real virtual machine (its own kernel, systemd and cloud-init) under QEMU, inside a container attached to your VPC like any other instance. The same API, CLI, console and Terraform apply:
+
+```bash
+aws ec2 create-key-pair --key-name dev --query KeyMaterial --output text > dev.pem && chmod 600 dev.pem
+aws ec2 run-instances --image-id ami-ubuntu-24-04-vm --instance-type t3.small --key-name dev \
+  --security-group-ids sg-... --user-data file://setup.sh
+ssh -i dev.pem -p <published port> ubuntu@localhost      # after an `ssh` ingress rule opens tcp/22
+```
+
+The guest has the instance's private IP, the VPC's DNS and the metadata service, and security groups filter its traffic. It runs with KVM acceleration when the Docker host has `/dev/kvm` (Linux) and is emulated otherwise, for example on Docker Desktop and OrbStack for Mac: it works but boots in about a minute. Cloud images (about 600 MB) are downloaded once on first use and cached in a Docker volume. Volumes, snapshots and images of VM disks, the browser terminal and run-command are not available for VM instances yet; see [docs/architecture.md](docs/architecture.md).
 
 ---
 
@@ -206,7 +219,7 @@ homecloud upgrade                 # verified update from GitHub releases
 * ✅ **Workflows:** Step Functions
 * ✅ **Infrastructure as code:** CloudFormation-style stacks
 * ✅ **AWS compatibility:** the AWS CLI, SDKs and Terraform work against HomeCloud for IAM/STS, EC2/VPC, S3, Lambda, DynamoDB, SQS, SNS, Secrets Manager, SSM, KMS, CloudWatch, EventBridge, Step Functions, Elastic Load Balancing, Auto Scaling, ECS and ECR
-* 🔄 **Next:** AWS APIs for RDS, API Gateway, Route 53, ACM, EFS, ElastiCache and CloudFormation; stricter security groups and resource policies; VM-backed instances (QEMU/KVM); multi-node clusters
+* 🔄 **Next:** AWS APIs for RDS, API Gateway, Route 53, ACM, EFS, ElastiCache and CloudFormation; stricter security groups and resource policies; volumes, snapshots and a browser terminal for VM instances; multi-node clusters
 * 🔄 **Phase 4:** Edge compute and hardware integrations
 
 📍 **[See the open issues](https://github.com/solinode/homecloud/issues)** for everything planned, with a checklist per item.
