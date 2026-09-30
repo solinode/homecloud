@@ -211,6 +211,8 @@ homecloud upgrade                 # verified update from GitHub releases
 * 🔄 **Next:** AWS APIs for RDS, API Gateway, Route 53, ACM, EFS, ElastiCache and CloudFormation; stricter security groups and resource policies; VM-backed instances (QEMU/KVM); multi-node clusters
 * 🔄 **Phase 4:** Edge compute and hardware integrations
 
+Designs for the two largest open items: **[multi-node clusters](docs/design/multi-node.md)** ([#55](https://github.com/solinode/homecloud/issues/55)) and **[edge compute and hardware integrations](docs/design/edge.md)** ([#56](https://github.com/solinode/homecloud/issues/56)).
+
 📍 **[See the open issues](https://github.com/solinode/homecloud/issues)** for everything planned, with a checklist per item.
 
 ---
