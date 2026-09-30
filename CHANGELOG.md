@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.2.0 (2026-09-30)
+
+More services speak the AWS protocols, security groups and resource policies are enforced more strictly, and the console covers more of EC2, CloudWatch and EventBridge.
+
+### AWS compatibility
+- The AWS CLI, SDKs and Terraform now also work with Elastic Load Balancing v2 (load balancers, target groups, listeners, rules), EC2 Auto Scaling and launch templates, ECS, ECR and RDS (instances, snapshots and restores, subnet and parameter groups, master passwords in Secrets Manager).
+- Elastic IPs: allocate, associate, disassociate and release, in the AWS API, the native API and the console.
+
+### Security
+- Security group changes apply to running instances (authorize/revoke, changing an instance's groups). Docker can't change a running container's ports, so the instance is recreated from its disk with the same ID and IP, and its processes restart.
+- SQS queue policies, SNS topic policies and KMS key policies are enforced together with IAM policies; an explicit Deny wins. SNS and EventBridge deliveries are checked against the target's policy with `aws:SourceArn`.
+- Condition keys in policies: `aws:SourceIp`, `aws:SecureTransport`, `aws:PrincipalArn`, `aws:username`, S3 keys such as `s3:prefix` and object tags, and more. S3 bucket policies use the same evaluator as IAM.
+
+### Console
+- EC2 key pairs (create, import, download), EBS snapshots, internet gateways and route tables, Elastic IPs.
+- CloudWatch Logs Insights queries, metric filters and subscription filters, alarm history.
+- EventBridge custom event buses and EventBridge Scheduler.
+
+### Fixed
+- `homecloud upgrade` and the install scripts download from solinode/homecloud instead of relying on GitHub's redirect from the old repository name.
+
 ## 0.1.1 (2026-09-30)
 
 The first release of the rebuilt HomeCloud. It includes everything listed under 0.1.0 below, plus these fixes. (0.1.0 was withdrawn: S3 could not start on new installations.)
