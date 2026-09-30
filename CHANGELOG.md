@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.3.0 (2026-09-30)
+
+Every service in the console now speaks the AWS protocols, security groups filter traffic inside a VPC, and there's a demo console on the website.
+
+### AWS compatibility
+- The AWS CLI, SDKs and Terraform now also work with API Gateway (HTTP APIs), Route 53, ACM, EFS, ElastiCache, CloudTrail, Cognito user pools and CloudFormation (stacks, change sets, `aws cloudformation deploy`, exports, 60+ resource types).
+- `examples/terraform/shop`: a full app (VPC, load balancer with HTTPS, ECS, RDS, S3, DynamoDB, SNS, SQS, Lambda, API Gateway, Route 53) that deploys on a fresh install with the standard AWS provider, re-plans clean and destroys cleanly.
+
+### Security
+- Security groups filter traffic between resources inside a VPC, as on AWS: rules from CIDRs or other security groups, stateful replies, the default group allowing its own members. Covers instances, ECS tasks, RDS, ElastiCache, load balancers and Lambda functions in a VPC. Resources in different groups now need a rule between them.
+- API Gateway checks the Lambda function's resource policy before invoking it.
+
+### Website
+- Try the console without installing anything: https://homecloud.pages.dev/demo/
+
+### Fixed
+- Security group rules whose source is another group were rejected when sent by the AWS SDKs and Terraform.
+- Lambda event source mappings can be tagged, and Route 53 alias records keep `EvaluateTargetHealth`, so Terraform plans stay clean.
+- API Gateway HTTP integrations escape path parameters and reject bodies over 10 MB.
+
 ## 0.2.0 (2026-09-30)
 
 More services speak the AWS protocols, security groups and resource policies are enforced more strictly, and the console covers more of EC2, CloudWatch and EventBridge.
