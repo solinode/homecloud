@@ -16,6 +16,7 @@ package awsapi
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -112,6 +113,15 @@ func lookupTarget(prefix string) *Service {
 	return byTarget[prefix]
 }
 
+// splitTarget splits an X-Amz-Target at its last dot: prefixes such as
+// "com.amazonaws.cloudtrail.v20131101.CloudTrail_20131101" contain dots.
+func splitTarget(t string) (prefix, op string) {
+	if i := strings.LastIndex(t, "."); i >= 0 {
+		return t[:i], t[i+1:]
+	}
+	return t, ""
+}
+
 // Protocol of a request.
 type Protocol int
 
@@ -142,6 +152,25 @@ type Req struct {
 
 	action, resource string
 	status           int
+	info             *CallInfo
+}
+
+// CallInfo is what the audit trail learns about an AWS API call beyond the
+// audit function's arguments: the request ID and, for failures, the error.
+// AuditInfo returns it for the request passed to the Audit function.
+type CallInfo struct {
+	RequestID    string
+	ErrorCode    string
+	ErrorMessage string
+}
+
+type infoKey struct{}
+
+// AuditInfo returns the AWS call details attached to r, or nil when r is not
+// an AWS protocol request (native API requests carry none).
+func AuditInfo(r *http.Request) *CallInfo {
+	i, _ := r.Context().Value(infoKey{}).(*CallInfo)
+	return i
 }
 
 // Bind decodes the awsJson request body into v.
@@ -276,7 +305,7 @@ func Match(r *http.Request) bool {
 	}
 	// Unsigned awsJson calls (public operations such as Cognito sign-in).
 	if t := r.Header.Get("X-Amz-Target"); t != "" && r.Method == http.MethodPost {
-		prefix, _, _ := strings.Cut(t, ".")
+		prefix, _ := splitTarget(t)
 		return lookupTarget(prefix) != nil
 	}
 	return lookupUnsigned(r) != nil
@@ -287,6 +316,7 @@ const maxBody = 100 << 20
 func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	start := time.Now()
 	q := &Req{W: w, R: r, Account: h.Account, RequestID: RequestID(), status: 200, Creds: h.Creds}
+	q.info = &CallInfo{RequestID: q.RequestID}
 	w.Header().Set("x-amzn-RequestId", q.RequestID)
 	w.Header().Set("x-amz-request-id", q.RequestID)
 	sw := &statusWriter{ResponseWriter: w, q: q}
@@ -306,7 +336,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 				if res == "" {
 					res = "*"
 				}
-				h.Audit(q.P, action, res, r, q.status, time.Since(start))
+				h.Audit(q.P, action, res, r.WithContext(context.WithValue(r.Context(), infoKey{}, q.info)), q.status, time.Since(start))
 			}
 		}
 	}()
@@ -325,7 +355,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		if target != "" {
 			// Services sharing a signing name (DynamoDB and DynamoDB Streams both
 			// sign as "dynamodb") are told apart by their target prefix.
-			prefix, _, _ := strings.Cut(target, ".")
+			prefix, _ := splitTarget(target)
 			if ts := lookupTarget(prefix); ts != nil {
 				q.Svc = ts
 			}
@@ -335,7 +365,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	} else if target != "" {
-		prefix, _, _ := strings.Cut(target, ".")
+		prefix, _ := splitTarget(target)
 		q.Svc = lookupTarget(prefix)
 	} else {
 		q.Svc = lookupUnsigned(r)
@@ -346,7 +376,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case target != "":
-		prefix, op, _ := strings.Cut(target, ".")
+		prefix, op := splitTarget(target)
 		if prefix != q.Svc.JSONPrefix {
 			q.fail(Errorf(http.StatusBadRequest, "UnknownOperationException", "unknown target %q", target))
 			return
@@ -460,6 +490,9 @@ func (q *Req) Fail(err error) { q.fail(err) }
 
 func (q *Req) fail(err error) {
 	e := toError(q.Svc, err)
+	if q.info != nil {
+		q.info.ErrorCode, q.info.ErrorMessage = e.Code, e.Message
+	}
 	if q.Svc == nil {
 		q.writeJSONError(e)
 		return

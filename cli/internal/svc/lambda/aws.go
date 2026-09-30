@@ -16,6 +16,7 @@ import (
 
 // RegisterAWS serves the AWS Lambda REST API (restJson1, signing name "lambda").
 func (s *Service) RegisterAWS() {
+	s.registerAPIGateway()
 	awsapi.Register(&awsapi.Service{
 		Name: "lambda",
 		REST: s.serveAWS,
