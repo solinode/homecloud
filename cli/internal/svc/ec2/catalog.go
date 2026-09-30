@@ -58,12 +58,19 @@ type Image struct {
 	// VMBase names the cloud image (vm.Bases) a VM image boots; empty for images
 	// that run as containers. Ref is empty for VM images.
 	VMBase string `json:"vm_base,omitempty"`
+	// Images made from a VM instance (CreateImage) carry their own flattened
+	// disk in the Docker volume VMDisk instead of a VMBase, plus what a launch
+	// needs to know about it.
+	VMDisk   string `json:"vm_disk,omitempty"`
+	VMUser   string `json:"vm_user,omitempty"`
+	VMArch   string `json:"vm_arch,omitempty"` // aarch64 | x86_64
+	VMDiskGB int    `json:"vm_disk_gb,omitempty"`
 	// Virtualization is "vm" (QEMU guest with its own kernel) or "container".
 	Virtualization string `json:"virtualization"`
 }
 
 // IsVM reports whether the image boots a virtual machine.
-func (im Image) IsVM() bool { return im.VMBase != "" }
+func (im Image) IsVM() bool { return im.VMBase != "" || im.VMDisk != "" }
 
 // normalized fills derived fields.
 func (im Image) normalized() Image {

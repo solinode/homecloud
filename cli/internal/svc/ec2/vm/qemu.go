@@ -13,6 +13,30 @@ type Machine struct {
 	KVM      bool // hardware acceleration; otherwise TCG emulation
 	VCPUs    int
 	MemoryMB int64
+	// Disks are the extra volumes, attached as virtio disks after the root disk
+	// in this order (so /dev/vdb, /dev/vdc, ...). Each is a raw image file
+	// /disks/<ID>/disk.img, and its serial makes /dev/disk/by-id/virtio-<Serial>.
+	Disks []Disk
+}
+
+// Disk is an extra volume of a VM.
+type Disk struct {
+	ID string // the volume ID
+}
+
+// DisksDir is where the VM container mounts the extra volumes (one per volume ID).
+const DisksDir = "/disks"
+
+// Path of the disk's image file in the VM container.
+func (d Disk) Path() string { return DisksDir + "/" + d.ID + "/disk.img" }
+
+// Serial is the virtio serial of the disk: the volume ID cut to the 20
+// characters virtio-blk allows.
+func (d Disk) Serial() string {
+	if len(d.ID) > 20 {
+		return d.ID[:20]
+	}
+	return d.ID
 }
 
 // MAC is a stable, locally administered address derived from the instance ID.
@@ -56,14 +80,25 @@ func (m Machine) Args() []string {
 		)
 	}
 	args = append(args,
-		// Root disk and the cloud-init seed (label cidata, found by NoCloud).
+		// The NIC is wired to passt inside the container (see hc-vm-run). It is
+		// declared first, at a fixed PCI slot, so that its name in the guest
+		// (enp0s3) does not change when disks are added or removed: the guest's
+		// network configuration refers to it.
+		"-netdev", "stream,id=net0,addr.type=unix,addr.path=/tmp/passt.sock,server=off",
+		"-device", "virtio-net-pci,netdev=net0,mac="+m.MAC()+",romfile=,addr=0x3",
+		// Root disk, extra volumes, then the cloud-init seed (label cidata, found by NoCloud).
 		"-drive", "file="+DiskDir+"/disk.qcow2,if=none,id=root,format=qcow2",
 		"-device", "virtio-blk-pci,drive=root,bootindex=1",
+	)
+	for i, d := range m.Disks {
+		args = append(args,
+			"-drive", fmt.Sprintf("file=%s,if=none,id=data%d,format=raw", d.Path(), i),
+			"-device", fmt.Sprintf("virtio-blk-pci,drive=data%d,serial=%s", i, d.Serial()),
+		)
+	}
+	args = append(args,
 		"-drive", "file="+DiskDir+"/seed.iso,if=none,id=seed,format=raw,readonly=on",
 		"-device", "virtio-blk-pci,drive=seed",
-		// The NIC is wired to passt inside the container (see hc-vm-run).
-		"-netdev", "stream,id=net0,addr.type=unix,addr.path=/tmp/passt.sock,server=off",
-		"-device", "virtio-net-pci,netdev=net0,mac="+m.MAC()+",romfile=",
 		"-device", "virtio-rng-pci",
 		"-display", "none", "-monitor", "none",
 		"-chardev", "stdio,id=ser0,signal=off", "-serial", "chardev:ser0",

@@ -111,8 +111,12 @@ func (f *filterEnv) sshDial(t *testing.T, id string, port int, signer ssh.Signer
 	t.Helper()
 	var c *ssh.Client
 	var lastErr error
-	end := time.Now().Add(6 * time.Minute)
+	end := time.Now().Add(vmTestBudget)
 	for {
+		// The published port changes when the container is rebuilt: look it up each time.
+		if p := f.vmGet(id).PublicPorts["22/tcp"]; p != 0 {
+			port = p
+		}
 		c, lastErr = ssh.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port), &ssh.ClientConfig{
 			User: user, Auth: []ssh.AuthMethod{ssh.PublicKeys(signer)}, HostKeyCallback: ssh.InsecureIgnoreHostKey(), Timeout: 15 * time.Second,
 		})
@@ -142,7 +146,8 @@ func (f *filterEnv) vmDiagnose(id string) string {
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
-	if res, err := f.h.Env.Docker.Exec(ctx, i.ContainerID, []string{"/bin/sh", "-c", "cat /proc/net/tcp | head -12; echo; ls -l /tmp; cat /run/passt.log | head"}, nil); err == nil {
+	probe := "timeout 5 bash -c 'exec 3<>/dev/tcp/" + i.PrivateIP + "/22; head -c 60 <&3' 2>&1; echo; iptables -S INPUT 2>&1 | head -20"
+	if res, err := f.h.Env.Docker.Exec(ctx, i.ContainerID, []string{"/bin/sh", "-c", "cat /proc/net/tcp6 | head -8; echo; ls -l /tmp; cat /run/passt.log | head -5; echo banner-from-inside:; " + probe}, nil); err == nil {
 		b.WriteString(res.Stdout + res.Stderr)
 	}
 	return b.String()
@@ -186,7 +191,16 @@ func (f *filterEnv) bannerEventually(t *testing.T, want bool, from node, ip, wha
 	t.Fatalf("%s: SSH banner from %s to %s reachable = %v, want %v", what, from.id, ip, !want, want)
 }
 
-func TestVMInstanceLifecycle(t *testing.T) {
+// vmLab is a test VPC with internet access, its own metadata service, a key
+// pair, a security group letting SSH in from anywhere and a probe container.
+type vmLab struct {
+	*filterEnv
+	signer ssh.Signer
+	sg     string
+	helper node
+}
+
+func newVMLab(t *testing.T) *vmLab {
 	if os.Getenv("HC_TEST_VM") != "1" {
 		t.Skip("set HC_TEST_VM=1 to boot a real VM (slow; downloads a cloud image)")
 	}
@@ -219,6 +233,12 @@ func TestVMInstanceLifecycle(t *testing.T) {
 
 	// A container instance in the VPC to probe the guest from.
 	helper := f.launchImage(t, "ami-alpine-3-20", f.group(t, "probe"))
+	return &vmLab{filterEnv: f, signer: signer, sg: sg, helper: helper}
+}
+
+func TestVMInstanceLifecycle(t *testing.T) {
+	lab := newVMLab(t)
+	f, h, signer, sg, helper := lab.filterEnv, lab.h, lab.signer, lab.sg, lab.helper
 
 	userData := "#!/bin/sh\necho hc-userdata-ran > /var/tmp/userdata.txt\n"
 	run := h.AWSJSON(t, "ec2", "run-instances", "--image-id", vmTestImage, "--instance-type", "t3.micro", "--key-name", "vmtest",
@@ -296,10 +316,6 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	// (The AWS CLI decodes the base64 output itself.)
 	if out := h.AWSJSON(t, "ec2", "get-console-output", "--instance-id", id)["Output"].(string); !strings.Contains(out, "Cloud-init v.") || !strings.Contains(out, "finished at") {
 		t.Errorf("console output lacks cloud-init lines: %.300s", out)
-	}
-	// Commands inside a VM are not available yet, with a clear error.
-	if msg, err := h.AWSErr(t, "ec2", "create-image", "--instance-id", id, "--name", "vm-img"); err == nil || !strings.Contains(msg, "not supported yet") {
-		t.Errorf("create-image of a VM: %v %s", err, msg)
 	}
 	c.Close()
 	t.Logf("guest checks passed")

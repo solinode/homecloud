@@ -61,13 +61,17 @@ var fetchScript string
 //go:embed hc-vm-ctl
 var ctlScript string
 
+//go:embed hc-vm-flatten
+var flattenScript string
+
 // RunnerContext is the build context of the runner image.
 func RunnerContext() map[string][]byte {
 	return map[string][]byte{
-		"Dockerfile":  []byte(runnerDockerfile),
-		"hc-vm-run":   []byte(runScript),
-		"hc-vm-fetch": []byte(fetchScript),
-		"hc-vm-ctl":   []byte(ctlScript),
+		"Dockerfile":    []byte(runnerDockerfile),
+		"hc-vm-run":     []byte(runScript),
+		"hc-vm-fetch":   []byte(fetchScript),
+		"hc-vm-ctl":     []byte(ctlScript),
+		"hc-vm-flatten": []byte(flattenScript),
 	}
 }
 
@@ -94,6 +98,9 @@ const (
 	DiskDir   = "/vm"      // the instance's root volume
 	SeedDir   = "/hc/seed" // cloud-init NoCloud files
 )
+
+// LabelRoot marks the Docker volume of a VM's root disk: backups flatten it.
+const LabelRoot = "homecloud.vm-root"
 
 // MinRootGB is the smallest root disk: it must hold the cloud image.
 const MinRootGB = 4

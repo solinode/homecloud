@@ -15,5 +15,6 @@ RUN set -eu; \
 COPY hc-vm-run /usr/local/bin/hc-vm-run
 COPY hc-vm-fetch /usr/local/bin/hc-vm-fetch
 COPY hc-vm-ctl /usr/local/bin/hc-vm-ctl
+COPY hc-vm-flatten /usr/local/bin/hc-vm-flatten
 RUN chmod 0755 /usr/local/bin/hc-vm-*
 ENTRYPOINT ["/usr/local/bin/hc-vm-run"]

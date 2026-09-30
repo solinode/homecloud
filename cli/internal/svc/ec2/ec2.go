@@ -20,6 +20,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2/vm"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
 )
 
@@ -127,6 +128,9 @@ type Instance struct {
 	// VMNetwork is "passt" (the guest has the instance's address) or "user"
 	// (passt could not start: the guest is behind NAT with forwarded ports).
 	VMNetwork string `json:"vm_network,omitempty"`
+	// VMAMI is the Docker volume holding the disk of the image (made from an
+	// instance) the instance was launched from; the root disk was copied from it.
+	VMAMI string `json:"vm_ami,omitempty"`
 }
 
 // IsVM reports whether the instance is a virtual machine.
@@ -154,6 +158,8 @@ type Volume struct {
 	AttachTime          time.Time `json:"attach_time,omitempty"`
 	DeleteOnTermination bool      `json:"delete_on_termination,omitempty"`
 	AttachState         string    `json:"attach_state,omitempty"` // attaching | attached | detaching
+	// VMRoot is set on the root volume of a VM instance.
+	VMRoot bool `json:"vm_root,omitempty"`
 }
 
 func volumeName(id string) string { return "hc-" + id }
@@ -229,6 +235,12 @@ func (s *Service) sync(i Instance) Instance {
 	}
 	st := s.env.Docker.State(i.ContainerID)
 	want := i.State
+	if st == "missing" && i.IsVM() {
+		// The disk outlives the container (a restored backup has volumes but no containers).
+		if ri, ok := s.vmRecoverContainer(i); ok {
+			return ri
+		}
+	}
 	switch st {
 	case "running":
 		want = "running"
@@ -498,7 +510,7 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 		}
 	}
 	for _, v := range in.Volumes {
-		if !strings.HasPrefix(v.MountPath, "/") {
+		if !img.IsVM() && !strings.HasPrefix(v.MountPath, "/") { // VM disks have a device, not a mount path
 			return nil, core.BadRequest("volume mount_path must be absolute")
 		}
 		if v.SnapshotID != "" {
@@ -567,7 +579,12 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 		}
 		vols := in.Volumes
 		if img.IsVM() {
-			inst.Virtualization, inst.VMBase, inst.VMUser, inst.VMDiskGB = vmPlan.virtualization, img.VMBase, vmPlan.user, vmPlan.diskGB
+			inst.Virtualization, inst.VMBase, inst.VMUser, inst.VMDiskGB, inst.VMAMI = vmPlan.virtualization, img.VMBase, vmPlan.user, vmPlan.diskGB, vmPlan.ami
+			for n := range vols { // extra volumes: name their EBS device when the caller did not
+				if vols[n].Device == "" {
+					vols[n].Device = fmt.Sprintf("/dev/sd%c", 'f'+n)
+				}
+			}
 			inst.ImageRef = "" // a VM image has no Docker image
 			vols = append([]VolumeSpec{vmPlan.root}, vols...)
 		}
@@ -594,7 +611,7 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 					size = 8
 				}
 				vol, err := s.createVolume(VolumeInput{Size: size, AZ: pl.Subnet.AvailabilityZone, Tags: in.VolumeTags, Type: v.VolumeType,
-					Iops: v.Iops, Throughput: v.Throughput, Encrypted: v.Encrypted, KMSKeyID: v.KMSKeyID, SnapshotID: v.SnapshotID, Sync: true})
+					Iops: v.Iops, Throughput: v.Throughput, Encrypted: v.Encrypted, KMSKeyID: v.KMSKeyID, SnapshotID: v.SnapshotID, Sync: true, VMRoot: img.IsVM() && v.MountPath == vm.DiskDir})
 				if err != nil {
 					undo()
 					return launched, err
@@ -1199,7 +1216,7 @@ func (s *Service) CreateImage(instanceID, name, description string, tags core.Ta
 		return Image{}, core.Errf(http.StatusConflict, "IncorrectInstanceState", "instance %s has no disk to capture", i.ID)
 	}
 	if i.IsVM() {
-		return Image{}, errVMUnsupported("creating images from")
+		return s.createVMImage(i, name, description, tags)
 	}
 	if name == "" {
 		name = i.ID + "-image"
@@ -1232,7 +1249,9 @@ func (s *Service) DeregisterImage(id string) error {
 	if err != nil {
 		return core.NotFound("image", id)
 	}
-	if im.SourceInstance != "" {
+	if im.VMDisk != "" {
+		_ = s.env.Docker.RemoveVolume(im.VMDisk)
+	} else if im.SourceInstance != "" {
 		_ = s.env.Docker.C.RemoveImage(im.Ref)
 	}
 	return store.Delete(s.env.Store, cImages, im.ID)
@@ -1255,6 +1274,8 @@ type VolumeInput struct {
 	// until the copy finishes, unless Sync waits for it.
 	SnapshotID string
 	Sync       bool
+	// VMRoot marks the root volume of a VM instance (its disk is a qcow2 overlay that snapshots and backups flatten).
+	VMRoot bool
 }
 
 func (s *Service) createVolume(in VolumeInput) (Volume, error) {
@@ -1299,7 +1320,12 @@ func (s *Service) createVolume(in VolumeInput) (Volume, error) {
 	if v.Name == "" && in.Tags["Name"] != "" {
 		v.Name = in.Tags["Name"]
 	}
-	if err := s.env.Docker.CreateVolume(volumeName(v.ID), runtime.Labels("ebs", v.ID, nil)); err != nil {
+	v.VMRoot = in.VMRoot
+	var extra map[string]string
+	if in.VMRoot {
+		extra = map[string]string{vm.LabelRoot: "true"}
+	}
+	if err := s.env.Docker.CreateVolume(volumeName(v.ID), runtime.Labels("ebs", v.ID, extra)); err != nil {
 		return v, err
 	}
 	if in.SnapshotID == "" {

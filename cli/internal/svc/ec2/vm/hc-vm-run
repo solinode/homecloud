@@ -14,10 +14,31 @@ set -eu
 
 disk=/vm/disk.qcow2
 if [ ! -f "$disk" ]; then
-  echo "[homecloud] creating disk ($HC_VM_DISK_GB GiB) from $HC_VM_BASE"
-  qemu-img create -q -f qcow2 -b "/images/$HC_VM_BASE" -F qcow2 "$disk.tmp" "${HC_VM_DISK_GB}G"
+  if [ -n "${HC_VM_AMI:-}" ]; then
+    # An image made from an instance: a standalone copy, so the instance does not
+    # depend on the image staying registered.
+    echo "[homecloud] creating disk ($HC_VM_DISK_GB GiB) from the image"
+    qemu-img convert -f qcow2 -O qcow2 /ami/disk.qcow2 "$disk.tmp"
+    qemu-img resize -q "$disk.tmp" "${HC_VM_DISK_GB}G"
+  else
+    echo "[homecloud] creating disk ($HC_VM_DISK_GB GiB) from $HC_VM_BASE"
+    qemu-img create -q -f qcow2 -b "/images/$HC_VM_BASE" -F qcow2 "$disk.tmp" "${HC_VM_DISK_GB}G"
+  fi
   mv "$disk.tmp" "$disk"
 fi
+
+# Extra volumes are raw images, created sparse on first use and grown when the
+# volume was enlarged. HC_VM_DISKS is "<volume id>:<GiB> ..."; the QEMU command
+# line names the files (/disks/<id>/disk.img).
+for d in ${HC_VM_DISKS:-}; do
+  id=${d%%:*}; gb=${d##*:}; img=/disks/$id/disk.img
+  want=$((gb * 1073741824))
+  if [ ! -f "$img" ]; then
+    truncate -s "$want" "$img"
+  elif [ "$(stat -c %s "$img")" -lt "$want" ]; then
+    truncate -s "$want" "$img"
+  fi
+done
 
 # The seed is rebuilt on every start so changed user data applies to the next boot.
 if [ -d /hc/seed ]; then
@@ -54,7 +75,7 @@ if [ "${HC_VM_NET:-}" != "user" ]; then
     elif grep -q "Failed to bind" /run/passt.log; then
       echo "hint: passt binds its socket as user nobody, so the socket directory must be world-writable" >&2
     elif grep -qE "sandbox|user namespace|remount|pivot_root" /run/passt.log; then
-      echo "hint: the container's seccomp or AppArmor profile blocks passt's sandbox (it needs seccomp=unconfined and apparmor=unconfined)" >&2
+      echo "hint: the container's seccomp or AppArmor profile blocks passt's sandbox (it needs seccomp to allow unshare, mount, umount2 and pivot_root, and no AppArmor profile that denies them)" >&2
     fi
     HC_VM_NET=user
   fi

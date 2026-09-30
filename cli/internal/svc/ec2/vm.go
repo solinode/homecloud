@@ -59,6 +59,7 @@ type vmPlan struct {
 	user           string
 	diskGB         int
 	root           VolumeSpec
+	ami            string // the Docker volume of an image made from an instance
 }
 
 func errVMUnsupported(what string) error {
@@ -84,23 +85,28 @@ func (s *Service) planVM(in RunInput, img Image) (vmPlan, error) {
 	if err != nil {
 		return p, core.Errf(http.StatusBadRequest, "Unsupported", "%v", err)
 	}
-	base, ok := vm.Bases[img.VMBase]
-	if !ok {
-		return p, core.Errf(http.StatusBadRequest, "InvalidAMIID.Unavailable", "the image %s has no cloud image %q", img.ID, img.VMBase)
-	}
-	if _, err := base.For(arch); err != nil {
-		return p, core.Errf(http.StatusBadRequest, "InvalidAMIID.Unavailable", "the image %s is not available for %s hosts: %v", img.ID, arch, err)
+	minGB := vm.MinRootGB
+	if img.VMBase != "" {
+		base, ok := vm.Bases[img.VMBase]
+		if !ok {
+			return p, core.Errf(http.StatusBadRequest, "InvalidAMIID.Unavailable", "the image %s has no cloud image %q", img.ID, img.VMBase)
+		}
+		if _, err := base.For(arch); err != nil {
+			return p, core.Errf(http.StatusBadRequest, "InvalidAMIID.Unavailable", "the image %s is not available for %s hosts: %v", img.ID, arch, err)
+		}
+		p.user, p.diskGB = base.DefaultUser, 8
+	} else { // an image made from an instance
+		if img.VMArch != string(arch) {
+			return p, core.Errf(http.StatusBadRequest, "InvalidAMIID.Unavailable", "the image %s was made on a %s host, this one is %s", img.ID, img.VMArch, arch)
+		}
+		p.user, p.diskGB, minGB = img.VMUser, max(8, img.VMDiskGB), img.VMDiskGB
 	}
 	if len(in.FileSystems) > 0 {
 		return p, errVMUnsupported("mounting file systems in")
 	}
-	if len(in.Volumes) > 0 {
-		return p, errVMUnsupported("attaching volumes at launch to")
-	}
 	if err := s.vmRunnerFailure(); err != nil {
 		return p, core.Errf(http.StatusServiceUnavailable, "Unsupported", "virtual machine instances are unavailable: %v", err)
 	}
-	p.user, p.diskGB = base.DefaultUser, 8
 	p.root = VolumeSpec{Device: "/dev/xvda", MountPath: vm.DiskDir}
 	del := true
 	p.root.DeleteOnTermination = &del
@@ -114,9 +120,10 @@ func (s *Service) planVM(in RunInput, img Image) (vmPlan, error) {
 		}
 		p.root.VolumeType, p.root.Iops, p.root.Throughput, p.root.Encrypted, p.root.KMSKeyID = r.VolumeType, r.Iops, r.Throughput, r.Encrypted, r.KMSKeyID
 	}
-	if p.diskGB < vm.MinRootGB || p.diskGB > 16384 {
-		return p, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "the root volume of a VM image must be between %d and 16384 GiB", vm.MinRootGB)
+	if p.diskGB < minGB || p.diskGB > 16384 {
+		return p, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "the root volume of %s must be between %d and 16384 GiB", img.ID, minGB)
 	}
+	p.ami = img.VMDisk
 	p.root.SizeGB = p.diskGB
 	p.virtualization = "emulated"
 	if s.vmKVM() {
@@ -215,8 +222,12 @@ func (s *Service) vmEnsureBase(ctx context.Context, runner string, base vm.Base,
 // vmMachine is the guest hardware of an instance.
 func (s *Service) vmMachine(inst Instance) vm.Machine {
 	arch, _ := vm.ArchOf(hostArch(s))
-	return vm.Machine{Name: inst.ID, Arch: arch, KVM: inst.Virtualization == "kvm",
+	m := vm.Machine{Name: inst.ID, Arch: arch, KVM: inst.Virtualization == "kvm",
 		VCPUs: max(1, int(math.Ceil(inst.VCPUs))), MemoryMB: inst.MemoryMB}
+	for _, d := range vmDataDisks(inst) {
+		m.Disks = append(m.Disks, vm.Disk{ID: d.VolumeID})
+	}
+	return m
 }
 
 // vmRunSpec is the VM container of an instance.
@@ -228,8 +239,23 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 		dns = vpc.DNSAddress(v.CIDR)
 	}
 	mounts := []runtime.Mount{{Volume: s.vmImageVolume(), Target: vm.ImagesDir, ReadOnly: true}}
+	var disks []string
 	for _, v := range inst.Volumes {
-		mounts = append(mounts, runtime.Mount{Volume: volumeName(v.VolumeID), Target: v.MountPath})
+		if v.MountPath == vm.DiskDir { // the root volume
+			mounts = append(mounts, runtime.Mount{Volume: volumeName(v.VolumeID), Target: v.MountPath})
+			continue
+		}
+		mounts = append(mounts, runtime.Mount{Volume: volumeName(v.VolumeID), Target: vm.DisksDir + "/" + v.VolumeID})
+	}
+	for _, d := range vmDataDisks(inst) {
+		size := 1
+		if vol, err := store.Get[Volume](s.env.Store, cVolumes, d.VolumeID); err == nil {
+			size = vol.SizeGB
+		}
+		disks = append(disks, fmt.Sprintf("%s:%d", d.VolumeID, size))
+	}
+	if inst.VMAMI != "" {
+		mounts = append(mounts, runtime.Mount{Volume: inst.VMAMI, Target: "/ami", ReadOnly: true})
 	}
 	spec := runtime.RunSpec{
 		DNS:    s.dns(inst.VpcID),
@@ -248,20 +274,24 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 		Hostname: strings.TrimSuffix(inst.PrivateDNS, ".internal"),
 		Env: map[string]string{
 			"HC_VM_BASE": base.CacheName(mach.Arch), "HC_VM_DISK_GB": strconv.Itoa(inst.VMDiskGB), "HC_VM_ARCH": string(mach.Arch), "HC_VM_DNS": dns,
+			"HC_VM_DISKS": strings.Join(disks, " "),
 			// Used only when passt is unavailable (or HC_VM_NET=user is set for the server).
 			"HC_VM_NET": os.Getenv("HC_VM_NET"), "HC_VM_HOSTFWD": hostFwd(s.vpc.IngressPorts(inst.SecurityGroups, 64)),
 		},
 		ExtraHosts: []string{runtime.HostAlias},
-		// passt sandboxes itself (user, mount and pid namespaces, pivot_root),
-		// which Docker's default seccomp profile and, on Ubuntu, its
-		// docker-default AppArmor profile forbid; the container gets no extra
-		// capability. It also opens a socket for each forwarded port, so it
-		// needs more than the 65536 open files some hosts allow by default.
-		SecurityOpt: []string{"seccomp=unconfined", "apparmor=unconfined"},
+		// passt sandboxes itself (user and mount namespaces, pivot_root), which
+		// Docker's default seccomp profile and, on Ubuntu, its docker-default
+		// AppArmor profile forbid; the container gets no extra capability. It
+		// also opens a socket for each forwarded port, so it needs more than the
+		// 65536 open files some hosts allow by default.
+		SecurityOpt: vmSecurityOpts(),
 		NoFile:      1048576,
 	}
 	if mach.KVM {
 		spec.Devices = []string{"/dev/kvm"}
+	}
+	if inst.VMAMI != "" {
+		spec.Env["HC_VM_AMI"] = "1"
 	}
 	return spec
 }
@@ -284,6 +314,34 @@ func (s *Service) vmFwdMatches(inst Instance) bool {
 		}
 	}
 	return true
+}
+
+var (
+	secOptsOnce sync.Once
+	secOpts     []string
+)
+
+// vmSecurityOpts confines the VM container with Docker's default seccomp
+// profile plus the four syscalls passt's sandbox needs (vm.SeccompProfile).
+// AppArmor cannot be narrowed from here: Ubuntu's docker-default profile denies
+// the mounts passt's sandbox makes, and a profile would have to be loaded on
+// the host. So the container runs without AppArmor confinement, unless
+// HC_VM_APPARMOR names a profile the administrator loaded on the host (a
+// profile that allows mount, umount and pivot_root inside user namespaces).
+func vmSecurityOpts() []string {
+	secOptsOnce.Do(func() {
+		prof, err := vm.SeccompProfile()
+		if err != nil {
+			log.Printf("ec2: building the VM seccomp profile: %v (using seccomp=unconfined)", err)
+			prof = "unconfined"
+		}
+		aa := os.Getenv("HC_VM_APPARMOR")
+		if aa == "" {
+			aa = "unconfined"
+		}
+		secOpts = []string{"seccomp=" + prof, "apparmor=" + aa}
+	})
+	return secOpts
 }
 
 // hostFwd renders ports as QEMU user-mode networking forwards.
@@ -327,9 +385,11 @@ func (s *Service) launchVM(inst Instance, network string) {
 		return
 	}
 	arch, _ := vm.ArchOf(hostArch(s))
-	if err := s.vmEnsureBase(ctx, runner, vm.Bases[inst.VMBase], arch); err != nil {
-		fail(err)
-		return
+	if inst.VMBase != "" {
+		if err := s.vmEnsureBase(ctx, runner, vm.Bases[inst.VMBase], arch); err != nil {
+			fail(err)
+			return
+		}
 	}
 	if !s.vmPending(inst.ID) {
 		return // terminated while the image downloaded
@@ -519,6 +579,18 @@ func (s *Service) vmStop(inst Instance, force bool) error {
 
 // vmStart boots a stopped VM (same disk) and waits for the guest to be up.
 func (s *Service) vmStart(inst Instance) error {
+	if base, ok := vm.Bases[inst.VMBase]; ok {
+		// The root disk is an overlay on the cached cloud image: fetch it again if the cache was cleared or the host changed.
+		fctx, cancel := context.WithTimeout(context.Background(), 50*time.Minute)
+		if arch, err := vm.ArchOf(hostArch(s)); err == nil {
+			if runner, err := s.vmRunner(fctx); err != nil {
+				log.Printf("ec2: start %s: %v", inst.ID, err)
+			} else if err := s.vmEnsureBase(fctx, runner, base, arch); err != nil {
+				log.Printf("ec2: start %s: %v", inst.ID, err)
+			}
+		}
+		cancel()
+	}
 	since := time.Now().Add(-2 * time.Second)
 	if err := s.env.Docker.Start(inst.ContainerID); err != nil {
 		return err
@@ -553,8 +625,11 @@ func (s *Service) rebuildVM(i Instance) error {
 	if err != nil {
 		return err
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 35*time.Minute)
 	defer cancel()
+	if _, err := s.vmRunner(ctx); err != nil { // a new HomeCloud version may have a new runner image
+		return err
+	}
 	running := s.env.Docker.State(i.ContainerID) == "running"
 	if running {
 		if err := s.vmStop(i, false); err != nil {
