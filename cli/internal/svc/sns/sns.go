@@ -355,7 +355,7 @@ type subscribeInput struct {
 var phoneRe = regexp.MustCompile(`^\+?[0-9]{5,15}$`)
 
 // setSubAttribute validates and applies one subscription attribute.
-func (s *Service) setSubAttribute(sub *Subscription, name, value string) error {
+func (s *Service) setSubAttribute(sub *Subscription, name, value string, authorize func(action, resource string) error) error {
 	switch name {
 	case "RawMessageDelivery":
 		if value != "true" && value != "false" {
@@ -400,8 +400,13 @@ func (s *Service) setSubAttribute(sub *Subscription, name, value string) error {
 		if json.Unmarshal([]byte(value), &rp) != nil || !strings.HasPrefix(core.CanonicalARN(rp.DeadLetterTargetArn), "arn:"+core.Partition+":sqs:") {
 			return errInvalid("RedrivePolicy: deadLetterTargetArn must be an Amazon SQS queue ARN")
 		}
-		if _, ok := s.sqs.QueueARN(sqs.NameFromARN(rp.DeadLetterTargetArn)); !ok {
+		dlq, ok := s.sqs.QueueARN(sqs.NameFromARN(rp.DeadLetterTargetArn))
+		if !ok || !core.IsLocalARN(rp.DeadLetterTargetArn, s.env.AccountID) {
 			return errInvalid("RedrivePolicy: dead-letter queue %s does not exist", rp.DeadLetterTargetArn)
+		}
+		// Failed deliveries are written to the queue on the subscriber's behalf.
+		if err := authorize("sqs:SendMessage", dlq); err != nil {
+			return err
 		}
 		sub.RedrivePolicy = value
 	case "DeliveryPolicy":
@@ -497,7 +502,7 @@ func (s *Service) subscribe(t Topic, in subscribeInput, authorize func(action, r
 		if k == "FilterPolicyScope" {
 			continue
 		}
-		if err := s.setSubAttribute(&sub, k, v); err != nil {
+		if err := s.setSubAttribute(&sub, k, v, authorize); err != nil {
 			return Subscription{}, err
 		}
 	}
@@ -1349,7 +1354,7 @@ func (s *Service) updateSub(c *httpx.Ctx) (any, error) {
 		}
 		for _, k := range []string{"RawMessageDelivery", "FilterPolicy", "FilterPolicyScope"} {
 			if v, ok := attrs[k]; ok {
-				if err := s.setSubAttribute(x, k, v); err != nil {
+				if err := s.setSubAttribute(x, k, v, c.Authorize); err != nil {
 					return err
 				}
 			}
