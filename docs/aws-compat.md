@@ -89,7 +89,7 @@ that is not itself a trusted proxy is the source address, and `X-Forwarded-Proto
 | Secrets Manager | secretsmanager | awsJson 1.1 | Versions and staging labels, rotation via Lambda, resource policies |
 | SSM Parameter Store | ssm | awsJson 1.1 | Parameters, hierarchies, versions and labels, SecureString |
 | KMS | kms | awsJson 1.1 | Symmetric, RSA, ECC and HMAC keys, aliases, rotation, data keys, key policies, grants (stored), imported key material (`Origin=EXTERNAL`: `GetParametersForImport`, `ImportKeyMaterial` with RSAES_OAEP and RSA_AES_KEY_WRAP, expiry, `DeleteImportedKeyMaterial`; re-import needs the same material), multi-Region primary keys (`mrk-` ids). HomeCloud is one region, so `ReplicateKey` and `UpdatePrimaryRegion` return `UnsupportedOperationException` |
-| CloudWatch | monitoring | awsJson 1.0 + awsQuery | Metrics, GetMetricData with math, alarms, dashboards |
+| CloudWatch | monitoring | awsJson 1.0 + awsQuery | Metrics, GetMetricData with math (including `FILL(m, value \| REPEAT \| LINEAR)` and `ANOMALY_DETECTION_BAND`), alarms including anomaly detection alarms (`ThresholdMetricId`), anomaly detectors (`PutAnomalyDetector`, `DescribeAnomalyDetectors`, `DeleteAnomalyDetector`; single-metric and metric-math, `ExcludedTimeRanges`, `MetricTimezone`), dashboards |
 | CloudWatch Logs | logs | awsJson 1.1 | Groups, streams, events, filter patterns, Logs Insights, metric and subscription filters |
 | EventBridge | events | awsJson 1.1 | Buses, rules with full pattern syntax, targets with transforms |
 | EventBridge Scheduler | scheduler | restJson1 | Schedules and groups |
