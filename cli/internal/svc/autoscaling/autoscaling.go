@@ -42,9 +42,44 @@ type Policy struct {
 	Metric          string  `json:"metric"` // CPUUtilization | MemoryUtilization
 	TargetValue     float64 `json:"target_value"`
 	CooldownSeconds int     `json:"cooldown_seconds"`
+	// AWS API fields (see aws.go). Policies the group cannot act on (step and
+	// simple scaling, other metrics) are stored as Inert.
+	Type             string           `json:"type,omitempty"`
+	Inert            bool             `json:"inert,omitempty"`
+	AdjustmentType   string           `json:"adjustment_type,omitempty"`
+	ScalingAdjust    int              `json:"scaling_adjustment,omitempty"`
+	MinAdjustment    int              `json:"min_adjustment,omitempty"`
+	Cooldown         *int             `json:"cooldown,omitempty"`
+	Warmup           int              `json:"warmup,omitempty"`
+	PredefinedMetric string           `json:"predefined_metric,omitempty"`
+	ResourceLabel    string           `json:"resource_label,omitempty"`
+	DisableScaleIn   bool             `json:"disable_scale_in,omitempty"`
+	Disabled         bool             `json:"disabled,omitempty"`
+	MetricAggregate  string           `json:"metric_aggregate,omitempty"`
+	Steps            []StepAdjustment `json:"steps,omitempty"`
+}
+
+type StepAdjustment struct {
+	MetricIntervalLowerBound *float64
+	MetricIntervalUpperBound *float64
+	ScalingAdjustment        int
+}
+
+// TemplateRef points a group at an EC2 launch template.
+type TemplateRef struct {
+	ID      string `json:"id,omitempty"`
+	Name    string `json:"name,omitempty"`
+	Version string `json:"version,omitempty"` // "$Latest", "$Default" or a number
+}
+
+type GroupTag struct {
+	Key               string `json:"key"`
+	Value             string `json:"value"`
+	PropagateAtLaunch bool   `json:"propagate_at_launch"`
 }
 
 type Activity struct {
+	ID          string    `json:"id,omitempty"`
 	Time        time.Time `json:"time"`
 	Description string    `json:"description"`
 	Cause       string    `json:"cause"`
@@ -67,7 +102,18 @@ type Group struct {
 	LastScaling     *time.Time   `json:"last_scaling,omitempty"`
 	Activities      []Activity   `json:"activities"`
 	CreatedAt       time.Time    `json:"created_at"`
+	// AWS API fields.
+	Template            *TemplateRef `json:"template,omitempty"`
+	Tags                []GroupTag   `json:"tags,omitempty"`
+	HealthCheckType     string       `json:"health_check_type,omitempty"`
+	DefaultCooldown     int          `json:"default_cooldown,omitempty"`
+	SuspendedProcesses  []string     `json:"suspended_processes,omitempty"`
+	TerminationPolicies []string     `json:"termination_policies,omitempty"`
+	ProtectNewInstances bool         `json:"protect_new_instances,omitempty"`
 }
+
+// suspends reports whether an Auto Scaling process is suspended.
+func (g Group) suspends(process string) bool { return slices.Contains(g.SuspendedProcesses, process) }
 
 type Service struct {
 	env *svc.Env
@@ -83,7 +129,7 @@ func New(env *svc.Env, e *ec2.Service, lb *elb.Service, cw *cloudwatch.Service) 
 
 func (s *Service) activity(name, desc, cause, status string) {
 	_, _ = store.Update(s.env.Store, cGroups, name, func(g *Group) error {
-		g.Activities = append([]Activity{{Time: core.Now(), Description: desc, Cause: cause, Status: status}}, g.Activities...)
+		g.Activities = append([]Activity{{ID: newUUID(), Time: core.Now(), Description: desc, Cause: cause, Status: status}}, g.Activities...)
 		if len(g.Activities) > 100 {
 			g.Activities = g.Activities[:100]
 		}
@@ -157,27 +203,29 @@ func (s *Service) reconcile(stale Group) {
 			}
 		}
 	}
-	if !g.Suspended {
+	if !g.Suspended && !g.suspends("AlarmNotification") {
 		g = s.scale(g, live)
 	}
 	switch {
-	case len(live) < g.DesiredCapacity:
+	case len(live) < g.DesiredCapacity && !g.suspends("Launch"):
 		n := g.DesiredCapacity - len(live)
 		for k := 0; k < n; k++ {
 			subnet := ""
 			if len(g.SubnetIDs) > 0 {
 				subnet = g.SubnetIDs[(len(live)+k)%len(g.SubnetIDs)]
 			}
-			tags := core.Tags{groupTag: g.Name}
-			out, err := s.ec2.Launch(ec2.RunInput{Name: g.Name, ImageID: g.Launch.ImageID, InstanceType: g.Launch.InstanceType, SubnetID: subnet,
-				SecurityGroupIDs: g.Launch.SecurityGroupIDs, UserData: g.Launch.UserData, FileSystems: g.Launch.FileSystems, Tags: tags, Count: 1})
+			in, err := s.launchInput(g, subnet)
+			var out []ec2.Instance
+			if err == nil {
+				out, err = s.ec2.Launch(in)
+			}
 			if err != nil {
 				s.activity(g.Name, "Launching a new instance", err.Error(), "Failed")
 				return
 			}
 			s.activity(g.Name, "Launching a new instance: "+out[0].ID, fmt.Sprintf("capacity %d below desired %d", len(live)+k, g.DesiredCapacity), "Successful")
 		}
-	case len(live) > g.DesiredCapacity:
+	case len(live) > g.DesiredCapacity && !g.suspends("Terminate"):
 		// Terminate the newest instances first.
 		for _, i := range live[g.DesiredCapacity:] {
 			s.detach(g, i.ID)
@@ -186,6 +234,37 @@ func (s *Service) reconcile(stale Group) {
 			}
 		}
 	}
+}
+
+// launchInput builds the launch of one instance: from the group's launch
+// template (resolved now, so new template versions apply) or launch config.
+func (s *Service) launchInput(g Group, subnet string) (ec2.RunInput, error) {
+	in := ec2.RunInput{ImageID: g.Launch.ImageID, InstanceType: g.Launch.InstanceType, SecurityGroupIDs: g.Launch.SecurityGroupIDs,
+		UserData: g.Launch.UserData, FileSystems: g.Launch.FileSystems}
+	tags := core.Tags{}
+	if g.Template != nil {
+		rt, err := s.ec2.ResolveTemplate(g.Template.ID, g.Template.Name, g.Template.Version)
+		if err != nil {
+			return in, err
+		}
+		in = rt.Input
+		for k, v := range in.Tags {
+			tags[k] = v
+		}
+	}
+	for _, t := range g.Tags {
+		if t.PropagateAtLaunch {
+			tags[t.Key] = t.Value
+		}
+	}
+	tags[groupTag], tags["aws:autoscaling:groupName"] = g.Name, g.Name
+	in.Name, in.SubnetID, in.Count = g.Name, subnet, 1
+	if n, ok := tags["Name"]; ok {
+		in.Name, in.ExactName = n, true
+		delete(tags, "Name")
+	}
+	in.Tags = tags
+	return in, nil
 }
 
 func (s *Service) ensureTarget(tg, id string) error {
@@ -206,6 +285,9 @@ func (s *Service) scale(g Group, live []ec2.Instance) Group {
 	desired := g.DesiredCapacity
 	var cause string
 	for _, p := range g.Policies {
+		if p.Inert || p.Disabled {
+			continue
+		}
 		cooldown := time.Duration(max(p.CooldownSeconds, 60)) * time.Second
 		if g.LastScaling != nil && time.Since(*g.LastScaling) < cooldown {
 			return g
@@ -301,6 +383,16 @@ func validate(g *Group) error {
 	}
 	for i := range g.Policies {
 		p := &g.Policies[i]
+		if p.Type != "" { // created through the AWS API
+			for _, q := range g.Policies[:i] {
+				if q.Name == p.Name {
+					return core.BadRequest("policy name %q is used twice", p.Name)
+				}
+			}
+			if p.Inert {
+				continue
+			}
+		}
 		if p.Metric == "" {
 			p.Metric = "CPUUtilization"
 		}
@@ -314,7 +406,7 @@ func validate(g *Group) error {
 			p.CooldownSeconds = 180
 		}
 		// Generated names track the policy's target; custom names are kept.
-		if p.Name == "" || strings.HasPrefix(p.Name, "target-") {
+		if p.Type == "" && (p.Name == "" || strings.HasPrefix(p.Name, "target-")) {
 			p.Name = fmt.Sprintf("target-%s-%.0f", p.Metric, p.TargetValue)
 		}
 		for _, q := range g.Policies[:i] {
@@ -328,7 +420,11 @@ func validate(g *Group) error {
 
 // authorizeLaunch checks that the caller could launch the group's instances
 // themselves; the group acts on their behalf.
-func (s *Service) authorizeLaunch(c *httpx.Ctx, l LaunchConfig, targetGroups []string) error {
+type authz interface {
+	Authorize(action, resource string) error
+}
+
+func (s *Service) authorizeLaunch(c authz, l LaunchConfig, targetGroups []string) error {
 	if err := c.Authorize("ec2:RunInstances", "*"); err != nil {
 		return err
 	}
@@ -369,28 +465,56 @@ func (s *Service) create(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&g); err != nil {
 		return nil, err
 	}
-	if err := s.authorizeLaunch(c, g.Launch, g.TargetGroups); err != nil {
+	g, err := s.createIn(c, g)
+	if err != nil {
 		return nil, err
 	}
+	return s.view(g), nil
+}
+
+// resolveTemplate fills the group's launch settings from its launch template.
+func (s *Service) resolveTemplate(g *Group) error {
+	if g.Template == nil {
+		return nil
+	}
+	if g.Template.Version == "" {
+		g.Template.Version = "$Default"
+	}
+	rt, err := s.ec2.ResolveTemplate(g.Template.ID, g.Template.Name, g.Template.Version)
+	if err != nil {
+		return err
+	}
+	g.Template.ID, g.Template.Name = rt.ID, rt.Name
+	g.Launch.ImageID, g.Launch.InstanceType, g.Launch.SecurityGroupIDs, g.Launch.UserData = rt.Input.ImageID, rt.Input.InstanceType, rt.Input.SecurityGroupIDs, rt.Input.UserData
+	return nil
+}
+
+func (s *Service) createIn(c authz, g Group) (Group, error) {
+	if err := s.resolveTemplate(&g); err != nil {
+		return g, err
+	}
+	if err := s.authorizeLaunch(c, g.Launch, g.TargetGroups); err != nil {
+		return g, err
+	}
 	if !nameRe.MatchString(g.Name) {
-		return nil, core.BadRequest("group names are 1-255 letters, digits, dots, hyphens or underscores")
+		return g, core.BadRequest("group names are 1-255 letters, digits, dots, hyphens or underscores")
 	}
 	if store.Has(s.env.Store, cGroups, g.Name) {
-		return nil, core.Errf(http.StatusConflict, "AlreadyExists", "auto scaling group %q already exists", g.Name)
+		return g, core.Errf(http.StatusConflict, "AlreadyExists", "auto scaling group %q already exists", g.Name)
 	}
 	if g.Launch.ImageID == "" {
-		return nil, core.BadRequest("launch.image_id is required")
+		return g, core.BadRequest("launch.image_id is required")
 	}
 	if g.MaxSize == 0 {
 		g.MaxSize = max(g.DesiredCapacity, 1)
 	}
 	if err := validate(&g); err != nil {
-		return nil, err
+		return g, err
 	}
 	if err := s.checkPlacement(g.Launch, g.SubnetIDs, g.TargetGroups); err != nil {
-		return nil, err
+		return g, err
 	}
-	if g.HealthGraceSecs == 0 {
+	if g.HealthGraceSecs == 0 && g.HealthCheckType == "" { // the AWS API always sets the type and keeps an explicit 0
 		g.HealthGraceSecs = 120
 	}
 	g.ARN = s.env.ARN("autoscaling", "autoScalingGroup:"+g.Name)
@@ -405,29 +529,57 @@ func (s *Service) create(c *httpx.Ctx) (any, error) {
 		g.Policies = []Policy{}
 	}
 	if err := store.Put(s.env.Store, cGroups, g.Name, g); err != nil {
-		return nil, err
+		return g, err
 	}
 	go s.reconcile(g)
-	return s.view(g), nil
+	return g, nil
+}
+
+type updateInput struct {
+	MinSize         *int          `json:"min_size"`
+	MaxSize         *int          `json:"max_size"`
+	DesiredCapacity *int          `json:"desired_capacity"`
+	Launch          *LaunchConfig `json:"launch"`
+	Policies        *[]Policy     `json:"policies"`
+	Suspended       *bool         `json:"suspended"`
+	SubnetIDs       *[]string     `json:"subnet_ids"`
+	TargetGroups    *[]string     `json:"target_groups"`
+	// AWS API fields.
+	Template            *TemplateRef `json:"-"`
+	HealthCheckType     *string      `json:"-"`
+	HealthGraceSecs     *int         `json:"-"`
+	DefaultCooldown     *int         `json:"-"`
+	TerminationPolicies *[]string    `json:"-"`
+	ProtectNewInstances *bool        `json:"-"`
+	Tags                *[]GroupTag  `json:"-"`
+	SuspendedProcesses  *[]string    `json:"-"`
 }
 
 func (s *Service) update(c *httpx.Ctx) (any, error) {
-	var in struct {
-		MinSize         *int          `json:"min_size"`
-		MaxSize         *int          `json:"max_size"`
-		DesiredCapacity *int          `json:"desired_capacity"`
-		Launch          *LaunchConfig `json:"launch"`
-		Policies        *[]Policy     `json:"policies"`
-		Suspended       *bool         `json:"suspended"`
-		SubnetIDs       *[]string     `json:"subnet_ids"`
-		TargetGroups    *[]string     `json:"target_groups"`
-	}
+	var in updateInput
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	cur, err := store.Get[Group](s.env.Store, cGroups, c.Param("name"))
+	g, err := s.updateIn(c, c.Param("name"), in)
 	if err != nil {
-		return nil, core.NotFound("auto scaling group", c.Param("name"))
+		return nil, err
+	}
+	return s.view(g), nil
+}
+
+func (s *Service) updateIn(c authz, name string, in updateInput) (Group, error) {
+	cur, err := store.Get[Group](s.env.Store, cGroups, name)
+	if err != nil {
+		return cur, core.NotFound("auto scaling group", name)
+	}
+	if in.Template != nil {
+		probe := cur
+		probe.Template = in.Template
+		if err := s.resolveTemplate(&probe); err != nil {
+			return cur, err
+		}
+		l := probe.Launch
+		in.Template, in.Launch = probe.Template, &l
 	}
 	launch, subnets, tgs := cur.Launch, cur.SubnetIDs, cur.TargetGroups
 	var newTGs []string
@@ -447,16 +599,16 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 	}
 	if in.Launch != nil || newTGs != nil {
 		if err := s.authorizeLaunch(c, launch, newTGs); err != nil {
-			return nil, err
+			return cur, err
 		}
 	}
 	if in.Launch != nil || in.SubnetIDs != nil || in.TargetGroups != nil {
 		if err := s.checkPlacement(launch, subnets, tgs); err != nil {
-			return nil, err
+			return cur, err
 		}
 	}
 	var dropped []string
-	g, err := store.Update(s.env.Store, cGroups, c.Param("name"), func(g *Group) error {
+	g, err := store.Update(s.env.Store, cGroups, name, func(g *Group) error {
 		if in.MinSize != nil {
 			g.MinSize = *in.MinSize
 		}
@@ -489,13 +641,37 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 			}
 			g.TargetGroups = *in.TargetGroups
 		}
+		if in.Template != nil {
+			g.Template = in.Template
+		}
+		if in.HealthCheckType != nil {
+			g.HealthCheckType = *in.HealthCheckType
+		}
+		if in.HealthGraceSecs != nil {
+			g.HealthGraceSecs = *in.HealthGraceSecs
+		}
+		if in.DefaultCooldown != nil {
+			g.DefaultCooldown = *in.DefaultCooldown
+		}
+		if in.TerminationPolicies != nil {
+			g.TerminationPolicies = *in.TerminationPolicies
+		}
+		if in.ProtectNewInstances != nil {
+			g.ProtectNewInstances = *in.ProtectNewInstances
+		}
+		if in.Tags != nil {
+			g.Tags = *in.Tags
+		}
+		if in.SuspendedProcesses != nil {
+			g.SuspendedProcesses = *in.SuspendedProcesses
+		}
 		return validate(g)
 	})
 	if err == store.ErrNotFound {
-		return nil, core.NotFound("auto scaling group", c.Param("name"))
+		return cur, core.NotFound("auto scaling group", name)
 	}
 	if err != nil {
-		return nil, err
+		return cur, err
 	}
 	if len(dropped) > 0 {
 		live, _ := s.members(g.Name)
@@ -504,17 +680,25 @@ func (s *Service) update(c *httpx.Ctx) (any, error) {
 		}
 	}
 	go s.reconcile(g)
-	return s.view(g), nil
+	return g, nil
 }
 
 func (s *Service) delete(c *httpx.Ctx) (any, error) {
-	g, err := store.Update(s.env.Store, cGroups, c.Param("name"), func(g *Group) error { g.Deleting = true; return nil })
-	if err == store.ErrNotFound {
-		return nil, core.NotFound("auto scaling group", c.Param("name"))
-	}
+	g, err := s.deleteIn(c.Param("name"))
 	if err != nil {
 		return nil, err
 	}
-	go s.reconcile(g)
 	return s.view(g), nil
+}
+
+func (s *Service) deleteIn(name string) (Group, error) {
+	g, err := store.Update(s.env.Store, cGroups, name, func(g *Group) error { g.Deleting = true; return nil })
+	if err == store.ErrNotFound {
+		return g, core.NotFound("auto scaling group", name)
+	}
+	if err != nil {
+		return g, err
+	}
+	go s.reconcile(g)
+	return g, nil
 }

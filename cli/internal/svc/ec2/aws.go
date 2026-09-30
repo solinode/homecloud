@@ -70,6 +70,7 @@ func (s *Service) RegisterAWS() {
 		"DescribeAddresses":                    s.awsDescribeAddresses,
 	}
 	s.vpcOps(ops)
+	s.ltOps(ops)
 	svc := &awsapi.Service{Name: "ec2", XMLNS: xmlns, EC2: true, Ops: map[string]awsapi.Op{}}
 	for name, fn := range ops {
 		svc.Ops[name] = wrap(fn)
@@ -1310,7 +1311,7 @@ func (s *Service) awsDeleteKeyPair(q *awsapi.Req) (any, error) {
 
 var resourceTypes = map[string]string{
 	"i": "instance", "vol": "volume", "vpc": "vpc", "subnet": "subnet", "sg": "security-group", "ami": "image",
-	"key": "key-pair", "snap": "snapshot", "igw": "internet-gateway", "rtb": "route-table",
+	"key": "key-pair", "snap": "snapshot", "igw": "internet-gateway", "rtb": "route-table", "lt": "launch-template",
 }
 
 func resourceType(id string) string {
@@ -1353,6 +1354,8 @@ func (s *Service) setTags(id string, fn func(t core.Tags)) error {
 		_, err = store.Update(s.env.Store, cIGWs, id, func(x *InternetGateway) error { plain(&x.Tags); return nil })
 	case "route-table":
 		_, err = store.Update(s.env.Store, cRouteTables, id, func(x *RouteTable) error { plain(&x.Tags); return nil })
+	case "launch-template":
+		_, err = store.Update(s.env.Store, cLaunchTemplates, id, func(x *LaunchTemplate) error { plain(&x.Tags); return nil })
 	default:
 		return core.Errf(http.StatusBadRequest, "InvalidID", "The ID '%s' is not valid", id)
 	}
@@ -1453,6 +1456,9 @@ func (s *Service) allTagged() []tagRow {
 		out = append(out, tagRow{g.ID, g.Tags})
 	}
 	for _, t := range store.List[RouteTable](s.env.Store, cRouteTables) {
+		out = append(out, tagRow{t.ID, t.Tags})
+	}
+	for _, t := range store.List[LaunchTemplate](s.env.Store, cLaunchTemplates) {
 		out = append(out, tagRow{t.ID, t.Tags})
 	}
 	return out
