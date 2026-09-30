@@ -7,6 +7,7 @@ import (
 	"crypto/x509"
 	"encoding/base64"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -159,6 +160,13 @@ func TestKMSImportedKeyMaterialCLI(t *testing.T) {
 }
 
 func TestKMSImportWrappingBoto3(t *testing.T) {
+	py := os.Getenv("HC_TEST_PYTHON")
+	if py == "" {
+		py = "python3"
+	}
+	if exec.Command(py, "-c", "import cryptography, boto3").Run() != nil {
+		t.Skip("python with cryptography and boto3 not available (set HC_TEST_PYTHON)")
+	}
 	h, _, _ := setup(t)
 	out := h.Python(t, `
 import os, datetime

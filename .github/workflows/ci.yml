@@ -36,7 +36,7 @@ jobs:
         with:
           python-version: "3.12"
       # AWS compatibility tests drive the real AWS CLI (preinstalled on the runner) and boto3.
-      - run: pip install boto3 && aws --version
+      - run: pip install boto3 cryptography pycognito && aws --version
       - run: go vet ./...
       - run: go test -race -timeout 30m ./...
         env:
