@@ -264,7 +264,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	}
 	lambdaSvc.VerifyJWT = cognitoSvc.VerifyToken
 	lambdaSvc.CheckAuthorizer = cognitoSvc.CheckClient
-	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc, sfn: sfnSvc}
+	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc, sfn: sfnSvc, account: account}
 	sfnSvc.Tasks = tg
 	sfnSvc.Call = func(ctx context.Context, p *httpx.Principal, service, op string, in any) (json.RawMessage, error) {
 		return awsapi.Call(ctx, p, account, service, op, in)

@@ -411,7 +411,7 @@ func (s *Service) userContext(u User) CondContext {
 }
 
 func (s *Service) principal(u User, keyID string) *httpx.Principal {
-	p := &httpx.Principal{AccountID: s.env.AccountID, UserName: u.Name, ARN: u.ARN, Root: u.Root, AccessKey: keyID, Context: s.userContext(u)}
+	p := &httpx.Principal{AccountID: s.env.AccountID, UserName: u.Name, ARN: u.ARN, Root: u.Root, AccessKey: keyID, Context: s.userContext(u), ResolveResource: s.resolveResource}
 	if u.Root {
 		p.Can = func(string, string) bool { return true }
 		p.Identity = func(string, string, map[string][]string) httpx.Decision { return httpx.Allowed }

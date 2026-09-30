@@ -45,6 +45,10 @@ type Principal struct {
 	// as "aws:sourceip" or "aws:username"). IAM fills the identity keys; see
 	// AddRequestContext for the request keys.
 	Context map[string][]string `json:"-"`
+	// ResolveResource maps the resource a caller named to the one it denotes (IAM
+	// resolves role names and paths for iam:PassRole), so that a policy on the real
+	// resource cannot be dodged by another spelling of it.
+	ResolveResource func(action, resource string) string `json:"-"`
 }
 
 // AddRequestContext records the IAM global condition keys that come from the
