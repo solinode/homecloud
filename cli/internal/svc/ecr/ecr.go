@@ -41,6 +41,11 @@ type Repository struct {
 	CreatedAt   time.Time `json:"created_at"`
 	Description string    `json:"description,omitempty"`
 	Tags        core.Tags `json:"tags,omitempty"`
+	ScanOnPush  bool      `json:"scan_on_push,omitempty"`
+	Encryption  string    `json:"encryption,omitempty"`
+	KMSKey      string    `json:"kms_key,omitempty"`
+	Lifecycle   string    `json:"lifecycle_policy,omitempty"`
+	Policy      string    `json:"repository_policy,omitempty"`
 }
 
 type Service struct {
@@ -210,14 +215,23 @@ func (s *Service) create(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	if len(in.Name) < 2 || len(in.Name) > 256 || !nameRe.MatchString(in.Name) {
-		return nil, core.BadRequest("repository names are lowercase letters, digits and . _ - separators, optionally namespaced with /")
+	r, err := s.createRepo(in.Name, in.TagMutable == nil || *in.TagMutable, in.Description, in.Tags)
+	if err != nil {
+		return nil, err
 	}
-	if store.Has(s.env.Store, cRepos, in.Name) {
-		return nil, core.Errf(http.StatusConflict, "RepositoryAlreadyExistsException", "repository %q already exists", in.Name)
+	return r, nil
+}
+
+// createRepo validates and stores a new repository.
+func (s *Service) createRepo(name string, mutable bool, desc string, tags core.Tags) (Repository, error) {
+	if len(name) < 2 || len(name) > 256 || !nameRe.MatchString(name) {
+		return Repository{}, core.BadRequest("repository names are lowercase letters, digits and . _ - separators, optionally namespaced with /")
 	}
-	r := s.newRepo(in.Name, in.TagMutable == nil || *in.TagMutable, in.Description)
-	r.Tags = in.Tags
+	if store.Has(s.env.Store, cRepos, name) {
+		return Repository{}, core.Errf(http.StatusConflict, "RepositoryAlreadyExistsException", "repository %q already exists", name)
+	}
+	r := s.newRepo(name, mutable, desc)
+	r.Tags = tags
 	return r, store.Put(s.env.Store, cRepos, r.Name, r)
 }
 
@@ -349,36 +363,33 @@ func (s *Service) deleteDigest(name, digest string) error {
 }
 
 func (s *Service) delete(c *httpx.Ctx) (any, error) {
+	return nil, s.deleteRepo(c.Param("name"), c.Query("force") == "true")
+}
+
+func (s *Service) deleteRepo(name string, force bool) error {
 	if err := s.ready(); err != nil {
-		return nil, err
+		return err
 	}
-	name := c.Param("name")
 	if !store.Has(s.env.Store, cRepos, name) {
-		return nil, core.Errf(http.StatusNotFound, "RepositoryNotFoundException", "repository %q does not exist", name)
+		return core.Errf(http.StatusNotFound, "RepositoryNotFoundException", "repository %q does not exist", name)
 	}
 	imgs, err := s.images(name)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	if len(imgs) > 0 && c.Query("force") != "true" {
-		return nil, core.Errf(http.StatusConflict, "RepositoryNotEmptyException", "repository %q has %d images; pass force=true", name, len(imgs))
+	if len(imgs) > 0 && !force {
+		return core.Errf(http.StatusConflict, "RepositoryNotEmptyException", "repository %q has %d images; pass force=true", name, len(imgs))
 	}
 	for _, i := range imgs {
 		if err := s.deleteDigest(name, i.Digest); err != nil {
-			return nil, err
+			return err
 		}
 	}
-	return nil, store.Delete(s.env.Store, cRepos, name)
+	return store.Delete(s.env.Store, cRepos, name)
 }
 
 func (s *Service) deleteImage(c *httpx.Ctx) (any, error) {
-	if err := s.ready(); err != nil {
-		return nil, err
-	}
 	repo, ref := c.Query("repository"), c.Query("image")
-	if !imageRefRe.MatchString(ref) {
-		return nil, core.BadRequest("image must be a tag or a sha256: digest")
-	}
 	r, err := store.Get[Repository](s.env.Store, cRepos, repo)
 	if err != nil {
 		return nil, core.Errf(http.StatusNotFound, "RepositoryNotFoundException", "repository %q does not exist", repo)
@@ -386,20 +397,43 @@ func (s *Service) deleteImage(c *httpx.Ctx) (any, error) {
 	if err := c.Authorize("ecr:BatchDeleteImage", r.ARN); err != nil {
 		return nil, err
 	}
-	digest := ref
-	if !strings.HasPrefix(ref, "sha256:") {
-		resp, err := s.get(repo+"/manifests/"+ref, manifestTypes, nil)
-		if err != nil {
-			return nil, err
-		}
-		if resp.StatusCode == http.StatusNotFound {
-			return nil, core.Errf(http.StatusNotFound, "ImageNotFoundException", "image %s:%s not found", repo, ref)
-		}
-		digest = resp.Header.Get("Docker-Content-Digest")
-	}
-	if err := s.deleteDigest(repo, digest); err != nil {
+	digest, err := s.deleteRef(repo, ref)
+	if err != nil {
 		return nil, err
 	}
-	log.Printf("ecr: deleted %s@%s", repo, digest)
 	return map[string]string{"deleted": digest}, nil
+}
+
+// resolve returns the digest of a tag or digest reference, or "" if it does not exist.
+func (s *Service) resolve(repo, ref string) (string, error) {
+	if !imageRefRe.MatchString(ref) {
+		return "", core.BadRequest("image must be a tag or a sha256: digest")
+	}
+	resp, err := s.get(repo+"/manifests/"+ref, manifestTypes, nil)
+	if err != nil {
+		return "", err
+	}
+	if resp.StatusCode == http.StatusNotFound {
+		return "", nil
+	}
+	return resp.Header.Get("Docker-Content-Digest"), nil
+}
+
+// deleteRef deletes the image a tag or digest refers to.
+func (s *Service) deleteRef(repo, ref string) (string, error) {
+	if err := s.ready(); err != nil {
+		return "", err
+	}
+	digest, err := s.resolve(repo, ref)
+	if err != nil {
+		return "", err
+	}
+	if digest == "" {
+		return "", core.Errf(http.StatusNotFound, "ImageNotFoundException", "image %s:%s not found", repo, ref)
+	}
+	if err := s.deleteDigest(repo, digest); err != nil {
+		return "", err
+	}
+	log.Printf("ecr: deleted %s@%s", repo, digest)
+	return digest, nil
 }

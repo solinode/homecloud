@@ -282,6 +282,16 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	sfnSvc.RegisterAWS()
 	ec2Svc.RegisterAWS()
 	elbSvc.RegisterAWS()
+	ecrSvc.RegisterAWS()
+	ecsSvc.RegisterAWS()
+	ecsSvc.Roles, ecsSvc.Params, ecsSvc.RegistryHost = ecsRoles{iamSvc}, ssmSvc, ecrSvc.Host()
+	ecsSvc.Logs = func(group, stream string, ts []time.Time, msgs []string) error {
+		evs := make([]cloudwatch.LogEvent, len(msgs))
+		for i := range msgs {
+			evs[i] = cloudwatch.LogEvent{Timestamp: ts[i], Message: msgs[i]}
+		}
+		return cw.Append(group, stream, evs...)
+	}
 	asgSvc.RegisterAWS()
 	ec2Svc.TemplateInUse = asgSvc.TemplateInUse
 	awsHandler := &awsapi.Handler{Creds: iamSvc, Account: account, Audit: trailSvc.Record}
