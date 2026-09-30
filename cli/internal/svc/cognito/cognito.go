@@ -13,6 +13,8 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"log"
+	"math/big"
 	"net/http"
 	"regexp"
 	"slices"
@@ -57,6 +59,11 @@ type Pool struct {
 	KeyID          string         `json:"key_id"`
 	PrivateKeyCT   string         `json:"private_key_ct,omitempty"`
 	CreatedAt      time.Time      `json:"created_at"`
+	ModifiedAt     time.Time      `json:"modified_at,omitempty"`
+	Tags           core.Tags      `json:"tags,omitempty"`
+	// Extra holds AWS settings HomeCloud stores and echoes without acting on
+	// them (LambdaConfig, MfaConfiguration, AccountRecoverySetting, ...).
+	Extra map[string]any `json:"extra,omitempty"`
 }
 
 type Group struct {
@@ -73,6 +80,13 @@ type Client struct {
 	AccessTokenMinutes int       `json:"access_token_minutes"`
 	RefreshTokenDays   int       `json:"refresh_token_days"`
 	CreatedAt          time.Time `json:"created_at"`
+	ModifiedAt         time.Time `json:"modified_at,omitempty"`
+	// SecretCT is the client secret encrypted, so AWS clients can prove it with
+	// SECRET_HASH (an HMAC needs the secret itself). Clients created before it
+	// existed have only SecretHash and accept the native secret check only.
+	SecretCT string `json:"secret_ct,omitempty"`
+	// Extra holds AWS settings echoed by DescribeUserPoolClient (ExplicitAuthFlows, ...).
+	Extra map[string]any `json:"extra,omitempty"`
 }
 
 type User struct {
@@ -85,7 +99,11 @@ type User struct {
 	Enabled      bool              `json:"enabled"`
 	Groups       []string          `json:"groups"`
 	CreatedAt    time.Time         `json:"created_at"`
+	ModifiedAt   time.Time         `json:"modified_at,omitempty"`
 	LastSignIn   *time.Time        `json:"last_sign_in,omitempty"`
+	// ConfirmCode is the hash of the pending sign-up confirmation code.
+	ConfirmCode        string    `json:"confirm_code,omitempty"`
+	ConfirmCodeExpires time.Time `json:"confirm_code_expires,omitempty"`
 	// TokenVersion is embedded in every token; global sign-out increments it.
 	TokenVersion int `json:"token_version"`
 }
@@ -377,28 +395,61 @@ func (s *Service) createPool(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	if !poolName.MatchString(in.Name) {
-		return nil, core.BadRequest("pool name must be 1-128 characters")
-	}
 	pp := PasswordPolicy{MinLength: 8, RequireLowercase: true, RequireNumbers: true}
 	if in.PasswordPolicy != nil {
 		pp = *in.PasswordPolicy
-		if pp.MinLength == 0 {
-			pp.MinLength = 8
-		}
-		if pp.MinLength < 6 || pp.MinLength > 99 {
-			return nil, core.BadRequest("password_policy.min_length must be 6-99")
-		}
 	}
-	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	p, err := s.newPool(in.Name, pp, in.AutoConfirm == nil || *in.AutoConfirm, in.SelfSignUp == nil || *in.SelfSignUp, nil, nil)
 	if err != nil {
 		return nil, err
 	}
+	return s.poolView(p), nil
+}
+
+// checkPolicy validates and normalizes a password policy.
+func checkPolicy(pp *PasswordPolicy) error {
+	if pp.MinLength == 0 {
+		pp.MinLength = 8
+	}
+	if pp.MinLength < 6 || pp.MinLength > 99 {
+		return core.BadRequest("password_policy.min_length must be 6-99")
+	}
+	return nil
+}
+
+// newPool creates and stores a user pool with a fresh signing key. Shared by
+// the native API and the AWS protocol layer.
+func (s *Service) newPool(name string, pp PasswordPolicy, autoConfirm, selfSignUp bool, tags core.Tags, extra map[string]any) (Pool, error) {
+	if !poolName.MatchString(name) {
+		return Pool{}, core.BadRequest("pool name must be 1-128 characters")
+	}
+	if err := checkPolicy(&pp); err != nil {
+		return Pool{}, err
+	}
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		return Pool{}, err
+	}
 	id := core.Region + "_" + strings.ToUpper(core.RandHex(9))
-	p := Pool{ID: id, ARN: s.env.ARN("cognito-idp", "userpool/"+id), Name: in.Name, PasswordPolicy: pp, AutoConfirm: in.AutoConfirm == nil || *in.AutoConfirm,
-		SelfSignUp: in.SelfSignUp == nil || *in.SelfSignUp, Groups: []Group{}, KeyID: core.RandHex(16),
-		PrivateKeyCT: s.secrets.Encrypt(x509.MarshalPKCS1PrivateKey(key)), CreatedAt: core.Now()}
-	return s.poolView(p), store.Put(s.env.Store, cPools, id, p)
+	p := Pool{ID: id, ARN: s.env.ARN("cognito-idp", "userpool/"+id), Name: name, PasswordPolicy: pp, AutoConfirm: autoConfirm,
+		SelfSignUp: selfSignUp, Groups: []Group{}, KeyID: core.RandHex(16), PrivateKeyCT: s.secrets.Encrypt(x509.MarshalPKCS1PrivateKey(key)),
+		CreatedAt: core.Now(), ModifiedAt: core.Now(), Tags: tags, Extra: extra}
+	return p, store.Put(s.env.Store, cPools, id, p)
+}
+
+// modPool updates a pool under the store's lock.
+func (s *Service) modPool(id string, fn func(*Pool) error) (Pool, error) {
+	p, err := store.Update(s.env.Store, cPools, id, func(p *Pool) error {
+		if err := fn(p); err != nil {
+			return err
+		}
+		p.ModifiedAt = core.Now()
+		return nil
+	})
+	if err == store.ErrNotFound {
+		return p, core.Errf(http.StatusNotFound, "ResourceNotFoundException", "user pool %q does not exist", id)
+	}
+	return p, err
 }
 
 func (s *Service) getPool(c *httpx.Ctx) (any, error) {
@@ -418,14 +469,11 @@ func (s *Service) updatePool(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	p, err := store.Update(s.env.Store, cPools, c.Param("pool"), func(p *Pool) error {
+	p, err := s.modPool(c.Param("pool"), func(p *Pool) error {
 		if in.PasswordPolicy != nil {
 			p.PasswordPolicy = *in.PasswordPolicy
-			if p.PasswordPolicy.MinLength == 0 {
-				p.PasswordPolicy.MinLength = 8
-			}
-			if p.PasswordPolicy.MinLength < 6 || p.PasswordPolicy.MinLength > 99 {
-				return core.BadRequest("password_policy.min_length must be 6-99")
+			if err := checkPolicy(&p.PasswordPolicy); err != nil {
+				return err
 			}
 		}
 		if in.AutoConfirm != nil {
@@ -436,9 +484,6 @@ func (s *Service) updatePool(c *httpx.Ctx) (any, error) {
 		}
 		return nil
 	})
-	if err == store.ErrNotFound {
-		return nil, core.Errf(http.StatusNotFound, "ResourceNotFoundException", "user pool %q does not exist", c.Param("pool"))
-	}
 	if err != nil {
 		return nil, err
 	}
@@ -446,9 +491,13 @@ func (s *Service) updatePool(c *httpx.Ctx) (any, error) {
 }
 
 func (s *Service) deletePool(c *httpx.Ctx) (any, error) {
-	id := c.Param("pool")
+	return nil, s.removePool(c.Param("pool"))
+}
+
+// removePool deletes a pool with its users, clients and refresh tokens.
+func (s *Service) removePool(id string) error {
 	if _, err := s.pool(id); err != nil {
-		return nil, err
+		return err
 	}
 	for _, u := range store.List[User](s.env.Store, cUsers) {
 		if u.PoolID == id {
@@ -467,7 +516,7 @@ func (s *Service) deletePool(c *httpx.Ctx) (any, error) {
 	s.mu.Lock()
 	delete(s.keys, id)
 	s.mu.Unlock()
-	return nil, store.Delete(s.env.Store, cPools, id)
+	return store.Delete(s.env.Store, cPools, id)
 }
 
 func (s *Service) listClients(c *httpx.Ctx) (any, error) {
@@ -491,35 +540,53 @@ func (s *Service) createClient(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	if _, err := s.pool(c.Param("pool")); err != nil {
+	cl, secret, err := s.newClient(c.Param("pool"), in.Name, in.GenerateSecret, in.AccessTokenMinutes, in.RefreshTokenDays, nil)
+	if err != nil {
 		return nil, err
 	}
-	if in.AccessTokenMinutes == 0 {
-		in.AccessTokenMinutes = 60
-	}
-	if in.RefreshTokenDays == 0 {
-		in.RefreshTokenDays = 30
-	}
-	if in.AccessTokenMinutes < 5 || in.AccessTokenMinutes > 1440 || in.RefreshTokenDays < 1 || in.RefreshTokenDays > 3650 {
-		return nil, core.BadRequest("access_token_minutes must be 5-1440 and refresh_token_days 1-3650")
-	}
-	cl := Client{ID: strings.ToLower(core.NewSecret(26)), PoolID: c.Param("pool"), Name: in.Name, AccessTokenMinutes: in.AccessTokenMinutes,
-		RefreshTokenDays: in.RefreshTokenDays, CreatedAt: core.Now()}
 	out := map[string]any{"id": cl.ID, "name": cl.Name, "access_token_minutes": cl.AccessTokenMinutes, "refresh_token_days": cl.RefreshTokenDays}
-	if in.GenerateSecret {
-		secret := core.NewSecret(48)
-		cl.SecretHash = hashToken(secret)
+	if secret != "" {
 		out["client_secret"] = secret // shown once
 	}
-	return out, store.Put(s.env.Store, cClients, cl.ID, cl)
+	return out, nil
+}
+
+// newClient creates an app client and returns it with its secret (when
+// generated). Zero token lifetimes select the defaults.
+func (s *Service) newClient(poolID, name string, genSecret bool, accessMinutes, refreshDays int, extra map[string]any) (Client, string, error) {
+	if _, err := s.pool(poolID); err != nil {
+		return Client{}, "", err
+	}
+	if accessMinutes == 0 {
+		accessMinutes = 60
+	}
+	if refreshDays == 0 {
+		refreshDays = 30
+	}
+	if accessMinutes < 5 || accessMinutes > 1440 || refreshDays < 1 || refreshDays > 3650 {
+		return Client{}, "", core.BadRequest("access_token_minutes must be 5-1440 and refresh_token_days 1-3650")
+	}
+	cl := Client{ID: strings.ToLower(core.NewSecret(26)), PoolID: poolID, Name: name, AccessTokenMinutes: accessMinutes,
+		RefreshTokenDays: refreshDays, CreatedAt: core.Now(), ModifiedAt: core.Now(), Extra: extra}
+	secret := ""
+	if genSecret {
+		secret = core.NewSecret(48)
+		cl.SecretHash = hashToken(secret)
+		cl.SecretCT = s.secrets.Encrypt([]byte(secret))
+	}
+	return cl, secret, store.Put(s.env.Store, cClients, cl.ID, cl)
 }
 
 func (s *Service) deleteClient(c *httpx.Ctx) (any, error) {
-	cl, err := store.Get[Client](s.env.Store, cClients, c.Param("client"))
-	if err != nil || cl.PoolID != c.Param("pool") {
-		return nil, core.Errf(http.StatusNotFound, "ResourceNotFoundException", "client %q does not exist", c.Param("client"))
+	return nil, s.removeClient(c.Param("pool"), c.Param("client"))
+}
+
+func (s *Service) removeClient(poolID, clientID string) error {
+	cl, err := store.Get[Client](s.env.Store, cClients, clientID)
+	if err != nil || cl.PoolID != poolID {
+		return core.Errf(http.StatusNotFound, "ResourceNotFoundException", "client %q does not exist", clientID)
 	}
-	return nil, store.Delete(s.env.Store, cClients, cl.ID)
+	return store.Delete(s.env.Store, cClients, cl.ID)
 }
 
 func (s *Service) listUsers(c *httpx.Ctx) (any, error) {
@@ -579,7 +646,7 @@ func (s *Service) newUser(p Pool, username, password string, attrs map[string]st
 	}
 	h2 := core.RandHex(32)
 	u := User{PoolID: p.ID, Username: username, Sub: h2[0:8] + "-" + h2[8:12] + "-" + h2[12:16] + "-" + h2[16:20] + "-" + h2[20:32],
-		Attributes: attrs, PasswordHash: string(h), Status: status, Enabled: true, Groups: []string{}, CreatedAt: core.Now()}
+		Attributes: attrs, PasswordHash: string(h), Status: status, Enabled: true, Groups: []string{}, CreatedAt: core.Now(), ModifiedAt: core.Now()}
 	return u, store.Put(s.env.Store, cUsers, userKey(p.ID, username), u)
 }
 
@@ -598,27 +665,9 @@ func (s *Service) adminCreateUser(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	generated := ""
-	if in.Password == "" {
-		// Satisfy any policy: long enough, with every character class.
-		generated = core.NewSecret(max(p.PasswordPolicy.MinLength, 12)) + "aA1!"
-		in.Password, in.TemporaryPassword = generated, true
-	}
-	status := "CONFIRMED"
-	if in.TemporaryPassword {
-		status = "FORCE_CHANGE_PASSWORD"
-	}
-	for _, g := range in.Groups {
-		if !slices.ContainsFunc(p.Groups, func(x Group) bool { return x.Name == g }) {
-			return nil, core.NotFound("group", g)
-		}
-	}
-	u, err := s.newUser(p, in.Username, in.Password, in.Attributes, status)
+	u, generated, err := s.adminCreate(p, in.Username, in.Password, in.TemporaryPassword, in.Attributes, in.Groups)
 	if err != nil {
 		return nil, err
-	}
-	if len(in.Groups) > 0 {
-		u, _ = store.Update(s.env.Store, cUsers, userKey(p.ID, u.Username), func(x *User) error { x.Groups = in.Groups; return nil })
 	}
 	v := u.view()
 	if generated != "" {
@@ -627,10 +676,43 @@ func (s *Service) adminCreateUser(c *httpx.Ctx) (any, error) {
 	return v, nil
 }
 
-func (s *Service) userOf(c *httpx.Ctx) (User, error) {
-	u, err := store.Get[User](s.env.Store, cUsers, userKey(c.Param("pool"), c.Param("user")))
+// adminCreate creates a confirmed user, or one that must change the
+// temporary password at first sign-in. Without a password a temporary one is
+// generated and returned.
+func (s *Service) adminCreate(p Pool, username, password string, temporary bool, attrs map[string]string, groups []string) (User, string, error) {
+	generated := ""
+	if password == "" {
+		// Satisfy any policy: long enough, with every character class.
+		generated = core.NewSecret(max(p.PasswordPolicy.MinLength, 12)) + "aA1!"
+		password, temporary = generated, true
+	}
+	status := "CONFIRMED"
+	if temporary {
+		status = "FORCE_CHANGE_PASSWORD"
+	}
+	for _, g := range groups {
+		if !slices.ContainsFunc(p.Groups, func(x Group) bool { return x.Name == g }) {
+			return User{}, "", core.NotFound("group", g)
+		}
+	}
+	u, err := s.newUser(p, username, password, attrs, status)
 	if err != nil {
-		return u, core.Errf(http.StatusNotFound, "UserNotFoundException", "user %q does not exist", c.Param("user"))
+		return u, "", err
+	}
+	if len(groups) > 0 {
+		u, _ = store.Update(s.env.Store, cUsers, userKey(p.ID, u.Username), func(x *User) error { x.Groups = groups; return nil })
+	}
+	return u, generated, nil
+}
+
+func (s *Service) userOf(c *httpx.Ctx) (User, error) {
+	return s.getUser(c.Param("pool"), c.Param("user"))
+}
+
+func (s *Service) getUser(pool, name string) (User, error) {
+	u, err := store.Get[User](s.env.Store, cUsers, userKey(pool, name))
+	if err != nil {
+		return u, core.Errf(http.StatusNotFound, "UserNotFoundException", "user %q does not exist", name)
 	}
 	return u, nil
 }
@@ -644,19 +726,33 @@ func (s *Service) adminGetUser(c *httpx.Ctx) (any, error) {
 }
 
 func (s *Service) adminDeleteUser(c *httpx.Ctx) (any, error) {
-	u, err := s.userOf(c)
+	return nil, s.removeUser(c.Param("pool"), c.Param("user"))
+}
+
+func (s *Service) removeUser(pool, name string) error {
+	u, err := s.getUser(pool, name)
 	if err != nil {
-		return nil, err
+		return err
 	}
 	s.revokeAll(u.PoolID, u.Username)
-	return nil, store.Delete(s.env.Store, cUsers, userKey(u.PoolID, u.Username))
+	return store.Delete(s.env.Store, cUsers, userKey(u.PoolID, u.Username))
+}
+
+func (s *Service) modUser(pool, name string, fn func(*User) error) (User, error) {
+	if _, err := s.getUser(pool, name); err != nil {
+		return User{}, err
+	}
+	return store.Update(s.env.Store, cUsers, userKey(pool, name), func(u *User) error {
+		if err := fn(u); err != nil {
+			return err
+		}
+		u.ModifiedAt = core.Now()
+		return nil
+	})
 }
 
 func (s *Service) updateUser(c *httpx.Ctx, fn func(*User) error) (any, error) {
-	if _, err := s.userOf(c); err != nil {
-		return nil, err
-	}
-	u, err := store.Update(s.env.Store, cUsers, userKey(c.Param("pool"), c.Param("user")), fn)
+	u, err := s.modUser(c.Param("pool"), c.Param("user"), fn)
 	if err != nil {
 		return nil, err
 	}
@@ -673,34 +769,47 @@ func (s *Service) adminUpdateUser(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	p, err := s.pool(c.Param("pool"))
+	u, err := s.patchUser(c.Param("pool"), c.Param("user"), in.Attributes, in.Enabled, in.Groups, in.Confirm)
 	if err != nil {
 		return nil, err
 	}
-	if err := checkAttrs(in.Attributes); err != nil {
-		return nil, err
+	return u.view(), nil
+}
+
+// patchUser changes attributes (an empty value deletes one), the enabled
+// flag, group membership, and confirms an unconfirmed user.
+func (s *Service) patchUser(pool, name string, attrs map[string]string, enabled *bool, groups *[]string, confirm bool) (User, error) {
+	p, err := s.pool(pool)
+	if err != nil {
+		return User{}, err
 	}
-	return s.updateUser(c, func(u *User) error {
-		for k, v := range in.Attributes {
+	if err := checkAttrs(attrs); err != nil {
+		return User{}, err
+	}
+	return s.modUser(pool, name, func(u *User) error {
+		if u.Attributes == nil {
+			u.Attributes = map[string]string{}
+		}
+		for k, v := range attrs {
 			if v == "" {
 				delete(u.Attributes, k)
 			} else {
 				u.Attributes[k] = v
 			}
 		}
-		if in.Enabled != nil {
-			u.Enabled = *in.Enabled
+		if enabled != nil {
+			u.Enabled = *enabled
 		}
-		if in.Groups != nil {
-			for _, g := range *in.Groups {
+		if groups != nil {
+			for _, g := range *groups {
 				if !slices.ContainsFunc(p.Groups, func(x Group) bool { return x.Name == g }) {
 					return core.NotFound("group", g)
 				}
 			}
-			u.Groups = *in.Groups
+			u.Groups = slices.Clone(*groups)
 		}
-		if in.Confirm && u.Status == "UNCONFIRMED" {
-			u.Status = "CONFIRMED"
+		if confirm && u.Status == "UNCONFIRMED" {
+			u.Status, u.ConfirmCode = "CONFIRMED", ""
 		}
 		return nil
 	})
@@ -714,20 +823,30 @@ func (s *Service) adminSetPassword(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	p, err := s.pool(c.Param("pool"))
+	u, err := s.setPassword(c.Param("pool"), c.Param("user"), in.Password, in.Permanent)
 	if err != nil {
 		return nil, err
 	}
-	if err := p.PasswordPolicy.check(in.Password); err != nil {
-		return nil, err
-	}
-	h, err := bcrypt.GenerateFromPassword([]byte(in.Password), bcrypt.DefaultCost)
+	return u.view(), nil
+}
+
+// setPassword replaces a user's password: permanent, or temporary (the user
+// must choose a new one at the next sign-in).
+func (s *Service) setPassword(pool, name, password string, permanent bool) (User, error) {
+	p, err := s.pool(pool)
 	if err != nil {
-		return nil, err
+		return User{}, err
 	}
-	return s.updateUser(c, func(u *User) error {
+	if err := p.PasswordPolicy.check(password); err != nil {
+		return User{}, err
+	}
+	h, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	if err != nil {
+		return User{}, err
+	}
+	return s.modUser(pool, name, func(u *User) error {
 		u.PasswordHash = string(h)
-		if in.Permanent {
+		if permanent {
 			u.Status = "CONFIRMED"
 		} else {
 			u.Status = "FORCE_CHANGE_PASSWORD"
@@ -760,40 +879,47 @@ func (s *Service) createGroup(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&g); err != nil {
 		return nil, err
 	}
-	if !poolName.MatchString(g.Name) {
-		return nil, core.BadRequest("invalid group name")
-	}
-	p, err := store.Update(s.env.Store, cPools, c.Param("pool"), func(p *Pool) error {
-		if slices.ContainsFunc(p.Groups, func(x Group) bool { return x.Name == g.Name }) {
-			return core.Conflict("group %q already exists", g.Name)
-		}
-		p.Groups = append(p.Groups, g)
-		return nil
-	})
-	if err == store.ErrNotFound {
-		return nil, core.Errf(http.StatusNotFound, "ResourceNotFoundException", "user pool %q does not exist", c.Param("pool"))
-	}
+	p, err := s.newGroup(c.Param("pool"), g)
 	if err != nil {
 		return nil, err
 	}
 	return s.poolView(p), nil
 }
 
+// newGroup adds a group to a pool.
+func (s *Service) newGroup(pool string, g Group) (Pool, error) {
+	if !poolName.MatchString(g.Name) {
+		return Pool{}, core.BadRequest("invalid group name")
+	}
+	return s.modPool(pool, func(p *Pool) error {
+		if slices.ContainsFunc(p.Groups, func(x Group) bool { return x.Name == g.Name }) {
+			return core.Errf(http.StatusConflict, "GroupExistsException", "group %q already exists", g.Name)
+		}
+		p.Groups = append(p.Groups, g)
+		return nil
+	})
+}
+
 func (s *Service) deleteGroup(c *httpx.Ctx) (any, error) {
-	g := c.Param("group")
-	p, err := store.Update(s.env.Store, cPools, c.Param("pool"), func(p *Pool) error {
+	p, err := s.removeGroup(c.Param("pool"), c.Param("group"))
+	if err != nil {
+		return nil, err
+	}
+	return s.poolView(p), nil
+}
+
+// removeGroup deletes a group and its memberships.
+func (s *Service) removeGroup(pool, g string) (Pool, error) {
+	p, err := s.modPool(pool, func(p *Pool) error {
 		n := len(p.Groups)
 		p.Groups = slices.DeleteFunc(p.Groups, func(x Group) bool { return x.Name == g })
 		if len(p.Groups) == n {
-			return core.NotFound("group", g)
+			return core.Errf(http.StatusNotFound, "ResourceNotFoundException", "group %q does not exist", g)
 		}
 		return nil
 	})
-	if err == store.ErrNotFound {
-		return nil, core.Errf(http.StatusNotFound, "ResourceNotFoundException", "user pool %q does not exist", c.Param("pool"))
-	}
 	if err != nil {
-		return nil, err
+		return p, err
 	}
 	for _, u := range store.List[User](s.env.Store, cUsers) {
 		if u.PoolID == p.ID && slices.Contains(u.Groups, g) {
@@ -803,7 +929,7 @@ func (s *Service) deleteGroup(c *httpx.Ctx) (any, error) {
 			})
 		}
 	}
-	return s.poolView(p), nil
+	return p, nil
 }
 
 // ---- public (application-facing) routes ----
@@ -880,15 +1006,27 @@ func (s *Service) signUp(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	p, err := s.pool(c.Param("pool"))
+	u, err := s.selfSignUp(c.Param("pool"), in)
 	if err != nil {
 		return nil, err
 	}
+	return map[string]any{"user_sub": u.Sub, "user_confirmed": u.Status == "CONFIRMED"}, nil
+}
+
+// selfSignUp registers a user without administrator credentials. The user is
+// confirmed at once when the pool auto-confirms; otherwise a confirmation code
+// is issued (see issueCode) and the user must confirm it or be confirmed by an
+// administrator before signing in.
+func (s *Service) selfSignUp(poolID string, in authInput) (User, error) {
+	p, err := s.pool(poolID)
+	if err != nil {
+		return User{}, err
+	}
 	if !p.SelfSignUp {
-		return nil, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "self sign-up is disabled for this user pool")
+		return User{}, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "self sign-up is disabled for this user pool")
 	}
 	if _, err := s.client(p, in.ClientID, in.ClientSecret); err != nil {
-		return nil, err
+		return User{}, err
 	}
 	status := "UNCONFIRMED"
 	if p.AutoConfirm {
@@ -896,9 +1034,59 @@ func (s *Service) signUp(c *httpx.Ctx) (any, error) {
 	}
 	u, err := s.newUser(p, in.Username, in.Password, in.Attributes, status)
 	if err != nil {
-		return nil, err
+		return u, err
 	}
-	return map[string]any{"user_sub": u.Sub, "user_confirmed": u.Status == "CONFIRMED"}, nil
+	if status == "UNCONFIRMED" {
+		if err := s.issueCode(p.ID, u.Username); err != nil {
+			return u, err
+		}
+	}
+	return u, nil
+}
+
+// issueCode creates a sign-up confirmation code for the user. HomeCloud sends
+// no e-mail or SMS, so the code is written to the server log instead.
+func (s *Service) issueCode(pool, username string) error {
+	n, err := rand.Int(rand.Reader, big.NewInt(1000000))
+	if err != nil {
+		return err
+	}
+	code := fmt.Sprintf("%06d", n.Int64())
+	if _, err := s.modUser(pool, username, func(u *User) error {
+		u.ConfirmCode, u.ConfirmCodeExpires = hashToken(code), time.Now().Add(24*time.Hour)
+		return nil
+	}); err != nil {
+		return err
+	}
+	log.Printf("cognito: confirmation code for user %q in pool %s is %s (nothing is e-mailed; AdminConfirmSignUp confirms without it)", username, pool, code)
+	return nil
+}
+
+// confirmSignUp confirms a self-registered user with the code from issueCode.
+func (s *Service) confirmSignUp(poolID, username, code string) error {
+	if _, err := s.pool(poolID); err != nil {
+		return err
+	}
+	key := poolID + "/confirm/" + strings.ToLower(username)
+	if !s.attempt(key) {
+		return core.Errf(http.StatusTooManyRequests, "TooManyRequestsException", "too many failed attempts; try again later")
+	}
+	u, err := s.getUser(poolID, username)
+	if err != nil {
+		return err
+	}
+	if u.Status != "UNCONFIRMED" {
+		return core.Errf(http.StatusBadRequest, "NotAuthorizedException", "user cannot be confirmed. Current status is %s", u.Status)
+	}
+	if u.ConfirmCode == "" || time.Now().After(u.ConfirmCodeExpires) {
+		return core.Errf(http.StatusBadRequest, "ExpiredCodeException", "the confirmation code has expired; request a new one")
+	}
+	if subtle.ConstantTimeCompare([]byte(u.ConfirmCode), []byte(hashToken(strings.TrimSpace(code)))) != 1 {
+		return core.Errf(http.StatusBadRequest, "CodeMismatchException", "invalid verification code provided")
+	}
+	s.succeeded(key)
+	_, err = s.modUser(poolID, username, func(u *User) error { u.Status, u.ConfirmCode = "CONFIRMED", ""; return nil })
+	return err
 }
 
 func (s *Service) auth(c *httpx.Ctx) (any, error) {
@@ -906,7 +1094,14 @@ func (s *Service) auth(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	p, err := s.pool(c.Param("pool"))
+	return s.authenticate(c.Param("pool"), in, httpx.ClientIP(c.R))
+}
+
+// authenticate runs a sign-in flow (USER_PASSWORD_AUTH or REFRESH_TOKEN_AUTH).
+// It returns *tokens, or a map with "challenge" and "session" when the user
+// must first choose a new password.
+func (s *Service) authenticate(poolID string, in authInput, ip string) (any, error) {
+	p, err := s.pool(poolID)
 	if err != nil {
 		return nil, err
 	}
@@ -917,7 +1112,7 @@ func (s *Service) auth(c *httpx.Ctx) (any, error) {
 	deny := core.Errf(http.StatusBadRequest, "NotAuthorizedException", "incorrect username or password")
 	switch in.Flow {
 	case "", "USER_PASSWORD_AUTH":
-		tk := p.ID + "/" + strings.ToLower(in.Username) + "/" + httpx.ClientIP(c.R)
+		tk := p.ID + "/" + strings.ToLower(in.Username) + "/" + ip
 		if !s.attempt(tk) {
 			return nil, core.Errf(http.StatusTooManyRequests, "TooManyRequestsException", "too many failed attempts; try again later")
 		}
@@ -963,12 +1158,19 @@ func (s *Service) respond(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
-	p, err := s.pool(c.Param("pool"))
+	return s.respondChallenge(c.Param("pool"), in)
+}
+
+// respondChallenge answers the NEW_PASSWORD_REQUIRED challenge and signs the
+// user in.
+func (s *Service) respondChallenge(poolID string, in authInput) (any, error) {
+	p, err := s.pool(poolID)
 	if err != nil {
 		return nil, err
 	}
 	ch, err := store.Get[challenge](s.env.Store, cSessions, hashToken(in.Session))
-	if err != nil || ch.PoolID != p.ID || time.Now().After(ch.Expires) {
+	if err != nil || ch.PoolID != p.ID || time.Now().After(ch.Expires) ||
+		(in.ClientID != "" && in.ClientID != ch.ClientID) || (in.Username != "" && !strings.EqualFold(in.Username, ch.Username)) {
 		return nil, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "invalid or expired session")
 	}
 	if err := p.PasswordPolicy.check(in.NewPassword); err != nil {
@@ -998,11 +1200,39 @@ func (s *Service) respond(c *httpx.Ctx) (any, error) {
 
 // bearer verifies the request's access token and returns its user.
 func (s *Service) bearer(c *httpx.Ctx) (Pool, User, error) {
-	p, err := s.pool(c.Param("pool"))
+	return s.verifyAccess(c.Param("pool"), strings.TrimPrefix(c.R.Header.Get("Authorization"), "Bearer "))
+}
+
+// PoolOfToken reads the user pool ID from a token's issuer without trusting
+// the token; verify it with verifyAccess.
+func (s *Service) poolOfToken(token string) string {
+	parts := strings.Split(token, ".")
+	if len(parts) != 3 {
+		return ""
+	}
+	b, err := b64.DecodeString(parts[1])
+	if err != nil {
+		return ""
+	}
+	var c struct {
+		Iss string `json:"iss"`
+	}
+	if json.Unmarshal(b, &c) != nil {
+		return ""
+	}
+	i := strings.LastIndex(c.Iss, "/cognito/")
+	if i < 0 {
+		return ""
+	}
+	return c.Iss[i+len("/cognito/"):]
+}
+
+// verifyAccess verifies an access token of the pool and returns its user.
+func (s *Service) verifyAccess(poolID, tok string) (Pool, User, error) {
+	p, err := s.pool(poolID)
 	if err != nil {
 		return p, User{}, err
 	}
-	tok := strings.TrimPrefix(c.R.Header.Get("Authorization"), "Bearer ")
 	claims, err := s.VerifyToken(p.ID, tok, "")
 	if err != nil {
 		return p, User{}, core.Errf(http.StatusUnauthorized, "NotAuthorizedException", "%v", err)
@@ -1041,23 +1271,28 @@ func (s *Service) changePassword(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	return nil, s.changePasswordOf(p, u, in.Old, in.New)
+}
+
+// changePasswordOf sets a new password after checking the old one.
+func (s *Service) changePasswordOf(p Pool, u User, oldPw, newPw string) error {
 	tk := p.ID + "/change/" + u.Sub
 	if !s.attempt(tk) {
-		return nil, core.Errf(http.StatusTooManyRequests, "TooManyRequestsException", "too many failed attempts; try again later")
+		return core.Errf(http.StatusTooManyRequests, "TooManyRequestsException", "too many failed attempts; try again later")
 	}
-	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(in.Old)) != nil {
-		return nil, core.Errf(http.StatusBadRequest, "NotAuthorizedException", "incorrect password")
+	if bcrypt.CompareHashAndPassword([]byte(u.PasswordHash), []byte(oldPw)) != nil {
+		return core.Errf(http.StatusBadRequest, "NotAuthorizedException", "incorrect password")
 	}
 	s.succeeded(tk)
-	if err := p.PasswordPolicy.check(in.New); err != nil {
-		return nil, err
+	if err := p.PasswordPolicy.check(newPw); err != nil {
+		return err
 	}
-	h, err := bcrypt.GenerateFromPassword([]byte(in.New), bcrypt.DefaultCost)
+	h, err := bcrypt.GenerateFromPassword([]byte(newPw), bcrypt.DefaultCost)
 	if err != nil {
-		return nil, err
+		return err
 	}
-	_, err = store.Update(s.env.Store, cUsers, userKey(p.ID, u.Username), func(x *User) error { x.PasswordHash = string(h); return nil })
-	return nil, err
+	_, err = s.modUser(p.ID, u.Username, func(x *User) error { x.PasswordHash = string(h); return nil })
+	return err
 }
 
 func (s *Service) signOut(c *httpx.Ctx) (any, error) {
