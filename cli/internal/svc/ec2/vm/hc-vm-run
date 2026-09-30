@@ -1,0 +1,51 @@
+#!/bin/sh
+# Entrypoint of a VM container: prepares the instance's disk, the cloud-init
+# seed and the guest's network (passt), then becomes QEMU.
+#
+#   /images   image cache volume (read-only): the base cloud images
+#   /vm       the instance's disk volume: disk.qcow2, seed.iso, efivars.fd
+#   /hc/seed  cloud-init NoCloud files, written by HomeCloud before the first start
+#
+# Environment: HC_VM_BASE (file in /images), HC_VM_DISK_GB, HC_VM_ARCH
+# (aarch64|x86_64), HC_VM_DNS (comma separated resolvers for the guest).
+# The arguments are the QEMU command line.
+set -eu
+
+disk=/vm/disk.qcow2
+if [ ! -f "$disk" ]; then
+  echo "[homecloud] creating disk ($HC_VM_DISK_GB GiB) from $HC_VM_BASE"
+  qemu-img create -q -f qcow2 -b "/images/$HC_VM_BASE" -F qcow2 "$disk.tmp" "${HC_VM_DISK_GB}G"
+  mv "$disk.tmp" "$disk"
+fi
+
+# The seed is rebuilt on every start so changed user data applies to the next boot.
+if [ -d /hc/seed ]; then
+  rm -f /vm/seed.iso
+  genisoimage -quiet -output /vm/seed.iso -volid cidata -joliet -rock /hc/seed/* >/dev/null 2>&1
+fi
+
+if [ "$HC_VM_ARCH" = "aarch64" ] && [ ! -f /vm/efivars.fd ]; then
+  cp /usr/share/AAVMF/AAVMF_VARS.fd /vm/efivars.fd
+fi
+
+# passt gives the guest this container's address, gateway and routes, and
+# forwards every inbound TCP and UDP port to it.
+#
+# The guest resolves through HC_VM_DNS (the VPC's resolver address, base+2 as in
+# AWS); passt relays those queries to Docker's resolver in this container's
+# namespace (127.0.0.11), so names resolve as they do for container instances.
+dns=""
+if [ -n "${HC_VM_DNS:-}" ]; then dns="-D $HC_VM_DNS --dns-forward $HC_VM_DNS --dns-host 127.0.0.11"; fi
+rm -f /run/passt.sock /run/qmp.sock
+# shellcheck disable=SC2086
+passt -f -s /run/passt.sock -t all -u all $dns >/run/passt.log 2>&1 &
+n=0
+while [ ! -S /run/passt.sock ] && [ $n -lt 50 ]; do n=$((n+1)); sleep 0.1; done
+if [ ! -S /run/passt.sock ]; then
+  echo "[homecloud] passt did not start:" >&2
+  cat /run/passt.log >&2
+  exit 1
+fi
+
+echo "[homecloud] starting the virtual machine"
+exec "$@"

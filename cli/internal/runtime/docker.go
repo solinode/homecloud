@@ -74,27 +74,29 @@ type Mount struct {
 }
 
 type RunSpec struct {
-	Name       string
-	Image      string
-	Cmd        []string
-	Entrypoint []string
-	Env        map[string]string
-	Labels     map[string]string
-	NanoCPUs   int64
-	MemoryMB   int64
-	Ports      []Port
-	Mounts     []Mount
-	Network    string
-	IP         string
-	Aliases    []string
-	Restart    string // "", "unless-stopped", "always"
-	WorkingDir string
-	User       string // run as this user (e.g. "0"); empty uses the image's default
-	Hostname   string
-	DNS        []string // upstream servers for Docker's embedded DNS
-	ExtraHosts []string // "name:ip" entries for /etc/hosts ("host-gateway" is the Docker host)
-	CapAdd     []string // extra Linux capabilities (e.g. NET_ADMIN)
-	Start      bool
+	Name        string
+	Image       string
+	Cmd         []string
+	Entrypoint  []string
+	Env         map[string]string
+	Labels      map[string]string
+	NanoCPUs    int64
+	MemoryMB    int64
+	Ports       []Port
+	Mounts      []Mount
+	Network     string
+	IP          string
+	Aliases     []string
+	Restart     string // "", "unless-stopped", "always"
+	WorkingDir  string
+	User        string // run as this user (e.g. "0"); empty uses the image's default
+	Hostname    string
+	DNS         []string // upstream servers for Docker's embedded DNS
+	ExtraHosts  []string // "name:ip" entries for /etc/hosts ("host-gateway" is the Docker host)
+	CapAdd      []string // extra Linux capabilities (e.g. NET_ADMIN)
+	Devices     []string // host devices passed through (e.g. /dev/kvm)
+	SecurityOpt []string // e.g. seccomp=unconfined
+	Start       bool
 }
 
 // HostAlias makes the Docker host reachable from containers as host.docker.internal
@@ -159,6 +161,10 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 		hc.CPUPeriod, hc.CPUQuota = 100000, s.NanoCPUs/10000
 	}
 	hc.CapAdd = s.CapAdd
+	hc.SecurityOpt = s.SecurityOpt
+	for _, dev := range s.Devices {
+		hc.Devices = append(hc.Devices, docker.Device{PathOnHost: dev, PathInContainer: dev, CgroupPermissions: "rwm"})
+	}
 	if s.Restart != "" {
 		hc.RestartPolicy = docker.RestartPolicy{Name: s.Restart}
 	}
