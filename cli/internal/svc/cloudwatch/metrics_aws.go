@@ -31,25 +31,28 @@ func (s *Service) registerMetricsAWS() {
 			"AlreadyExists":    "InvalidParameterValue",
 		},
 		Ops: map[string]awsapi.Op{
-			"PutMetricData":           s.awsPutMetricData,
-			"GetMetricStatistics":     s.awsGetMetricStatistics,
-			"GetMetricData":           s.awsGetMetricData,
-			"ListMetrics":             s.awsListMetrics,
-			"PutMetricAlarm":          s.awsPutMetricAlarm,
-			"DescribeAlarms":          s.awsDescribeAlarms,
-			"DescribeAlarmsForMetric": s.awsDescribeAlarmsForMetric,
-			"DeleteAlarms":            s.awsDeleteAlarms,
-			"SetAlarmState":           s.awsSetAlarmState,
-			"EnableAlarmActions":      s.awsEnableAlarmActions,
-			"DisableAlarmActions":     s.awsDisableAlarmActions,
-			"DescribeAlarmHistory":    s.awsDescribeAlarmHistory,
-			"TagResource":             s.awsCWTagResource,
-			"UntagResource":           s.awsCWUntagResource,
-			"ListTagsForResource":     s.awsCWListTags,
-			"PutDashboard":            s.awsPutDashboard,
-			"GetDashboard":            s.awsGetDashboard,
-			"ListDashboards":          s.awsListDashboards,
-			"DeleteDashboards":        s.awsDeleteDashboards,
+			"PutMetricData":            s.awsPutMetricData,
+			"GetMetricStatistics":      s.awsGetMetricStatistics,
+			"GetMetricData":            s.awsGetMetricData,
+			"ListMetrics":              s.awsListMetrics,
+			"PutMetricAlarm":           s.awsPutMetricAlarm,
+			"DescribeAlarms":           s.awsDescribeAlarms,
+			"DescribeAlarmsForMetric":  s.awsDescribeAlarmsForMetric,
+			"DeleteAlarms":             s.awsDeleteAlarms,
+			"SetAlarmState":            s.awsSetAlarmState,
+			"EnableAlarmActions":       s.awsEnableAlarmActions,
+			"DisableAlarmActions":      s.awsDisableAlarmActions,
+			"PutAnomalyDetector":       s.awsPutAnomalyDetector,
+			"DescribeAnomalyDetectors": s.awsDescribeAnomalyDetectors,
+			"DeleteAnomalyDetector":    s.awsDeleteAnomalyDetector,
+			"DescribeAlarmHistory":     s.awsDescribeAlarmHistory,
+			"TagResource":              s.awsCWTagResource,
+			"UntagResource":            s.awsCWUntagResource,
+			"ListTagsForResource":      s.awsCWListTags,
+			"PutDashboard":             s.awsPutDashboard,
+			"GetDashboard":             s.awsGetDashboard,
+			"ListDashboards":           s.awsListDashboards,
+			"DeleteDashboards":         s.awsDeleteDashboards,
 		},
 	})
 }
@@ -402,7 +405,9 @@ func (s *Service) awsGetMetricData(q *awsapi.Req) (any, error) {
 		}
 		for _, ts := range series {
 			r := metricDataResult{Id: id, Label: ts.label, Timestamps: []awsapi.Time{}, Values: []float64{}, StatusCode: "Complete"}
-			if mq.Label != "" {
+			if mq.Label != "" && ts.band != "" {
+				r.Label = mq.Label + map[string]string{"upper": " (Upper)", "lower": " (Lower)"}[ts.band]
+			} else if mq.Label != "" {
 				r.Label = mq.Label
 			}
 			idx := make([]int, len(ts.t))
@@ -534,7 +539,8 @@ type awsMetricAlarm struct {
 	Unit                               string            `json:",omitempty"`
 	EvaluationPeriods                  int               `json:",omitempty"`
 	DatapointsToAlarm                  int               `json:",omitempty"`
-	Threshold                          float64           `json:""`
+	Threshold                          *float64          `json:",omitempty"`
+	ThresholdMetricId                  string            `json:",omitempty"`
 	ComparisonOperator                 string            `json:",omitempty"`
 	TreatMissingData                   string            `json:",omitempty"`
 	Metrics                            []MetricDataQuery `json:",omitempty"`
@@ -550,8 +556,11 @@ func toAWSAlarm(a Alarm) awsMetricAlarm {
 		InsufficientDataActions: nonNil(a.InsufficientDataActions), StateValue: a.State, StateReason: a.StateReason, StateReasonData: a.StateReasonData,
 		StateUpdatedTimestamp: awsapi.T(a.StateUpdatedAt), StateTransitionedTimestamp: awsapi.T(a.StateUpdatedAt),
 		MetricName: a.Metric, Namespace: a.Namespace, Statistic: a.Statistic, ExtendedStatistic: a.ExtendedStatistic,
-		Period: a.Period, Unit: a.Unit, EvaluationPeriods: a.EvaluationPeriods, DatapointsToAlarm: a.DatapointsToAlarm, Threshold: a.Threshold,
-		ComparisonOperator: a.ComparisonOperator, TreatMissingData: a.TreatMissingData, Metrics: a.Metrics}
+		Period: a.Period, Unit: a.Unit, EvaluationPeriods: a.EvaluationPeriods, DatapointsToAlarm: a.DatapointsToAlarm, Threshold: &a.Threshold,
+		ComparisonOperator: a.ComparisonOperator, TreatMissingData: a.TreatMissingData, Metrics: a.Metrics, ThresholdMetricId: a.ThresholdMetricID}
+	if a.ThresholdMetricID != "" {
+		out.Threshold = nil
+	}
 	if len(a.Metrics) == 0 {
 		out.Dimensions = dimList(a.Dimensions)
 	} else {
@@ -599,7 +608,11 @@ func (s *Service) awsPutMetricAlarm(q *awsapi.Req) (any, error) {
 		}
 	}
 	if in.ThresholdMetricId != "" {
-		return nil, invalid("anomaly detection alarms (ThresholdMetricId) are not supported")
+		if in.Threshold != nil {
+			return nil, invalid("an anomaly detection alarm (ThresholdMetricId) takes no Threshold")
+		}
+		zero := 0.0
+		in.Threshold = &zero
 	}
 	if in.Threshold == nil {
 		return nil, missingParam("Threshold")
@@ -622,7 +635,7 @@ func (s *Service) awsPutMetricAlarm(q *awsapi.Req) (any, error) {
 		OKActions: in.OKActions, InsufficientDataActions: in.InsufficientDataActions, Metric: in.MetricName, Namespace: in.Namespace,
 		Statistic: in.Statistic, ExtendedStatistic: in.ExtendedStatistic, Dimensions: dimMap(in.Dimensions), Period: in.Period, Unit: in.Unit,
 		EvaluationPeriods: in.EvaluationPeriods, DatapointsToAlarm: in.DatapointsToAlarm, Threshold: *in.Threshold,
-		ComparisonOperator: in.ComparisonOperator, TreatMissingData: in.TreatMissingData, Metrics: in.Metrics}
+		ComparisonOperator: in.ComparisonOperator, TreatMissingData: in.TreatMissingData, Metrics: in.Metrics, ThresholdMetricID: in.ThresholdMetricId}
 	if len(in.Tags) > 0 && !store.Has(s.env.Store, cAlarms, a.Name) {
 		a.Tags = core.Tags{}
 		for _, t := range in.Tags {

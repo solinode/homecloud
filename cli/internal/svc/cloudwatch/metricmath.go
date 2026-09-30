@@ -64,6 +64,7 @@ func dimList(m map[string]string) []Dimension {
 // tseries is a time series ordered by time.
 type tseries struct {
 	label  string
+	band   string // "upper" or "lower" for ANOMALY_DETECTION_BAND series
 	period time.Duration
 	t      []time.Time
 	v      []float64
@@ -341,6 +342,27 @@ func (p *mathParser) primary() (mnode, error) {
 			return nil, fmt.Errorf("bad number %q", t)
 		}
 		return func() (mval, error) { return scalarVal(f), nil }, nil
+	}
+	if p.peek() == "(" && strings.EqualFold(t, "ANOMALY_DETECTION_BAND") {
+		p.pos++
+		if p.pos >= len(p.toks) || !queryIDRe.MatchString(p.toks[p.pos]) {
+			return nil, fmt.Errorf("ANOMALY_DETECTION_BAND needs a metric or expression ID")
+		}
+		src := p.toks[p.pos]
+		p.pos++
+		var kn mnode
+		if p.peek() == "," {
+			p.pos++
+			var err error
+			if kn, err = p.expr(); err != nil {
+				return nil, err
+			}
+		}
+		if p.peek() != ")" {
+			return nil, fmt.Errorf("expected ) in ANOMALY_DETECTION_BAND(")
+		}
+		p.pos++
+		return p.bandNode(src, kn), nil
 	}
 	if p.peek() == "(" {
 		p.pos++
@@ -677,10 +699,8 @@ func (p *mathParser) function(name string, args []mnode, strArg string) (mnode, 
 			return nil, fmt.Errorf("FILL(metric, value)")
 		}
 		repeat := strArg == "REPEAT"
-		if strArg == "LINEAR" {
-			return nil, fmt.Errorf("FILL(..., LINEAR) is not supported; use a value or REPEAT")
-		}
-		if len(args) == 1 && !repeat {
+		linear := strArg == "LINEAR"
+		if len(args) == 1 && !repeat && !linear {
 			return nil, fmt.Errorf("FILL needs a value or REPEAT")
 		}
 		return func() (mval, error) {
@@ -689,7 +709,7 @@ func (p *mathParser) function(name string, args []mnode, strArg string) (mnode, 
 				return mval{}, err
 			}
 			fillVal := 0.0
-			if !repeat {
+			if !repeat && !linear {
 				fv, err := arg(1)
 				if err != nil {
 					return mval{}, err
@@ -703,6 +723,9 @@ func (p *mathParser) function(name string, args []mnode, strArg string) (mnode, 
 				have := map[int64]float64{}
 				for i, t := range s.t {
 					have[t.UnixNano()] = s.v[i]
+				}
+				if linear {
+					return fillLinear(s, p.grid(s.period))
 				}
 				out := &tseries{label: s.label, period: s.period}
 				last, seen := 0.0, false
@@ -736,5 +759,27 @@ func (p *mathParser) function(name string, args []mnode, strArg string) (mnode, 
 			return v, nil
 		}, nil
 	}
-	return nil, fmt.Errorf("unsupported function %s (supported: SUM, AVG, MIN, MAX, STDDEV, ABS, CEIL, FLOOR, SQRT, LOG, LOG10, EXP, METRICS, PERIOD, DATAPOINT_COUNT, RATE, DIFF, RUNNING_SUM, FILL)", name)
+	return nil, fmt.Errorf("unsupported function %s (supported: ANOMALY_DETECTION_BAND, SUM, AVG, MIN, MAX, STDDEV, ABS, CEIL, FLOOR, SQRT, LOG, LOG10, EXP, METRICS, PERIOD, DATAPOINT_COUNT, RATE, DIFF, RUNNING_SUM, FILL)", name)
+}
+
+// fillLinear fills the grid timestamps that have no datapoint by linear
+// interpolation between the nearest datapoints before and after. Timestamps
+// before the first or after the last datapoint stay missing.
+func fillLinear(s *tseries, grid []time.Time) *tseries {
+	out := &tseries{label: s.label, period: s.period}
+	j := 0 // first datapoint at or after t
+	for _, t := range grid {
+		for j < len(s.t) && s.t[j].Before(t) {
+			j++
+		}
+		switch {
+		case j < len(s.t) && s.t[j].Equal(t):
+			out.t, out.v = append(out.t, t), append(out.v, s.v[j])
+		case j > 0 && j < len(s.t):
+			a, b := s.t[j-1], s.t[j]
+			f := float64(t.Sub(a)) / float64(b.Sub(a))
+			out.t, out.v = append(out.t, t), append(out.v, s.v[j-1]+f*(s.v[j]-s.v[j-1]))
+		}
+	}
+	return out
 }
