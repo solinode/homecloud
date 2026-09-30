@@ -84,7 +84,7 @@ connection to HomeCloud itself is TLS, so behind a TLS-terminating proxy it is f
 | DynamoDB | dynamodb | awsJson 1.0 | Tables, GSIs/LSIs, all item ops with expressions, batch, transactions, PartiQL, TTL, streams |
 | SQS | sqs | awsJson 1.0 + awsQuery | Standard and FIFO queues, DLQs and redrive, batch ops, long polling, queue policies |
 | SNS | sns | awsQuery | Topics (incl. FIFO), subscriptions (sqs, lambda, http/s, email), filter policies, topic policies, signed messages |
-| Secrets Manager | secretsmanager | awsJson 1.1 | Versions and staging labels, rotation via Lambda, resource policies |
+| Secrets Manager | secretsmanager | awsJson 1.1 | Versions and staging labels, rotation via Lambda, resource policies. Replication to other regions is not available: `AddReplicaRegions` and `ReplicateSecretToRegions` fail with `InvalidRequestException` because HomeCloud serves a single region |
 | SSM Parameter Store | ssm | awsJson 1.1 | Parameters, hierarchies, versions and labels, SecureString |
 | KMS | kms | awsJson 1.1 | Symmetric, RSA, ECC and HMAC keys, aliases, rotation, data keys, key policies, grants (stored) |
 | CloudWatch | monitoring | awsJson 1.0 + awsQuery | Metrics, GetMetricData with math, alarms, dashboards |
