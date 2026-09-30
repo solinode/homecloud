@@ -466,6 +466,26 @@ func (s *Service) serveAWS(a *s3req) error {
 			return err
 		}
 	}
+	// Uploads can set retention or a legal hold through headers: AWS needs the
+	// matching permissions for that, not just s3:PutObject.
+	if op.object && (op.action == "s3:PutObject" || op.name == "CopyObject" || op.name == "CreateMultipartUpload") {
+		h := q.R.Header
+		need := ""
+		if h.Get("X-Amz-Object-Lock-Mode") != "" || h.Get("X-Amz-Object-Lock-Retain-Until-Date") != "" {
+			need = "s3:PutObjectRetention"
+		}
+		if h.Get("X-Amz-Object-Lock-Legal-Hold") != "" {
+			need = "s3:PutObjectLegalHold"
+		}
+		if need != "" {
+			if err := s.authorize(a, need, res); err != nil {
+				return err
+			}
+			if err := s.authorize(a, op.action, res); err != nil { // recorded as the call's action
+				return err
+			}
+		}
+	}
 	if _, err := s.cl(); err != nil {
 		return err
 	}

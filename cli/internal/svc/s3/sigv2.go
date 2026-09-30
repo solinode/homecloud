@@ -97,6 +97,19 @@ func (s *Service) sigV2(a *s3req) (bool, error) {
 		return true, awsapi.Errorf(http.StatusForbidden, "SignatureDoesNotMatch",
 			"The request signature we calculated does not match the signature you provided. Check your key and signing method.")
 	}
+	// SigV2 only signs the sub-resources listed above. Any other one the request
+	// carries (?retention, ?publicAccessBlock, ...) is not covered by the signature,
+	// so whoever holds a presigned URL could append it to change the operation.
+	for k := range a.query {
+		if v2SubResources[k] || valueParams[k] {
+			continue
+		}
+		for _, sub := range append(append([]subOps{}, bucketSubs...), objectSubs...) {
+			if sub.sub == k {
+				return true, awsapi.Errorf(http.StatusForbidden, "AccessDenied", "the ?%s sub-resource cannot be signed with signature version 2: use signature version 4", k)
+			}
+		}
+	}
 	a.q.P = p
 	return true, nil
 }

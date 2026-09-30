@@ -46,6 +46,47 @@ func TestWebsiteServesOnlyWhatThePolicyAllows(t *testing.T) {
 	}
 }
 
+// A SigV2 presigned URL signs only the sub-resources SigV2 knows; appending
+// another one (?retention, ?publicAccessBlock, ...) must not reuse the signature.
+func TestSigV2PresignedURLCannotGainSubresources(t *testing.T) {
+	h, _ := newHarness(t)
+	b := bucketName()
+	h.AWS(t, "s3", "mb", "s3://"+b)
+	out := h.Python(t, `
+s3 = boto3.client("s3", config=botocore.config.Config(signature_version="s3"))
+print(s3.generate_presigned_url("get_object", Params={"Bucket": "`+b+`", "Key": "f"}, ExpiresIn=300))
+`)
+	u := strings.TrimSpace(out)
+	if !strings.Contains(u, "AWSAccessKeyId=") {
+		t.Skipf("not a SigV2 URL: %s", u)
+	}
+	for _, sub := range []string{"retention", "publicAccessBlock", "legal-hold"} {
+		st, body := getStatus(t, u+"&"+sub)
+		if st != 403 || !strings.Contains(body, "signature version 2") {
+			t.Fatalf("?%s appended to a SigV2 URL: %d %s", sub, st, body)
+		}
+	}
+}
+
+// Locking an object through upload headers needs the retention / legal hold
+// permissions, not just s3:PutObject.
+func TestObjectLockHeadersNeedTheirOwnPermissions(t *testing.T) {
+	h, _ := newHarness(t)
+	b := bucketName()
+	h.AWS(t, "s3", "mb", "s3://"+b)
+	dir := t.TempDir()
+	_ = os.WriteFile(dir+"/f", []byte("x"), 0o600)
+	ak, sk := h.User(t, "uploader")
+	h.Native(t, "PUT", "/api/v1/iam/users/uploader/inline-policies/one", map[string]any{
+		"Version": "2012-10-17", "Statement": []any{map[string]any{"Effect": "Allow", "Action": "s3:PutObject",
+			"Resource": []string{"arn:aws:s3:::" + b + "/*"}}}})
+	out, err := h.AWSAs(t, ak, sk, "", "s3api", "put-object", "--bucket", b, "--key", "k", "--body", dir+"/f", "--object-lock-legal-hold-status", "ON")
+	mustFail(t, out, err, "s3:PutObjectLegalHold")
+	out, err = h.AWSAs(t, ak, sk, "", "s3api", "put-object", "--bucket", b, "--key", "k", "--body", dir+"/f",
+		"--object-lock-mode", "COMPLIANCE", "--object-lock-retain-until-date", "2999-01-01T00:00:00Z")
+	mustFail(t, out, err, "s3:PutObjectRetention")
+}
+
 // Keys in a DeleteObjects body are forwarded as they are, so "allowed/../x" must
 // not be authorized as a key under allowed/.
 func TestDeleteObjectsRejectsDotSegments(t *testing.T) {
