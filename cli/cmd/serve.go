@@ -6,13 +6,16 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 
 	"github.com/homecloudhq/homecloud/cli/internal/client"
 	"github.com/homecloudhq/homecloud/cli/internal/core"
+	"github.com/homecloudhq/homecloud/cli/internal/httpx"
 	"github.com/homecloudhq/homecloud/cli/internal/server"
 	"github.com/spf13/cobra"
 )
@@ -27,7 +30,10 @@ func init() {
 and CLI credentials in the data directory. Settings passed as flags are saved to
 <data-dir>/config.json and reused on later starts.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cfg = mergeConfig(cmd, cfg)
+			var err error
+			if cfg, err = mergeConfig(cmd, cfg); err != nil {
+				return err
+			}
 			if selfSigned && cfg.TLSCert == "" {
 				c, k, err := server.SelfSignedCert(cfg.DataDir, cfg.PublicHost)
 				if err != nil {
@@ -49,6 +55,10 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 	f.StringVar(&cfg.DataDir, "data-dir", cfg.DataDir, "where HomeCloud keeps its state")
 	f.StringVar(&cfg.APIAddr, "addr", cfg.APIAddr, "address the API and console listen on (use 0.0.0.0:8080 to expose on your LAN)")
 	f.StringVar(&cfg.PublicHost, "public-host", cfg.PublicHost, "host name clients use to reach published ports (e.g. your LAN IP or Tailscale name)")
+	f.StringVar(&cfg.PublicURL, "public-url", cfg.PublicURL, "base URL clients reach the API at, e.g. https://cloud.example.com behind a reverse proxy (used in API Gateway, function URL, queue and website links)")
+	f.StringSliceVar(&cfg.TrustedProxies, "trusted-proxies", cfg.TrustedProxies, "CIDRs of reverse proxies whose X-Forwarded-For / X-Forwarded-Proto are trusted (default: none)")
+	f.StringVar(&cfg.ServiceBind, "s3-bind", cfg.ServiceBind, "host address the MinIO and MinIO console ports are published on (default 127.0.0.1; use 0.0.0.0 to expose)")
+	f.StringVar(&cfg.DNSBind, "dns-bind", cfg.DNSBind, "host address the DNS server's port is published on (default 127.0.0.1; use 0.0.0.0 to serve public zones)")
 	f.IntVar(&cfg.S3Port, "s3-port", cfg.S3Port, "host port for the S3-compatible endpoint")
 	f.IntVar(&cfg.S3ConsolePort, "s3-console-port", cfg.S3ConsolePort, "host port for the MinIO console")
 	f.IntVar(&cfg.DNSPort, "dns-port", cfg.DNSPort, "host port (UDP and TCP) serving public DNS zones")
@@ -63,7 +73,17 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 		Use:   "configure",
 		Short: "Set the endpoint and access key the CLI uses",
 		RunE: func(cmd *cobra.Command, args []string) error {
-			cur, _ := client.Load()
+			cur := client.LoadFile()
+			if p.CAFile != "" {
+				abs, err := filepath.Abs(p.CAFile)
+				if err != nil {
+					return err
+				}
+				if _, err := os.ReadFile(abs); err != nil {
+					return fmt.Errorf("--ca-file: %w", err)
+				}
+				p.CAFile = abs
+			}
 			if p.Endpoint == "" {
 				p.Endpoint = prompt("Endpoint", cur.Endpoint)
 			}
@@ -73,7 +93,8 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 			if p.SecretAccessKey == "" {
 				p.SecretAccessKey = prompt("Secret access key", "")
 			}
-			if err := client.Save(p); err != nil {
+			// Settings not given here (region, ca_file, and a secret left blank) stay as they were.
+			if err := client.Save(client.Merge(cur, p)); err != nil {
 				return err
 			}
 			fmt.Println("saved to", client.CredentialsFile())
@@ -83,6 +104,8 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 	configureCmd.Flags().StringVar(&p.Endpoint, "endpoint", "", "API endpoint, e.g. http://homelab:8080")
 	configureCmd.Flags().StringVar(&p.AccessKeyID, "access-key-id", "", "access key ID")
 	configureCmd.Flags().StringVar(&p.SecretAccessKey, "secret-access-key", "", "secret access key")
+	configureCmd.Flags().StringVar(&p.Region, "region", "", "region the server runs in")
+	configureCmd.Flags().StringVar(&p.CAFile, "ca-file", "", "PEM file with the CA (or self-signed certificate) of an HTTPS server")
 	RootCmd.AddCommand(configureCmd)
 
 	RootCmd.AddCommand(&cobra.Command{
@@ -164,7 +187,7 @@ credentials, so AWS tools work against HomeCloud:
 }
 
 // mergeConfig loads the saved config, applies explicitly set flags and saves the result.
-func mergeConfig(cmd *cobra.Command, flags core.Config) core.Config {
+func mergeConfig(cmd *cobra.Command, flags core.Config) (core.Config, error) {
 	path := flags.Path("config.json")
 	cfg := core.DefaultConfig()
 	cfg.DataDir = flags.DataDir
@@ -184,10 +207,26 @@ func mergeConfig(cmd *cobra.Command, flags core.Config) core.Config {
 	set("s3-port", func() { cfg.S3Port = flags.S3Port })
 	set("s3-console-port", func() { cfg.S3ConsolePort = flags.S3ConsolePort })
 	set("dns-port", func() { cfg.DNSPort = flags.DNSPort })
+	set("public-url", func() { cfg.PublicURL = strings.TrimRight(flags.PublicURL, "/") })
+	set("trusted-proxies", func() { cfg.TrustedProxies = flags.TrustedProxies })
+	set("s3-bind", func() { cfg.ServiceBind = flags.ServiceBind })
+	set("dns-bind", func() { cfg.DNSBind = flags.DNSBind })
 	set("tls-cert", func() { cfg.TLSCert = flags.TLSCert })
 	set("tls-key", func() { cfg.TLSKey = flags.TLSKey })
+	if err := core.ValidatePublicURL(cfg.PublicURL); err != nil {
+		return cfg, err
+	}
+	if _, err := httpx.ParseTrustedProxies(cfg.TrustedProxies); err != nil {
+		return cfg, err
+	}
+	for _, a := range []string{cfg.ServiceBind, cfg.DNSBind} {
+		if a != "" && net.ParseIP(a) == nil {
+			return cfg, fmt.Errorf("--s3-bind and --dns-bind take an IP address such as 127.0.0.1 or 0.0.0.0, got %q", a)
+		}
+	}
+	cfg.Normalize()
 	saveConfig(cfg)
-	return cfg
+	return cfg, nil
 }
 
 func saveConfig(cfg core.Config) {

@@ -93,6 +93,7 @@ func (s *Service) hostBases() []string {
 		out = append(out, h)
 	}
 	add(s.env.Cfg.PublicHost)
+	add(s.env.Cfg.PublicHostname())
 	if h, _, err := net.SplitHostPort(s.env.Cfg.APIAddr); err == nil {
 		add(h)
 	}

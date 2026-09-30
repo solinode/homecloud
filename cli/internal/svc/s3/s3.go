@@ -12,6 +12,7 @@ import (
 	"io"
 	"log"
 	"mime"
+	"net"
 	"net/http"
 	"net/url"
 	"path"
@@ -61,7 +62,8 @@ type Service struct {
 	secrets *secrets.Service
 	mu      sync.RWMutex
 	client  *minio.Client
-	signer  *minio.Client // same credentials, public endpoint, for presigned URLs
+	signer  *minio.Client // same credentials, MinIO's host address: presigned URLs are served through /_s3/
+	direct  string        // host:port HomeCloud reaches MinIO at
 	user    string
 	pass    string
 	status  string
@@ -78,8 +80,15 @@ func New(env *svc.Env, sec *secrets.Service) *Service {
 	return s
 }
 
+// Endpoint is MinIO's own address: on the host it runs on by default. Remote
+// clients use the API endpoint (the AWS S3 protocol, authorized by IAM), or
+// publish MinIO with --s3-bind 0.0.0.0.
 func (s *Service) Endpoint() string {
-	return fmt.Sprintf("http://%s:%d", s.env.Cfg.PublicHost, s.env.Cfg.S3Port)
+	host := s.env.Cfg.PublicHost
+	if ip := net.ParseIP(s.env.Cfg.ServiceBindAddr()); ip != nil && ip.IsLoopback() {
+		host = s.env.Cfg.ServiceBindAddr()
+	}
+	return "http://" + net.JoinHostPort(host, strconv.Itoa(s.env.Cfg.S3Port))
 }
 
 // Start ensures the MinIO container runs and waits until it answers.
@@ -98,6 +107,15 @@ func (s *Service) Start(ctx context.Context, vpcs []vpc.VPC) error {
 	s.user, s.pass = c.User, c.Password
 
 	d := s.env.Docker
+	bind := s.env.Cfg.ServiceBindAddr()
+	if d.State(containerName) != "missing" && mismatched(d, bind, "9000/tcp", "9001/tcp") {
+		// Published on other addresses (all of them, before this was configurable):
+		// recreate it; the data lives in a named volume.
+		log.Printf("s3: recreating MinIO to publish its ports on %s only", bind)
+		if err := d.Remove(containerName); err != nil {
+			return fmt.Errorf("recreate MinIO: %w", err)
+		}
+	}
 	switch d.State(containerName) {
 	case "running":
 	case "missing":
@@ -112,7 +130,7 @@ func (s *Service) Start(ctx context.Context, vpcs []vpc.VPC) error {
 			User:    "0",
 			Env:     map[string]string{"MINIO_ROOT_USER": s.user, "MINIO_ROOT_PASSWORD": s.pass},
 			Labels:  runtime.Labels("s3", "server", nil),
-			Ports:   []runtime.Port{{ContainerPort: 9000, HostPort: s.env.Cfg.S3Port}, {ContainerPort: 9001, HostPort: s.env.Cfg.S3ConsolePort}},
+			Ports:   []runtime.Port{{ContainerPort: 9000, HostPort: s.env.Cfg.S3Port, HostIP: bind}, {ContainerPort: 9001, HostPort: s.env.Cfg.S3ConsolePort, HostIP: bind}},
 			Mounts:  []runtime.Mount{{Volume: dataVolume, Target: "/data"}},
 			Restart: "unless-stopped",
 			Start:   true,
@@ -128,7 +146,8 @@ func (s *Service) Start(ctx context.Context, vpcs []vpc.VPC) error {
 	for _, v := range vpcs {
 		s.ConnectNetwork(v)
 	}
-	return s.connect(ctx, fmt.Sprintf("127.0.0.1:%d", s.env.Cfg.S3Port), fmt.Sprintf("%s:%d", s.env.Cfg.PublicHost, s.env.Cfg.S3Port))
+	dial := net.JoinHostPort(s.env.Cfg.ServiceDialHost(), strconv.Itoa(s.env.Cfg.S3Port))
+	return s.connect(ctx, dial, dial)
 }
 
 // UseMinIO points the service at an already running MinIO server (host:port)
@@ -159,7 +178,7 @@ func (s *Service) connect(ctx context.Context, hostport, public string) error {
 		time.Sleep(time.Second)
 	}
 	s.mu.Lock()
-	s.client, s.signer, s.status = cl, signer, "available"
+	s.client, s.signer, s.direct, s.status = cl, signer, hostport, "available"
 	s.mu.Unlock()
 	return nil
 }
@@ -389,13 +408,8 @@ func (s *Service) getBucket(c *httpx.Ctx) (any, error) {
 		"name": name, "arn": "arn:aws:s3:::" + name, "region": s.env.Cfg.Region, "versioning": ver.Status, "created_at": created,
 		"public": s.isPublic(ctx, cl, name), "policy": policy, "object_count": count, "size_bytes": size, "stats_truncated": truncated,
 		"website": m.Website, "index_document": m.IndexDocument, "error_document": m.ErrorDocument, "lifecycle_rules": rules, "tags": m.Tags,
-		"website_url": fmt.Sprintf("http://%s/website/%s/", s.apiHost(), name),
+		"website_url": fmt.Sprintf("%s/website/%s/", s.env.Cfg.PublicBase(), name),
 	}, nil
-}
-
-func (s *Service) apiHost() string {
-	_, port, _ := strings.Cut(s.env.Cfg.APIAddr, ":")
-	return s.env.Cfg.PublicHost + ":" + port
 }
 
 func (s *Service) deleteBucket(c *httpx.Ctx) (any, error) {
@@ -814,7 +828,7 @@ func (s *Service) presign(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, s3err(err)
 	}
-	return map[string]any{"url": u.String(), "expires_at": time.Now().Add(exp).UTC()}, nil
+	return map[string]any{"url": s.publicPresigned(u.String()), "expires_at": time.Now().Add(exp).UTC()}, nil
 }
 
 func (s *Service) mustExist(c *httpx.Ctx, bucket string) error {
@@ -862,4 +876,15 @@ func (s *Service) website(c *httpx.Ctx) (any, error) {
 		return nil, core.Errf(http.StatusNotFound, "NoSuchKey", "%s not found", key)
 	}
 	return nil, s.stream(c, cl, bucket, key, "", false, http.StatusOK)
+}
+
+// mismatched reports whether MinIO is published on addresses other than bind.
+// If Docker can't inspect it right now, the container is left as it is.
+func mismatched(d *runtime.Docker, bind string, ports ...string) bool {
+	ok, err := d.BoundTo(containerName, bind, ports...)
+	if err != nil {
+		log.Printf("s3: inspect MinIO: %v (keeping the container)", err)
+		return false
+	}
+	return !ok
 }
