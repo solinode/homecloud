@@ -179,6 +179,7 @@ func New(env *svc.Env, v *vpc.Service) *Service {
 	if info, err := env.Docker.C.Info(); err == nil && info.NCPU > 0 {
 		s.hostCPU = float64(info.NCPU)
 	}
+	v.GroupChanged = s.groupChanged
 	v.InUse = func(sg string) bool {
 		for _, i := range store.List[Instance](env.Store, cInstances) {
 			if i.State != "terminated" && slices.Contains(i.SecurityGroups, sg) {
@@ -615,7 +616,7 @@ func (s *Service) runSpec(inst Instance, network string) runtime.RunSpec {
 		Labels:   runtime.Labels("ec2", inst.ID, map[string]string{"homecloud.name": inst.Name}),
 		NanoCPUs: int64(min(inst.VCPUs, s.hostCPU) * 1e9),
 		MemoryMB: inst.MemoryMB,
-		Ports:    s.vpc.PublishedPorts(inst.SecurityGroups),
+		Ports:    s.portsFor(inst),
 		Mounts:   mounts,
 		Network:  network,
 		IP:       inst.PrivateIP,
@@ -721,6 +722,7 @@ func (s *Service) launch(inst Instance, network string) {
 		x.PublicPorts = s.env.Docker.PublishedPorts(cid)
 		return nil
 	})
+	s.syncPortsAsync(inst.ID) // groups may have changed while launching
 }
 func nonEmpty(s string) []string {
 	if s == "" {
@@ -773,6 +775,7 @@ func (s *Service) transition(id string, from []string, fn func(i Instance) error
 			}
 			return nil
 		})
+		s.syncPortsAsync(id) // groups may have changed meanwhile
 	}()
 	return cur, nil
 }

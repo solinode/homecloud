@@ -78,7 +78,15 @@ func (s *Service) UpdateSecurityGroup(id string, fn func(*SecurityGroup) error) 
 	if err == store.ErrNotFound {
 		return g, core.NotFound("security group", id)
 	}
+	s.groupChanged(id, err)
 	return g, err
+}
+
+// groupChanged tells the hook a group's rules changed (when the change succeeded).
+func (s *Service) groupChanged(id string, err error) {
+	if err == nil && s.GroupChanged != nil {
+		s.GroupChanged(id)
+	}
 }
 
 // EgressRules returns a group's outbound rules, including AWS's default

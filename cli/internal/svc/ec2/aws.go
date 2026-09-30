@@ -68,6 +68,7 @@ func (s *Service) RegisterAWS() {
 		"DeleteSnapshot":                       s.awsDeleteSnapshot,
 		"DescribeNetworkInterfaces":            s.awsDescribeNetworkInterfaces,
 		"DescribeAddresses":                    s.awsDescribeAddresses,
+		"ModifyNetworkInterfaceAttribute":      s.awsModifyNetworkInterfaceAttribute,
 	}
 	s.vpcOps(ops)
 	s.ltOps(ops)
@@ -1102,6 +1103,7 @@ func (s *Service) awsModifyInstanceAttribute(q *awsapi.Req) (any, error) {
 		if _, err := store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error { x.SecurityGroups = groups; return nil }); err != nil {
 			return nil, err
 		}
+		s.syncPortsAsync(i.ID)
 	}
 	for _, m := range q.Structs("BlockDeviceMapping") {
 		if d, ok := m["Ebs.DeleteOnTermination"]; ok {
@@ -1701,6 +1703,35 @@ func (s *Service) awsDescribeNetworkInterfaces(q *awsapi.Req) (any, error) {
 		}
 	}
 	return map[string]any{"networkInterfaceSet": items}, nil
+}
+
+// awsModifyNetworkInterfaceAttribute changes the security groups of an
+// instance's primary interface; the other attributes are accepted and ignored.
+func (s *Service) awsModifyNetworkInterfaceAttribute(q *awsapi.Req) (any, error) {
+	id := q.Param("NetworkInterfaceId")
+	if err := q.Authorize("ec2:ModifyNetworkInterfaceAttribute", q.ARN("ec2", "network-interface/"+id)); err != nil {
+		return nil, err
+	}
+	var inst *Instance
+	for _, i := range s.list() {
+		if i.State != "terminated" && eniID(i.ID) == id {
+			inst = &i
+			break
+		}
+	}
+	if inst == nil {
+		return nil, core.Errf(http.StatusBadRequest, "InvalidNetworkInterfaceID.NotFound", "The networkInterface ID '%s' does not exist", id)
+	}
+	if groups := q.List("SecurityGroupId"); len(groups) > 0 {
+		if err := s.vpc.CheckGroups(inst.VpcID, groups); err != nil {
+			return nil, err
+		}
+		if _, err := store.Update(s.env.Store, cInstances, inst.ID, func(x *Instance) error { x.SecurityGroups = groups; return nil }); err != nil {
+			return nil, err
+		}
+		s.syncPortsAsync(inst.ID)
+	}
+	return map[string]any{"return": true}, nil
 }
 
 // awsDescribeAddresses: HomeCloud has no Elastic IPs.
