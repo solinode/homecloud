@@ -97,11 +97,14 @@ func TestCycleAndUnknownType(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := order(tp); err == nil || !strings.Contains(err.Error(), "circular") {
+	if _, err := order(tp); err == nil || !strings.Contains(err.Error(), "ircular") {
 		t.Fatalf("expected cycle error, got %v", err)
 	}
-	if _, err := Parse(`{"Resources":{"A":{"Type":"AWS::Nope"}}}`); err == nil {
-		t.Fatal("unknown type accepted")
+	if _, err := Parse(`{"Resources":{"A":{"Type":"Nope"}}}`); err == nil {
+		t.Fatal("malformed type accepted")
+	}
+	if _, err := Parse(`{"Resources":{"A":{"Type":"AWS::Nope::Thing"}}}`); err != nil {
+		t.Fatalf("well-formed but unsupported type must parse (it fails the stack, not the template): %v", err)
 	}
 }
 
