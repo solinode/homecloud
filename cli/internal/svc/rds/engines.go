@@ -220,7 +220,7 @@ func (e Engine) defaultClass() string {
 
 func (e Engine) validVersion(v string) error {
 	for _, x := range e.Versions {
-		if x == v {
+		if x == v || strings.HasPrefix(v, x+".") {
 			return nil
 		}
 	}

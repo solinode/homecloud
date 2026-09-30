@@ -336,6 +336,12 @@ func deletedErr(sec Secret, what string) error {
 
 // ---- internal API used by other services (no IAM checks) ----
 
+// ARN returns the ARN of a secret, for other services that report it.
+func (s *Service) ARN(name string) (string, bool) {
+	sec, err := s.get(name)
+	return sec.ARN, err == nil
+}
+
 // Put creates the secret or adds a new current version; used by other services.
 func (s *Service) Put(name, value, description, managedBy string) (Secret, error) {
 	if err := validName(name); err != nil {
