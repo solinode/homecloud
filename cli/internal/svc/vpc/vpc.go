@@ -104,6 +104,9 @@ type Service struct {
 	mu  sync.Mutex // serialises IP allocation
 	// InUse reports whether a security group is referenced by a resource; set by EC2.
 	InUse func(sgID string) bool
+	// GroupChanged is called after a security group's rules were changed, so
+	// running instances can be brought in line; set by EC2.
+	GroupChanged func(sgID string)
 	// AfterCreate is called with every new VPC.
 	AfterCreate func(v VPC)
 	// BeforeDelete is called before a VPC's network is removed (e.g. to drop
@@ -752,6 +755,7 @@ func (s *Service) addRule(c *httpx.Ctx) (any, error) {
 	if err == store.ErrNotFound {
 		return nil, core.NotFound("security group", c.Param("id"))
 	}
+	s.groupChanged(g.ID, err)
 	return g, err
 }
 
@@ -767,6 +771,7 @@ func (s *Service) removeRule(c *httpx.Ctx) (any, error) {
 	if err == store.ErrNotFound {
 		return nil, core.NotFound("security group", c.Param("id"))
 	}
+	s.groupChanged(g.ID, err)
 	return g, err
 }
 

@@ -116,6 +116,7 @@ export const SERVICES: ServiceDef[] = [
         items: [
           { label: "Security groups", href: "/vpc/security-groups/" },
           { label: "Key pairs", href: "/ec2/key-pairs/" },
+          { label: "Elastic IPs", href: "/ec2/elastic-ips/" },
           { label: "VPCs", href: "/vpc/" },
         ],
       },

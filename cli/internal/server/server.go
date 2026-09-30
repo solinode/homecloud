@@ -282,6 +282,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	sfnSvc.RegisterAWS()
 	ec2Svc.RegisterAWS()
 	elbSvc.RegisterAWS()
+	rdsSvc.RegisterAWS()
 	ecrSvc.RegisterAWS()
 	ecsSvc.RegisterAWS()
 	ecsSvc.Roles, ecsSvc.Params, ecsSvc.RegistryHost = ecsRoles{iamSvc}, ssmSvc, ecrSvc.Host()
