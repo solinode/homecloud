@@ -247,8 +247,12 @@ func TestAWSInstanceLifecycle(t *testing.T) {
 	if o, err := h.AWSErr(t, "rds", "delete-db-parameter-group", "--db-parameter-group-name", "pg17"); err == nil || !strings.Contains(o, "InvalidDBParameterGroupState") {
 		t.Fatalf("parameter group in use: %v %s", err, o)
 	}
-	if o, err := h.AWSErr(t, "rds", "reboot-db-instance", "--db-instance-identifier", "orders"); err == nil || !strings.Contains(o, "InvalidDBInstanceState") {
+	// The instance may already be available on a fast host; only a reboot
+	// accepted while it is still being created is wrong.
+	if o, err := h.AWSErr(t, "rds", "reboot-db-instance", "--db-instance-identifier", "orders"); err != nil && !strings.Contains(o, "InvalidDBInstanceState") {
 		t.Fatalf("reboot while creating: %v %s", err, o)
+	} else if err == nil && strings.Contains(o, `"creating"`) {
+		t.Fatalf("reboot accepted while creating: %s", o)
 	}
 
 	d := waitStatus(t, h, "orders", "available")

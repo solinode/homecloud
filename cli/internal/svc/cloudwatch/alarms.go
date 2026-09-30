@@ -41,6 +41,9 @@ type Alarm struct {
 	// Metrics makes a metric-math alarm (instead of Namespace/Metric): the
 	// query with ReturnData true is compared with the threshold.
 	Metrics []MetricDataQuery `json:"metrics,omitempty"`
+	// ThresholdMetricID names the ANOMALY_DETECTION_BAND expression among Metrics
+	// that an anomaly detection alarm compares the metric with.
+	ThresholdMetricID string `json:"threshold_metric_id,omitempty"`
 	// ActionsEnabled nil means enabled.
 	ActionsEnabled *bool `json:"actions_enabled,omitempty"`
 	// Actions are SNS topic ARNs or http(s) webhook URLs notified on state change.
@@ -81,6 +84,19 @@ var operators = map[string]func(a, b float64) bool{
 	"LessThanOrEqualToThreshold":    func(a, b float64) bool { return a <= b },
 }
 
+// anomalyOps are the comparison operators of anomaly detection alarms.
+var anomalyOps = map[string]func(v, lo, hi float64) bool{
+	"LessThanLowerOrGreaterThanUpperThreshold": func(v, lo, hi float64) bool { return v < lo || v > hi },
+	"LessThanLowerThreshold":                   func(v, lo, hi float64) bool { return v < lo },
+	"GreaterThanUpperThreshold":                func(v, lo, hi float64) bool { return v > hi },
+}
+
+var anomalyWords = map[string]string{"LessThanLowerOrGreaterThanUpperThreshold": "less than the lower or greater than the upper",
+	"LessThanLowerThreshold": "less than the lower", "GreaterThanUpperThreshold": "greater than the upper"}
+
+// alarmBand is the anomaly band at one evaluated datapoint.
+type alarmBand struct{ lo, hi float64 }
+
 func (s *Service) addHistory(name, typ, summary string, data any) {
 	b, _ := json.Marshal(data)
 	item := AlarmHistoryItem{AlarmName: name, Timestamp: time.Now().UTC(), HistoryItemType: typ, HistorySummary: summary, HistoryData: string(b)}
@@ -102,6 +118,13 @@ func (s *Service) history(name string) []AlarmHistoryItem {
 // EvaluationPeriods periods, oldest first (nil = no data). The current period
 // is used when it already has data, otherwise the last complete one ends the window.
 func (s *Service) alarmValues(a Alarm, now time.Time) ([]*float64, error) {
+	v, _, err := s.alarmData(a, now)
+	return v, err
+}
+
+// alarmData is alarmValues plus, for anomaly detection alarms, the band at each
+// datapoint. A datapoint without a band counts as missing.
+func (s *Service) alarmData(a Alarm, now time.Time) ([]*float64, []*alarmBand, error) {
 	n := max(a.EvaluationPeriods, 1)
 	period := time.Duration(a.Period) * time.Second
 	if len(a.Metrics) > 0 {
@@ -118,17 +141,34 @@ func (s *Service) alarmValues(a Alarm, now time.Time) ([]*float64, error) {
 	end := now.Truncate(period).Add(period)
 	start := end.Add(-period * time.Duration(n+1))
 	vals := map[int64]float64{}
+	bands := map[int64]*alarmBand{}
 	if len(a.Metrics) > 0 {
 		res, order, err := s.evalMetricQueries(a.Metrics, start, end)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		var out *tseries
 		for _, id := range order {
 			q := a.Metrics[slices.IndexFunc(a.Metrics, func(m MetricDataQuery) bool { return m.Id == id })]
-			if q.ReturnData == nil || *q.ReturnData {
+			if id == a.ThresholdMetricID {
+				for _, bs := range res[id].array {
+					for i, t := range bs.t {
+						b := bands[t.Unix()]
+						if b == nil {
+							b = &alarmBand{}
+							bands[t.Unix()] = b
+						}
+						if bs.band == "upper" {
+							b.hi = bs.v[i]
+						} else {
+							b.lo = bs.v[i]
+						}
+					}
+				}
+				continue
+			}
+			if out == nil && (q.ReturnData == nil || *q.ReturnData) {
 				out = res[id].series
-				break
 			}
 		}
 		if out != nil {
@@ -149,17 +189,33 @@ func (s *Service) alarmValues(a Alarm, now time.Time) ([]*float64, error) {
 		cur = cur.Add(-period)
 	}
 	out := make([]*float64, n)
+	var outBands []*alarmBand
+	if a.ThresholdMetricID != "" {
+		outBands = make([]*alarmBand, n)
+	}
 	for i := 0; i < n; i++ {
 		t := cur.Add(-period * time.Duration(n-1-i))
 		if v, ok := vals[t.Unix()]; ok {
+			if a.ThresholdMetricID != "" {
+				b, ok := bands[t.Unix()]
+				if !ok {
+					continue
+				}
+				outBands[i] = b
+			}
 			out[i] = &v
 		}
 	}
-	return out, nil
+	return out, outBands, nil
 }
 
 // evaluate decides an alarm's state from its datapoints.
 func evaluate(a Alarm, vals []*float64) (state, reason string, recent []float64) {
+	return evaluateBands(a, vals, nil)
+}
+
+// evaluateBands is evaluate for anomaly detection alarms when bands is set.
+func evaluateBands(a Alarm, vals []*float64, bands []*alarmBand) (state, reason string, recent []float64) {
 	n := len(vals)
 	m := a.DatapointsToAlarm
 	if m <= 0 || m > n {
@@ -167,10 +223,16 @@ func evaluate(a Alarm, vals []*float64) (state, reason string, recent []float64)
 	}
 	cmp := operators[a.ComparisonOperator]
 	breach, good, missing := 0, 0, 0
-	for _, v := range vals {
+	for i, v := range vals {
 		switch {
 		case v == nil:
 			missing++
+		case bands != nil && anomalyOps[a.ComparisonOperator](*v, bands[i].lo, bands[i].hi):
+			breach++
+			recent = append(recent, *v)
+		case bands != nil:
+			good++
+			recent = append(recent, *v)
 		case cmp(*v, a.Threshold):
 			breach++
 			recent = append(recent, *v)
@@ -197,6 +259,15 @@ func evaluate(a Alarm, vals []*float64) (state, reason string, recent []float64)
 	for i, v := range recent {
 		vs[i] = fmt.Sprint(v)
 	}
+	if bands != nil {
+		w := anomalyWords[a.ComparisonOperator]
+		if breach >= m {
+			return "ALARM", fmt.Sprintf("Thresholds Crossed: %d out of the last %d datapoints [%s] were %s band (minimum %d datapoints for OK -> ALARM transition).",
+				breach, n, strings.Join(vs, ", "), w, m), recent
+		}
+		return "OK", fmt.Sprintf("Thresholds Crossed: %d out of the last %d datapoints [%s] were not %s band (minimum %d datapoints for ALARM -> OK transition).",
+			n-breach, n, strings.Join(vs, ", "), w, m), recent
+	}
 	if breach >= m {
 		return "ALARM", fmt.Sprintf("Threshold Crossed: %d out of the last %d datapoints [%s] were %s the threshold (%v) (minimum %d datapoints for OK -> ALARM transition).",
 			breach, n, strings.Join(vs, ", "), opWords[a.ComparisonOperator], a.Threshold, m), recent
@@ -211,11 +282,11 @@ var opWords = map[string]string{"GreaterThanThreshold": "greater than", "Greater
 func (s *Service) evaluateAlarms() {
 	now := time.Now()
 	for _, a := range store.List[Alarm](s.env.Store, cAlarms) {
-		vals, err := s.alarmValues(a, now)
+		vals, bands, err := s.alarmData(a, now)
 		if err != nil {
 			continue
 		}
-		state, reason, recent := evaluate(a, vals)
+		state, reason, recent := evaluateBands(a, vals, bands)
 		if state == a.State {
 			continue
 		}
@@ -346,7 +417,7 @@ func (s *Service) PutAlarm(a Alarm, authorize func(action, resource string) erro
 		}
 		returns := 0
 		for _, q := range a.Metrics {
-			if q.ReturnData == nil || *q.ReturnData {
+			if q.Id != a.ThresholdMetricID && (q.ReturnData == nil || *q.ReturnData) {
 				returns++
 			}
 		}
@@ -373,7 +444,34 @@ func (s *Service) PutAlarm(a Alarm, authorize func(action, resource string) erro
 			return a, core.BadRequest("statistic must be Average, Sum, Minimum, Maximum or SampleCount")
 		}
 	}
-	if _, ok := operators[a.ComparisonOperator]; !ok {
+	if a.ThresholdMetricID != "" {
+		if _, ok := anomalyOps[a.ComparisonOperator]; !ok {
+			return a, core.BadRequest("an anomaly detection alarm's ComparisonOperator must be LessThanLowerOrGreaterThanUpperThreshold, LessThanLowerThreshold or GreaterThanUpperThreshold")
+		}
+		var band *MetricDataQuery
+		for i, q := range a.Metrics {
+			if q.Id == a.ThresholdMetricID {
+				band = &a.Metrics[i]
+			}
+		}
+		if band == nil {
+			return a, core.BadRequest("ThresholdMetricId %q is not one of the alarm's Metrics", a.ThresholdMetricID)
+		}
+		src, ok := bandSource(band.Expression)
+		if !ok {
+			return a, core.BadRequest("ThresholdMetricId must name an ANOMALY_DETECTION_BAND expression")
+		}
+		byID := map[string]MetricDataQuery{}
+		for _, q := range a.Metrics {
+			byID[q.Id] = q
+		}
+		if q := byID[src]; q.MetricStat != nil {
+			s.ensureDetector(AnomalyDetector{Single: &SingleMetricDetector{Namespace: q.MetricStat.Metric.Namespace, MetricName: q.MetricStat.Metric.MetricName,
+				Dimensions: q.MetricStat.Metric.Dimensions, Stat: q.MetricStat.Stat}})
+		} else if q.Expression != "" {
+			s.ensureDetector(AnomalyDetector{Math: s.depQueries(byID, src)})
+		}
+	} else if _, ok := operators[a.ComparisonOperator]; !ok {
 		return a, core.BadRequest("comparison_operator must be one of GreaterThanThreshold, GreaterThanOrEqualToThreshold, LessThanThreshold, LessThanOrEqualToThreshold")
 	}
 	switch a.TreatMissingData {

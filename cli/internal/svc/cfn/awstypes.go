@@ -504,6 +504,9 @@ func init() {
 			if name == "" {
 				name = x.GenName(512, false)
 			}
+			if l, ok := in["ReplicaRegions"].([]any); ok && len(l) > 0 {
+				return nil, fmt.Errorf("HomeCloud serves a single region; secret replication (ReplicaRegions) is not available")
+			}
 			out := map[string]any{"name": name}
 			if has(in, "Description") {
 				out["description"] = sv(in, "Description")
