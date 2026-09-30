@@ -255,6 +255,44 @@ func (d *Docker) HostPort(id string, containerPort int) int {
 	return 0
 }
 
+// BoundTo reports whether every given container port ("9000/tcp") of the
+// container is published on hostIP only. A container created before HomeCloud
+// bound ports to loopback fails this check and gets recreated. An error means
+// the container couldn't be inspected, which is not a reason to recreate it.
+func (d *Docker) BoundTo(id, hostIP string, ports ...string) (bool, error) {
+	c, err := d.C.InspectContainer(id)
+	if err != nil {
+		return false, err
+	}
+	if c.HostConfig == nil {
+		return false, nil
+	}
+	for _, p := range ports {
+		if !bindingsAre(c.HostConfig.PortBindings[docker.Port(p)], hostIP) {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func bindingsAre(bs []docker.PortBinding, hostIP string) bool {
+	if len(bs) == 0 {
+		return false
+	}
+	norm := func(ip string) string {
+		if ip == "" {
+			return "0.0.0.0"
+		}
+		return ip
+	}
+	for _, b := range bs {
+		if norm(b.HostIP) != norm(hostIP) {
+			return false
+		}
+	}
+	return true
+}
+
 // PublishedPorts maps "80/tcp" -> host port for a container.
 func (d *Docker) PublishedPorts(id string) map[string]int {
 	out := map[string]int{}

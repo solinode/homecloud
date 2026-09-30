@@ -243,6 +243,16 @@ func (s *Service) ResetRootPassword() (string, error) {
 	return pw, err
 }
 
+// SetRootPassword sets the root console password to pw (subject to the length
+// rules of every console password).
+func (s *Service) SetRootPassword(pw string) error {
+	if !store.Has(s.env.Store, cUsers, RootUser) {
+		return core.Errf(http.StatusNotFound, "NoSuchEntity", "this installation has no root user yet: start the server once first")
+	}
+	_, err := store.Update(s.env.Store, cUsers, RootUser, func(u *User) error { return setPassword(u, pw) })
+	return err
+}
+
 func (s *Service) userARN(name, path string) string { return s.env.ARN("iam", "user"+path+name) }
 func (s *Service) groupARN(name, path string) string {
 	return s.env.ARN("iam", "group"+path+name)

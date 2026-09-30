@@ -69,9 +69,11 @@ variables. Condition keys:
   `s3:RequestObjectTag`.
 - KMS: `kms:CallerAccount`.
 
-`aws:SourceIp` is the address of the connection; `X-Forwarded-For` is not trusted because
-HomeCloud has no notion of trusted proxies. `aws:SecureTransport` is true only when the
-connection to HomeCloud itself is TLS, so behind a TLS-terminating proxy it is false.
+`aws:SourceIp` is the address of the connection, and `aws:SecureTransport` is true only when the
+connection to HomeCloud itself is TLS. `X-Forwarded-For` and `X-Forwarded-Proto` are ignored unless the
+connection comes from a proxy listed in `--trusted-proxies`; then the rightmost `X-Forwarded-For` entry
+that is not itself a trusted proxy is the source address, and `X-Forwarded-Proto: https` makes
+`aws:SecureTransport` true.
 
 ## Coverage
 
