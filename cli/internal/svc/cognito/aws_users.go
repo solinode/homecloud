@@ -713,8 +713,20 @@ func (s *Service) initiateAuth(q *awsapi.Req, in map[string]any, admin bool) (an
 			return nil, invalid("Missing required parameter REFRESH_TOKEN")
 		}
 		ai.Flow = "REFRESH_TOKEN_AUTH"
+	case "USER_SRP_AUTH":
+		if !flowAllowed(cl, "ALLOW_USER_SRP_AUTH") {
+			return nil, invalid("%s flow not enabled for this client", flow)
+		}
+		if _, err := s.secretHash(cl, params["USERNAME"], params["SECRET_HASH"]); err != nil {
+			return nil, err
+		}
+		cp, err := s.srpInitiate(p, cl, params["USERNAME"], params["SRP_A"], httpx.ClientIP(q.R))
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"ChallengeName": "PASSWORD_VERIFIER", "ChallengeParameters": cp}, nil
 	default:
-		return nil, invalid("AuthFlow %s is not supported: HomeCloud supports USER_PASSWORD_AUTH and REFRESH_TOKEN_AUTH (enable ALLOW_USER_PASSWORD_AUTH on the app client)", flow)
+		return nil, invalid("AuthFlow %s is not supported: HomeCloud supports USER_SRP_AUTH, USER_PASSWORD_AUTH and REFRESH_TOKEN_AUTH (enable ALLOW_USER_SRP_AUTH or ALLOW_USER_PASSWORD_AUTH on the app client)", flow)
 	}
 	// SECRET_HASH covers the username; for refresh flows the token stands in for it.
 	who := ai.Username
@@ -757,10 +769,28 @@ func (s *Service) respondToChallenge(in map[string]any) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if name := str(in, "ChallengeName"); name != "NEW_PASSWORD_REQUIRED" {
-		return nil, invalid("challenge %q is not supported: only NEW_PASSWORD_REQUIRED", name)
-	}
 	resp := strMap(in["ChallengeResponses"])
+	switch name := str(in, "ChallengeName"); name {
+	case "NEW_PASSWORD_REQUIRED":
+	case "PASSWORD_VERIFIER":
+		if !flowAllowed(cl, "ALLOW_USER_SRP_AUTH") {
+			return nil, invalid("USER_SRP_AUTH flow not enabled for this client")
+		}
+		if _, err := s.secretHash(cl, resp["USERNAME"], resp["SECRET_HASH"]); err != nil {
+			return nil, err
+		}
+		u, err := s.srpVerify(p, cl, resp)
+		if err != nil {
+			return nil, err
+		}
+		res, err := s.signedIn(p, cl, u)
+		if err != nil {
+			return nil, err
+		}
+		return authResponse(res), nil
+	default:
+		return nil, invalid("challenge %q is not supported: only PASSWORD_VERIFIER and NEW_PASSWORD_REQUIRED", name)
+	}
 	secret, err := s.secretHash(cl, resp["USERNAME"], resp["SECRET_HASH"])
 	if err != nil {
 		return nil, err

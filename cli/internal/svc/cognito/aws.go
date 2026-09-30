@@ -25,7 +25,7 @@ import (
 
 // unsigned lists the operations callers make without AWS credentials; they
 // are authorized by the client ID, the user's password, or an access token.
-var unsigned = []string{"SignUp", "ConfirmSignUp", "ResendConfirmationCode", "InitiateAuth", "RespondToAuthChallenge", "GetUser", "GlobalSignOut",
+var unsigned = []string{"SignUp", "ConfirmSignUp", "ResendConfirmationCode", "ForgotPassword", "ConfirmForgotPassword", "InitiateAuth", "RespondToAuthChallenge", "GetUser", "GlobalSignOut",
 	"ChangePassword", "UpdateUserAttributes", "DeleteUser", "RevokeToken"}
 
 // RegisterAWS serves Cognito user pools over the AWS protocol.
@@ -50,6 +50,7 @@ func (s *Service) RegisterAWS() {
 		"AdminEnableUser":             s.awsAdminEnable,
 		"AdminDisableUser":            s.awsAdminEnable,
 		"AdminConfirmSignUp":          s.awsAdminConfirm,
+		"AdminResetUserPassword":      s.awsAdminResetPassword,
 		"AdminUserGlobalSignOut":      s.awsAdminSignOut,
 		"AdminInitiateAuth":           s.awsAdminInitiateAuth,
 		"AdminRespondToAuthChallenge": s.awsAdminRespond,
@@ -71,6 +72,8 @@ func (s *Service) RegisterAWS() {
 		"SignUp":                      s.awsSignUp,
 		"ConfirmSignUp":               s.awsConfirmSignUp,
 		"ResendConfirmationCode":      s.awsResendCode,
+		"ForgotPassword":              s.awsForgotPassword,
+		"ConfirmForgotPassword":       s.awsConfirmForgotPassword,
 		"InitiateAuth":                s.awsInitiateAuth,
 		"RespondToAuthChallenge":      s.awsRespond,
 		"GetUser":                     s.awsGetUser,

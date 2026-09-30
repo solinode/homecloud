@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Cognito user pools support `USER_SRP_AUTH` (Amplify, amazon-cognito-identity-js, pycognito), `ForgotPassword`/`ConfirmForgotPassword` and `AdminResetUserPassword`. Existing users need their password set again (or one `USER_PASSWORD_AUTH` sign-in) before SRP works.
+
 ## 0.3.0 (2026-09-30)
 
 Every service in the console now speaks the AWS protocols, security groups filter traffic inside a VPC, and there's a demo console on the website.
