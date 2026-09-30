@@ -42,6 +42,8 @@ type Record struct {
 	// Alias points at a HomeCloud resource (instance, task, database, load balancer)
 	// and follows its private IP.
 	Alias string `json:"alias,omitempty"`
+	// AliasEvaluateHealth is the alias's EvaluateTargetHealth flag, stored and reported as given.
+	AliasEvaluateHealth bool `json:"alias_evaluate_health,omitempty"`
 }
 
 type Zone struct {

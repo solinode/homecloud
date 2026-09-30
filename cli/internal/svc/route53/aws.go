@@ -690,7 +690,7 @@ func recordFromXML(x xRR) (Record, error) {
 		if !ok || lb == "" || strings.Contains(lb, ".") {
 			return Record{}, fmt.Errorf("alias target %q is not a HomeCloud load balancer DNS name", x.AliasTarget.DNSName)
 		}
-		r.Alias = lb
+		r.Alias, r.AliasEvaluateHealth = lb, x.AliasTarget.EvaluateTargetHealth
 		return r, nil
 	}
 	if x.ResourceRecords != nil {
@@ -711,7 +711,7 @@ func recordFromXML(x xRR) (Record, error) {
 func recordToXML(z Zone, r Record) xRR {
 	x := xRR{Name: escapeName(fqdn(r.Name, z.Name)), Type: r.Type}
 	if r.Alias != "" {
-		x.AliasTarget = &xAlias{HostedZoneId: elbZoneID, DNSName: r.Alias + elbSuffix}
+		x.AliasTarget = &xAlias{HostedZoneId: elbZoneID, DNSName: r.Alias + elbSuffix, EvaluateTargetHealth: r.AliasEvaluateHealth}
 		return x
 	}
 	ttl := r.TTL
