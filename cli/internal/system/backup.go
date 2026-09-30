@@ -69,6 +69,10 @@ type Backup struct {
 	// Snapshots capture files that a service keeps open, by path relative to
 	// the data directory (e.g. "dynamodb.db"); they replace a plain copy.
 	Snapshots map[string]func(io.Writer) error
+	// Flatten, when set, may return another volume to archive in place of the
+	// named one (and a function that removes it afterwards): EC2 uses it to back
+	// up a VM root disk as a standalone image. It returns "" to archive the volume itself.
+	Flatten func(ctx context.Context, volume string, labels map[string]string) (string, func(), error)
 }
 
 // excluded reports whether a data-directory path stays out of backups.
@@ -134,7 +138,7 @@ func (b *Backup) Write(ctx context.Context, w io.Writer, volumes bool, logf func
 			if err := addBytes(tw, "volumes/"+v.Name+".json", lb); err != nil {
 				return err
 			}
-			n, err := b.addVolume(ctx, tw, v.Name)
+			n, err := b.addVolume(ctx, tw, v.Name, v.Labels)
 			if err != nil {
 				m.Skipped[v.Name] = err.Error()
 				logf("backup: volume %s skipped: %v", v.Name, err)
@@ -156,7 +160,7 @@ func (b *Backup) Write(ctx context.Context, w io.Writer, volumes bool, logf func
 
 // addVolume copies a volume through a stopped helper container, pausing the
 // containers that use it meanwhile.
-func (b *Backup) addVolume(ctx context.Context, tw *tar.Writer, name string) (int64, error) {
+func (b *Backup) addVolume(ctx context.Context, tw *tar.Writer, name string, labels map[string]string) (int64, error) {
 	var paused []string
 	if cs, err := b.Docker.C.ListContainers(docker.ListContainersOptions{Filters: map[string][]string{"volume": {name}, "status": {"running"}}}); err == nil {
 		for _, c := range cs {
@@ -170,7 +174,19 @@ func (b *Backup) addVolume(ctx context.Context, tw *tar.Writer, name string) (in
 			_ = b.Docker.C.UnpauseContainer(id)
 		}
 	}()
-	id, err := createHelper(ctx, b.Docker, name)
+	src := name
+	if b.Flatten != nil {
+		// A VM's root disk is an overlay on an image a backup leaves out: archive a standalone copy.
+		alt, cleanup, err := b.Flatten(ctx, name, labels)
+		if err != nil {
+			return 0, err
+		}
+		if alt != "" {
+			defer cleanup()
+			src = alt
+		}
+	}
+	id, err := createHelper(ctx, b.Docker, src)
 	if err != nil {
 		return 0, err
 	}
