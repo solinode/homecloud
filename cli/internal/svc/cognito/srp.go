@@ -111,6 +111,11 @@ func srpServerKey(a, b, v, bigB *big.Int) []byte {
 	s := new(big.Int).Exp(v, u, srpN)
 	s.Mul(s, a).Mod(s, srpN)
 	s.Exp(s, b, srpN)
+	return srpKeyFrom(s, u)
+}
+
+// srpKeyFrom derives the session key from the shared secret S and u.
+func srpKeyFrom(s, u *big.Int) []byte {
 	prk := hmac.New(sha256.New, padBytes(u))
 	prk.Write(padBytes(s))
 	okm := hmac.New(sha256.New, prk.Sum(nil))
