@@ -106,7 +106,7 @@ func TestAWSZonesAndRecords(t *testing.T) {
 		change("CREATE", "*.example.com", "CNAME", 300, "www.example.com."),
 		change("CREATE", "v6.example.com", "AAAA", 300, "2001:db8::1"),
 		change("CREATE", "d._domainkey.example.com", "TXT", 300, `"`+strings.Repeat("k", 200)+`" "`+strings.Repeat("m", 200)+`"`),
-		`{"Action":"CREATE","ResourceRecordSet":{"Name":"app.example.com","Type":"A","AliasTarget":{"HostedZoneId":"Z35SXDOTRQ7X7K","DNSName":"web.elb.internal","EvaluateTargetHealth":false}}}`,
+		`{"Action":"CREATE","ResourceRecordSet":{"Name":"app.example.com","Type":"A","AliasTarget":{"HostedZoneId":"Z35SXDOTRQ7X7K","DNSName":"web.elb.internal","EvaluateTargetHealth":true}}}`,
 	))
 	var ch map[string]any
 	_ = json.Unmarshal([]byte(out), &ch)
@@ -128,7 +128,7 @@ func TestAWSZonesAndRecords(t *testing.T) {
 			t.Errorf("missing %s in %v", k, keys(byKey))
 		}
 	}
-	if a := byKey["app.example.com. A"]["AliasTarget"].(map[string]any); a["DNSName"] != "web.elb.internal." || a["HostedZoneId"] != "Z35SXDOTRQ7X7K" {
+	if a := byKey["app.example.com. A"]["AliasTarget"].(map[string]any); a["DNSName"] != "web.elb.internal." || a["HostedZoneId"] != "Z35SXDOTRQ7X7K" || a["EvaluateTargetHealth"] != true {
 		t.Errorf("alias %v", a)
 	}
 	txt := byKey["example.com. TXT"]["ResourceRecords"].([]any)

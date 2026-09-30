@@ -1183,21 +1183,51 @@ func (s *Service) awsServeURL(q *awsapi.Req) {
 
 // ---- tags ----
 
-func (s *Service) tagTarget(q *awsapi.Req, p map[string]string, action string) (string, error) {
+// tagTarget resolves the ARN of a taggable resource, a function or an event source mapping. For a
+// mapping it returns the mapping ID and true.
+func (s *Service) tagTarget(q *awsapi.Req, p map[string]string, action string) (id string, mapping bool, err error) {
 	arn := p["arn"]
+	if i := strings.Index(arn, ":event-source-mapping:"); i >= 0 {
+		id = arn[i+len(":event-source-mapping:"):]
+		if err := q.Authorize(action, s.mappingARN(id)); err != nil {
+			return "", true, err
+		}
+		if _, err := store.Get[Mapping](s.env.Store, cMappings, id); err != nil {
+			return "", true, mappingNotFound(id)
+		}
+		return id, true, nil
+	}
 	if !strings.Contains(arn, ":function:") {
-		return "", core.BadRequest("only functions can be tagged: %s", arn)
+		return "", false, core.BadRequest("only functions and event source mappings can be tagged: %s", arn)
 	}
 	name, _ := parseRef(arn)
 	if err := q.Authorize(action, s.fnARN(name)); err != nil {
-		return "", err
+		return "", false, err
 	}
-	_, err := s.getLatest(name)
-	return name, err
+	_, err = s.getLatest(name)
+	return name, false, err
+}
+
+// editTags applies fn to the tags of a function or event source mapping.
+func (s *Service) editTags(id string, mapping bool, fn func(core.Tags) (core.Tags, error)) error {
+	if mapping {
+		_, err := store.Update(s.env.Store, cMappings, id, func(m *Mapping) error {
+			t, err := fn(m.Tags)
+			m.Tags = t
+			return err
+		})
+		return err
+	}
+	_, err := s.modify(id, func(f *Function) error {
+		t, err := fn(f.Tags)
+		f.Tags = t
+		return err
+	})
+	return err
 }
 
 func (s *Service) awsTag(q *awsapi.Req, p map[string]string) error {
-	name, err := s.tagTarget(q, p, "lambda:TagResource")
+	id, mapping, err := s.tagTarget(q, p, "lambda:TagResource")
 	if err != nil {
 		return err
 	}
@@ -1205,17 +1235,17 @@ func (s *Service) awsTag(q *awsapi.Req, p map[string]string) error {
 	if err := s.bind(q, &in); err != nil {
 		return err
 	}
-	if _, err := s.modify(name, func(f *Function) error {
-		if f.Tags == nil {
-			f.Tags = core.Tags{}
+	if err := s.editTags(id, mapping, func(t core.Tags) (core.Tags, error) {
+		if t == nil {
+			t = core.Tags{}
 		}
 		for k, v := range in.Tags {
-			f.Tags[k] = v
+			t[k] = v
 		}
-		if len(f.Tags) > 50 {
-			return core.BadRequest("a function can have at most 50 tags")
+		if len(t) > 50 {
+			return t, core.BadRequest("a function can have at most 50 tags")
 		}
-		return nil
+		return t, nil
 	}); err != nil {
 		return err
 	}
@@ -1224,16 +1254,16 @@ func (s *Service) awsTag(q *awsapi.Req, p map[string]string) error {
 }
 
 func (s *Service) awsUntag(q *awsapi.Req, p map[string]string) error {
-	name, err := s.tagTarget(q, p, "lambda:UntagResource")
+	id, mapping, err := s.tagTarget(q, p, "lambda:UntagResource")
 	if err != nil {
 		return err
 	}
 	keys := q.R.URL.Query()["tagKeys"]
-	if _, err := s.modify(name, func(f *Function) error {
+	if err := s.editTags(id, mapping, func(t core.Tags) (core.Tags, error) {
 		for _, k := range keys {
-			delete(f.Tags, k)
+			delete(t, k)
 		}
-		return nil
+		return t, nil
 	}); err != nil {
 		return err
 	}
@@ -1242,16 +1272,23 @@ func (s *Service) awsUntag(q *awsapi.Req, p map[string]string) error {
 }
 
 func (s *Service) awsListTags(q *awsapi.Req, p map[string]string) error {
-	name, err := s.tagTarget(q, p, "lambda:ListTags")
+	id, mapping, err := s.tagTarget(q, p, "lambda:ListTags")
 	if err != nil {
 		return err
 	}
-	f, _ := s.getLatest(name)
-	tags := map[string]string(f.Tags)
-	if tags == nil {
-		tags = map[string]string{}
+	var tags core.Tags
+	if mapping {
+		m, _ := store.Get[Mapping](s.env.Store, cMappings, id)
+		tags = m.Tags
+	} else {
+		f, _ := s.getLatest(id)
+		tags = f.Tags
 	}
-	q.WriteJSON(http.StatusOK, map[string]any{"Tags": tags})
+	out := map[string]string(tags)
+	if out == nil {
+		out = map[string]string{}
+	}
+	q.WriteJSON(http.StatusOK, map[string]any{"Tags": out})
 	return nil
 }
 
