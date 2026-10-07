@@ -6,6 +6,7 @@
   <a href="https://homecloud.pages.dev/demo/"><b>Live demo console</b></a> ·
   <a href="#quick-start"><b>Quick start</b></a> ·
   <a href="docs/aws-compat.md"><b>AWS compatibility</b></a> ·
+  <a href="docs/integrations.md"><b>Testing &amp; CI</b></a> ·
   <a href="docs/comparison.md"><b>vs. LocalStack, moto, MinIO…</b></a> ·
   <a href="https://discord.gg/pemra9uaC9"><b>Discord</b></a>
 </p>
@@ -69,6 +70,8 @@ eval "$(homecloud aws-env)"
 ```
 
 S3 starts in the background on first boot; if your tests use S3 right away, wait for `s3: MinIO ready` in the log (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
+
+Or use the ready-made pieces in **[docs/integrations.md](docs/integrations.md)**: a GitHub Action that does the above in one step, and testcontainers modules for Go and Python.
 
 ---
 
