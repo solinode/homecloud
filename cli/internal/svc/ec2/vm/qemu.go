@@ -14,6 +14,12 @@ const (
 	QGAChannel   = "org.qemu.guest_agent.0"
 )
 
+// QEMUSandbox is QEMU's -sandbox setting: on top of the VM container's seccomp
+// profile it denies QEMU obsolete system calls, fork and exec (spawn), the set*id
+// calls (elevateprivileges) and scheduler and memory-policy changes
+// (resourcecontrol). QEMU needs none of them after it has started.
+const QEMUSandbox = "on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny"
+
 // Machine is a guest's hardware.
 type Machine struct {
 	Name     string // instance ID
@@ -66,6 +72,9 @@ func (m Machine) Args() []string {
 	args := []string{
 		"-name", m.Name,
 		"-nodefaults", "-no-user-config",
+		// QEMU's own seccomp filter (QEMUSandbox): a guest that exploits a device
+		// emulation bug cannot start programs or change credentials from QEMU.
+		"-sandbox", QEMUSandbox,
 	}
 	switch m.Arch {
 	case ArchAArch64:
