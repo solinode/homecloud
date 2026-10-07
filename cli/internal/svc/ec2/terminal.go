@@ -8,6 +8,7 @@ import (
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2/vm"
 	"golang.org/x/net/websocket"
 )
 
@@ -23,13 +24,21 @@ func (s *Service) terminal(c *httpx.Ctx) (any, error) {
 	if i.State != "running" {
 		return nil, core.Errf(http.StatusConflict, "IncorrectInstanceState", "instance %s is %s", i.ID, i.State)
 	}
+	cmd := []string{"/bin/sh", "-c", "cd ~ 2>/dev/null; if command -v bash >/dev/null; then exec bash -l; else exec sh -l; fi"}
+	if i.IsVM() {
+		// A VM has no docker-exec shell: the terminal is its serial console.
+		cmd = vm.SerialAttachCommand()
+	}
 	c.MarkWritten()
 	ws := websocket.Server{Handler: func(conn *websocket.Conn) {
 		defer conn.Close()
+		if i.IsVM() {
+			_ = websocket.Message.Send(conn, "[homecloud] serial console of "+i.ID+": press Enter for a login prompt (one session at a time).\r\n")
+		}
 		ex, err := s.env.Docker.C.CreateExec(docker.CreateExecOptions{
 			Container: i.ContainerID, Tty: true, AttachStdin: true, AttachStdout: true, AttachStderr: true,
 			Env: []string{"TERM=xterm-256color"},
-			Cmd: []string{"/bin/sh", "-c", "cd ~ 2>/dev/null; if command -v bash >/dev/null; then exec bash -l; else exec sh -l; fi"},
+			Cmd: cmd,
 		})
 		if err != nil {
 			_ = websocket.Message.Send(conn, "\r\n[homecloud] could not open a shell: "+err.Error()+"\r\n")

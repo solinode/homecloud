@@ -21,7 +21,7 @@ is enough.
 9. [Use it from your laptop, the AWS CLI and Terraform](#9-use-it-from-your-laptop-the-aws-cli-and-terraform)
 10. [Backups and restore](#10-backups-and-restore)
 11. [Upgrades](#11-upgrades)
-12. [KVM and VM-backed instances (upcoming)](#12-kvm-and-vm-backed-instances-upcoming)
+12. [KVM and VM instances](#12-kvm-and-vm-instances)
 13. [Security notes](#13-security-notes)
 14. [Troubleshooting](#14-troubleshooting)
 
@@ -435,23 +435,21 @@ homecloud doctor
 installs a specific release. Data is migrated automatically when the new version starts. After an
 upgrade, the first start may need network access to rebuild the security-group helper image.
 
-## 12. KVM and VM-backed instances (upcoming)
+## 12. KVM and VM instances
 
-> **Not available yet.** Today an EC2 instance in HomeCloud is a container that shares the host kernel.
-> VM-backed instances (QEMU/KVM) are on the roadmap; nothing in the current release uses KVM, and no
-> configuration is needed for it now.
+The VM images (`ami-ubuntu-24-04-vm`, `ami-debian-12-vm`) boot a real virtual machine under QEMU, inside a
+container on the instance's VPC network. Container images need nothing of this.
 
-When VM-backed instances arrive they will need hardware virtualization on the machine that runs Docker,
-exposed to the containers HomeCloud starts. If you are choosing hardware or a VPS today and want to keep
-that door open:
-
-- Prefer bare metal, a home server, or a VPS that offers nested virtualization. Many plain VPS plans
-  do not.
-- Check the device: `ls -l /dev/kvm`. If it is missing, `sudo apt install cpu-checker && kvm-ok` tells
-  you whether the CPU and firmware support it.
-- The Docker host must be able to hand `/dev/kvm` to containers. Docker Desktop and OrbStack on macOS
-  and Windows run Docker in a VM and may not expose it. The exact setup will be documented when the
-  feature ships.
+- **KVM.** With `/dev/kvm` on the Docker host, guests run hardware-accelerated; without it they are
+  emulated (works, but boots take minutes). Prefer bare metal, a home server, or a VPS with nested
+  virtualization; check with `ls -l /dev/kvm` (`sudo apt install cpu-checker && kvm-ok` tells whether the
+  CPU and firmware support it). Docker Desktop and OrbStack on macOS run guests emulated.
+- **Networking.** passt gives the guest the instance's private address. Where passt cannot sandbox
+  itself, notably Ubuntu 24.04 hosts (`kernel.apparmor_restrict_unprivileged_userns=1`), guests fall back
+  to QEMU user-mode networking: NAT, no private address of their own, only the ports the security groups
+  allow are forwarded. The instance reports `vm_network: user` and the server log says why
+  ([#90](https://github.com/solinode/homecloud/issues/90)).
+- **Disk.** Cloud images (about 600 MB each) are downloaded on first use into the `hc-vm-images` volume.
 
 ## 13. Security notes
 

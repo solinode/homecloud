@@ -178,6 +178,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	}
 	ec2Svc := ec2.New(env, vpcSvc)
 	ec2Svc.Recover()
+	cw.GuestUsage = ec2Svc.GuestUsage
 	s3Svc := s3.New(env, secSvc)
 	vpcSvc.AfterCreate = func(v vpc.VPC) {
 		s3Svc.ConnectNetwork(v)
@@ -280,7 +281,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	}
 
 	backup := &system.Backup{Cfg: cfg, Docker: dk, AccountID: account, Version: Version,
-		Snapshots: map[string]func(io.Writer) error{"dynamodb.db": ddb.Snapshot}}
+		Snapshots: map[string]func(io.Writer) error{"dynamodb.db": ddb.Snapshot}, Flatten: ec2Svc.FlattenForBackup}
 	mux := http.NewServeMux()
 	rt := &httpx.Router{Mux: mux, Auth: iamSvc, Account: account, Audit: trailSvc.Record}
 	for _, s := range []routable{iamSvc, secSvc, cw, vpcSvc, ec2Svc, s3Svc, rdsSvc, lambdaSvc, sqsSvc, snsSvc, ddb, eventsSvc, kmsSvc, ssmSvc, ecrSvc, elbSvc, ecsSvc, sfnSvc, cfnSvc, cognitoSvc, asgSvc, acmSvc, dnsSvc, trailSvc, backup} {

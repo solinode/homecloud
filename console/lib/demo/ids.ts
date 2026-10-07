@@ -38,6 +38,8 @@ export const INSTANCE = {
   bastion: stableId("i-", "shop-bastion"),
   batch: stableId("i-", "shop-batch-worker"),
   dev: stableId("i-", "dev-sandbox"),
+  ledger: stableId("i-", "shop-ledger-vm"),
+  audit: stableId("i-", "audit-vm"),
 }
 
 export const AMI = {
@@ -46,6 +48,8 @@ export const AMI = {
   alpine: stableId("ami-", "alpine-3.20"),
   amazonLinux: stableId("ami-", "amazon-linux-2023"),
   shopWeb: stableId("ami-", "shop-web-v14"),
+  ubuntuVm: stableId("ami-", "ubuntu-24.04-vm"),
+  debianVm: stableId("ami-", "debian-12-vm"),
 }
 
 export const KEY_PAIRS = ["shop-prod", "shop-dev", "alice-laptop"]

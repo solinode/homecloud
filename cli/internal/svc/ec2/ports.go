@@ -98,7 +98,7 @@ func (s *Service) portsMatch(inst Instance) bool {
 			return false
 		}
 	}
-	return true
+	return s.vmFwdMatches(inst)
 }
 
 // groupChanged applies a changed security group to the instances using it.

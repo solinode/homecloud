@@ -124,7 +124,7 @@ func (s *Service) CreateSnapshot(volumeID, description string, tags core.Tags) (
 		defer core.Recover("snapshot " + sn.ID)
 		ctx, cancel := context.WithTimeout(context.Background(), time.Hour)
 		defer cancel()
-		err := s.copyVolume(ctx, volumeName(v.ID), snapVolume(sn.ID))
+		err := s.snapshotCopy(ctx, v, snapVolume(sn.ID))
 		_, _ = store.Update(s.env.Store, cSnapshots, sn.ID, func(x *Snapshot) error {
 			now := core.Now()
 			x.CompletedAt = &now
@@ -207,6 +207,9 @@ func (s *Service) AttachVolume(volumeID, instanceID, device string) (Volume, err
 	if i.State != "running" && i.State != "stopped" {
 		return Volume{}, core.Errf(http.StatusBadRequest, "IncorrectState", "Instance '%s' is not 'running' or 'stopped'.", i.ID)
 	}
+	if i.IsVM() && (device == "/dev/xvda" || device == "/dev/sda1" || device == "/dev/sda") {
+		return Volume{}, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "Value (%s) for parameter device is invalid: it is the root device of a VM instance.", device)
+	}
 	for _, a := range i.Volumes {
 		if a.Device == device {
 			return Volume{}, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "Attachment point %s is already in use", device)
@@ -276,6 +279,9 @@ func (s *Service) DetachVolume(volumeID, instanceID, device string, force bool) 
 	i, err := s.get(v.AttachedTo)
 	if err != nil {
 		return v, err
+	}
+	if root, ok := vmRoot(i); ok && root.VolumeID == v.ID {
+		return v, core.Errf(http.StatusBadRequest, "OperationNotPermitted", "Volume '%s' is the root volume of instance %s; terminate the instance to release it.", v.ID, i.ID)
 	}
 	v, err = store.Update(s.env.Store, cVolumes, v.ID, func(x *Volume) error { x.AttachState = "detaching"; return nil })
 	if err != nil {
@@ -359,6 +365,9 @@ func (s *Service) recreate(id string) error {
 	}
 	if i.ContainerID == "" || i.State == "terminated" {
 		return nil
+	}
+	if i.IsVM() {
+		return s.rebuildVM(i)
 	}
 	v, err := s.vpc.GetVPC(i.VpcID)
 	if err != nil {

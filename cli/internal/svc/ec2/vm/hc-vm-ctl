@@ -1,0 +1,5 @@
+#!/bin/sh
+# Sends QMP commands to the VM's QEMU: hc-vm-ctl system_powerdown|system_reset|quit
+set -eu
+[ -S /run/qmp.sock ] || { echo "the virtual machine is not running" >&2; exit 1; }
+printf '{"execute":"qmp_capabilities"}\n{"execute":"%s"}\n' "$1" | socat -t 2 - UNIX-CONNECT:/run/qmp.sock

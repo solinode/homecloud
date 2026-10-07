@@ -23,7 +23,8 @@ import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { Image } from "@/lib/types"
-import { instanceHref } from "./instance-actions"
+import { Badge } from "@/components/ui/badge"
+import { instanceHref, isVMImage } from "./instance-actions"
 
 const IMAGES_PATH = "/api/v1/ec2/images"
 type Owner = "all" | "catalog" | "mine"
@@ -40,7 +41,18 @@ const columns: Column<Image>[] = [
     value: (im) => im.description,
     hideBelow: "lg",
   },
-  { id: "ref", header: "Docker image", cell: (im) => <span className="font-mono text-[13px]">{im.ref}</span>, value: (im) => im.ref },
+  {
+    id: "kind",
+    header: "Type",
+    cell: (im) => <Badge variant={isVMImage(im) ? "secondary" : "outline"}>{isVMImage(im) ? "VM" : "Container"}</Badge>,
+    value: (im) => (isVMImage(im) ? "VM" : "Container"),
+  },
+  {
+    id: "ref",
+    header: "Docker image / VM base",
+    cell: (im) => <span className="font-mono text-[13px]">{im.ref || im.vm_base || "-"}</span>,
+    value: (im) => im.ref || im.vm_base || "",
+  },
   {
     id: "owner",
     header: "Owner",
@@ -58,7 +70,7 @@ const columns: Column<Image>[] = [
   {
     id: "boot",
     header: "Boot mode",
-    cell: (im) => (im.keep_alive ? "VM-like (keep alive)" : "Application"),
+    cell: (im) => (isVMImage(im) ? "Virtual machine" : im.keep_alive ? "OS-like (keep alive)" : "Application"),
     value: (im) => (im.keep_alive ? "keep alive" : "application"),
     hideBelow: "md",
   },
