@@ -92,7 +92,9 @@ if [ "${HC_VM_NET:-}" != "user" ]; then
   aa=$(cat /proc/$pid/attr/current 2>/dev/null || true)
   case "$aa" in ""|unconfined) ;; *) echo "[homecloud] passt runs under the AppArmor profile $aa" ;; esac
   if [ ! -S /tmp/passt.sock ] || ! kill -0 "$pid" 2>/dev/null || grep -q "Failed to sandbox" /run/passt.log; then
+    # It must be gone, with every port it bound, before QEMU forwards ports itself.
     kill "$pid" 2>/dev/null || true
+    wait "$pid" 2>/dev/null || true
     pid=""
     echo "[homecloud] passt did not start; falling back to user-mode networking:" >&2
     tail -n 40 /run/passt.log >&2 || true
