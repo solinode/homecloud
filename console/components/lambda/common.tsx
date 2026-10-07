@@ -4,9 +4,9 @@ import { useMemo } from "react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag, type TagAccent } from "@/components/console/tag"
 import { api, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { LambdaAccountSettings, LambdaFunction, LambdaRuntime } from "@/lib/types"
@@ -84,11 +84,23 @@ export function useRuntimeLabels() {
   }, [data])
 }
 
+/** runtimeAccent tints the runtime Tag by language family. */
+export function runtimeAccent(runtime: string): TagAccent {
+  const r = runtime.toLowerCase()
+  if (r.startsWith("python")) return "info"
+  if (r.startsWith("nodejs")) return "success"
+  if (r.startsWith("ruby")) return "danger"
+  if (r.startsWith("java")) return "warning"
+  if (r.startsWith("dotnet")) return "violet"
+  if (r.startsWith("provided")) return "brand"
+  return "neutral"
+}
+
 export function RuntimeBadge({ runtime, label }: { runtime: string; label?: string }) {
   return (
-    <Badge variant="outline" className="font-normal" title={runtime}>
+    <Tag accent={runtimeAccent(runtime)} title={runtime}>
       {label ?? runtime}
-    </Badge>
+    </Tag>
   )
 }
 

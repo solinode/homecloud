@@ -43,7 +43,7 @@ export function ImageUriPicker({ id, value, onChange, invalid }: { id?: string; 
       />
       {repos.data && repos.data.length > 0 && (
         <div className="flex max-w-2xl flex-col gap-2 sm:flex-row sm:items-center">
-          <span className="text-muted-foreground shrink-0 text-xs">Browse ECR:</span>
+          <span className="hc-eyebrow shrink-0">Browse ECR</span>
           <Select value={repo} onValueChange={setRepo}>
             <SelectTrigger className="h-8 w-full min-w-0 sm:w-56" aria-label="ECR repository">
               <SelectValue placeholder="Repository" />
@@ -135,7 +135,7 @@ export function ImageCodeTab({ fn }: { fn: LambdaFunction }) {
       <Section title="Container image" description="The function runs this image. Deploying pulls the image again, even when the tag is unchanged.">
         <form onSubmit={deploy} className="flex flex-col gap-4">
           <KeyValueGrid columns={2} items={[{ label: "Current image URI", value: <CopyableText value={fn.image_uri ?? ""} />, wide: true }]} />
-          <Field label="Image URI" htmlFor="img-uri">
+          <Field label="Image URI" htmlFor="img-uri" help="Any registry URI the host can pull, or pick an image from ECR.">
             <ImageUriPicker id="img-uri" value={uri} onChange={setUri} />
           </Field>
           <div className="flex justify-end border-t pt-4">
@@ -173,7 +173,7 @@ export function ImageCodeTab({ fn }: { fn: LambdaFunction }) {
             <Field label="Command" htmlFor="img-cmd" optional help="Comma-separated, e.g. app.handler">
               <Input id="img-cmd" value={cmd} onChange={(e) => setCmd(e.target.value)} className="font-mono" />
             </Field>
-            <Field label="Working directory" htmlFor="img-wd" optional>
+            <Field label="Working directory" htmlFor="img-wd" optional help="An absolute path, e.g. /var/task">
               <Input id="img-wd" value={workdir} onChange={(e) => setWorkdir(e.target.value)} className="font-mono" />
             </Field>
             <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
@@ -190,9 +190,9 @@ export function ImageCodeTab({ fn }: { fn: LambdaFunction }) {
           <KeyValueGrid
             columns={3}
             items={[
-              { label: "Entrypoint", value: <span className="font-mono text-[13px]">{(ic.EntryPoint ?? []).join(" ") || "Image default"}</span> },
-              { label: "Command", value: <span className="font-mono text-[13px]">{(ic.Command ?? []).join(" ") || "Image default"}</span> },
-              { label: "Working directory", value: <span className="font-mono text-[13px]">{ic.WorkingDirectory || "Image default"}</span> },
+              { label: "Entrypoint", value: (ic.EntryPoint ?? []).join(" ") ? <span className="font-mono text-[13px]">{(ic.EntryPoint ?? []).join(" ")}</span> : <span className="text-muted-foreground">Image default</span> },
+              { label: "Command", value: (ic.Command ?? []).join(" ") ? <span className="font-mono text-[13px]">{(ic.Command ?? []).join(" ")}</span> : <span className="text-muted-foreground">Image default</span> },
+              { label: "Working directory", value: ic.WorkingDirectory ? <span className="font-mono text-[13px]">{ic.WorkingDirectory}</span> : <span className="text-muted-foreground">Image default</span> },
             ]}
           />
         )}

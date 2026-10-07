@@ -8,25 +8,27 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyButton } from "@/components/console/copy-button"
+import { CellLink, CellText, DataTable } from "@/components/console/data-table"
 import { Field } from "@/components/console/form-field"
 import { KeyValueGrid } from "@/components/console/key-value"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { Section } from "@/components/console/section"
+import { Tag } from "@/components/console/tag"
 import { TagsEditor, rowsToTags, tagsToRows, type TagRow } from "@/components/console/tags-editor"
 import { api, errorMessage } from "@/lib/api"
 import { formatMemoryMB } from "@/lib/format"
 import { revalidate } from "@/lib/hooks"
 import type { FunctionConfigInput, FunctionDetail, FunctionUrlConfig, LambdaFunction } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import { RolePicker } from "@/components/iam/role-picker"
 import { roleHref } from "@/components/iam/role-common"
 
-import { ARCHITECTURES, FunctionStateBadge, LAMBDA_PATH, MEMORY_PRESETS, UpdateStatusBadge, fnPath, formatTimeout, handlerError, handlerHelp, layerHref, splitLayerArn, useRuntimes } from "./common"
+import { ARCHITECTURES, FunctionStateBadge, RuntimeBadge, LAMBDA_PATH, MEMORY_PRESETS, UpdateStatusBadge, fnPath, formatTimeout, handlerError, handlerHelp, layerHref, splitLayerArn, useRuntimes } from "./common"
 import { AsyncConfig, ConcurrencyConfig } from "./config-advanced"
 import { envErrors } from "./create-function"
 import { LayersPicker } from "./pickers"
@@ -179,35 +181,18 @@ function LayersConfig({ fn }: { fn: LambdaFunction }) {
       ) : current.length === 0 ? (
         <p className="text-muted-foreground text-sm">No layers.</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 border-b">
-                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Order</th>
-                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Layer</th>
-                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Version</th>
-                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">ARN</th>
-              </tr>
-            </thead>
-            <tbody>
-              {current.map((a, i) => {
-                const p = splitLayerArn(a)
-                return (
-                  <tr key={a} className="border-b last:border-0">
-                    <td className="px-4 py-2">{i + 1}</td>
-                    <td className="px-4 py-2">
-                      <Link href={layerHref(p.name)} className="text-primary hover:underline">
-                        {p.name}
-                      </Link>
-                    </td>
-                    <td className="px-4 py-2">{p.version}</td>
-                    <td className="px-4 py-2 font-mono text-xs break-all">{a}</td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          data={current.map((arn, i) => ({ arn, order: i + 1, ...splitLayerArn(arn) }))}
+          rowId={(r) => r.arn}
+          noSearch
+          className="rounded-none border-0 shadow-none"
+          columns={[
+            { id: "order", header: "Order", value: (r) => r.order, cell: (r) => <span className="tabular-nums">{r.order}</span> },
+            { id: "name", header: "Layer", value: (r) => r.name, cell: (r) => <CellLink href={layerHref(r.name)}>{r.name}</CellLink> },
+            { id: "version", header: "Version", value: (r) => Number(r.version), cell: (r) => <span className="font-mono text-[13px]">{r.version}</span> },
+            { id: "arn", header: "ARN", value: (r) => r.arn, cell: (r) => <CellText mono muted max="36rem">{r.arn}</CellText>, hideBelow: "md" },
+          ]}
+        />
       )}
     </Section>
   )
@@ -294,7 +279,7 @@ function GeneralConfig({ fn }: { fn: LambdaFunction }) {
             ...(isImage
               ? [{ label: "Image URI", value: <span className="font-mono text-[13px] break-all">{fn.image_uri}</span>, wide: true }]
               : [
-                  { label: "Runtime", value: rtLabel(fn.runtime) },
+                  { label: "Runtime", value: <RuntimeBadge runtime={fn.runtime} label={rtLabel(fn.runtime)} /> },
                   { label: "Handler", value: <span className="font-mono text-[13px]">{fn.handler}</span> },
                 ]),
             { label: "Architecture", value: <span className="font-mono text-[13px]">{(fn.architectures ?? []).join(", ") || "x86_64"}</span> },
@@ -337,20 +322,20 @@ function GeneralConfig({ fn }: { fn: LambdaFunction }) {
         </Field>
         <div className="grid grid-cols-1 gap-5 md:grid-cols-2">
           {!isImage && (
-          <Field label="Runtime" htmlFor="cfg-runtime" help="Changing the runtime does not convert your code.">
-            <Select value={runtime} onValueChange={setRuntime}>
-              <SelectTrigger id="cfg-runtime" className="w-full max-w-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {(runtimes.data ?? [{ name: fn.runtime, label: fn.runtime }]).map((r) => (
-                  <SelectItem key={r.name} value={r.name}>
-                    {r.label} <span className="text-muted-foreground font-mono text-xs">{r.name}</span>
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </Field>
+            <Field label="Runtime" htmlFor="cfg-runtime" help="Changing the runtime does not convert your code.">
+              <Select value={runtime} onValueChange={setRuntime}>
+                <SelectTrigger id="cfg-runtime" className="w-full max-w-xs">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {(runtimes.data ?? [{ name: fn.runtime, label: fn.runtime }]).map((r) => (
+                    <SelectItem key={r.name} value={r.name}>
+                      {r.label} <span className="text-muted-foreground font-mono text-xs">{r.name}</span>
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
           )}
           {!isImage && (
             <Field label="Handler" htmlFor="cfg-handler" error={errors.handler} help={handlerHelp(runtime)}>
@@ -448,7 +433,7 @@ function EnvironmentConfig({ fn }: { fn: LambdaFunction }) {
       {editing ? (
         <form onSubmit={save} className="flex flex-col gap-4">
           <TagsEditor rows={rows} onChange={setRows} keyPlaceholder="Key" valuePlaceholder="Value" addLabel="Add environment variable" />
-          {err && <p className="text-destructive text-xs">{err}</p>}
+          {err && <p className="text-destructive text-xs" role="alert">{err}</p>}
           <div className="flex flex-wrap justify-end gap-2 border-t pt-4">
             <Button type="button" variant="outline" onClick={() => setEditing(false)} disabled={pending}>
               Cancel
@@ -462,24 +447,23 @@ function EnvironmentConfig({ fn }: { fn: LambdaFunction }) {
       ) : entries.length === 0 ? (
         <p className="text-muted-foreground text-sm">No environment variables.</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 border-b">
-                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Key</th>
-                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Value</th>
-              </tr>
-            </thead>
-            <tbody>
-              {entries.map(([k, v]) => (
-                <tr key={k} className="border-b last:border-0">
-                  <td className="px-4 py-2 font-mono text-[13px]">{k}</td>
-                  <td className="px-4 py-2 font-mono text-[13px] break-all">{v || <span className="text-muted-foreground">(empty)</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          data={entries.map(([key, value]) => ({ key, value }))}
+          rowId={(r) => r.key}
+          noSearch={entries.length <= 10}
+          searchPlaceholder="Find variables"
+          defaultSort={{ id: "key" }}
+          className="rounded-none border-0 shadow-none"
+          columns={[
+            { id: "key", header: "Key", value: (r) => r.key, cell: (r) => <CellText mono>{r.key}</CellText> },
+            {
+              id: "value",
+              header: "Value",
+              value: (r) => r.value,
+              cell: (r) => (r.value ? <span className="font-mono text-[13px] break-all">{r.value}</span> : <span className="text-muted-foreground">(empty)</span>),
+            },
+          ]}
+        />
       )}
     </Section>
   )
@@ -535,15 +519,10 @@ export function FunctionUrlTab({ fn }: { fn: LambdaFunction }) {
           </div>
 
           <div className="flex flex-col gap-2">
-            <span className="flex items-center gap-2 text-sm font-medium">
+            <span className="flex items-center gap-2 text-[13px] font-medium">
               Auth type {pending === "auth" && <Loader2 className="text-muted-foreground size-4 animate-spin" />}
             </span>
-            <RadioGroup
-              value={cfg.auth_type}
-              onValueChange={(v) => put({ ...cfg, auth_type: v as FunctionUrlConfig["auth_type"] }, "auth")}
-              disabled={!!pending}
-              className="grid-cols-1 sm:grid-cols-2"
-            >
+            <OptionGroup label="Auth type">
               {(
                 [
                   { v: "NONE", icon: Globe, title: "NONE", text: "Public: anyone who can reach this host can invoke the function." },
@@ -555,24 +534,17 @@ export function FunctionUrlTab({ fn }: { fn: LambdaFunction }) {
                   },
                 ] as const
               ).map((o) => (
-                <label
+                <OptionCard
                   key={o.v}
-                  htmlFor={`auth-${o.v}`}
-                  className={cn(
-                    "flex cursor-pointer items-start gap-3 rounded-md border p-3",
-                    cfg.auth_type === o.v && "border-primary bg-primary/5 dark:bg-primary/10",
-                  )}
-                >
-                  <RadioGroupItem id={`auth-${o.v}`} value={o.v} className="mt-0.5" />
-                  <span className="flex flex-col gap-0.5">
-                    <span className="flex items-center gap-1.5 font-mono text-sm font-medium">
-                      <o.icon className="size-3.5" /> {o.title}
-                    </span>
-                    <span className="text-muted-foreground text-xs">{o.text}</span>
-                  </span>
-                </label>
+                  selected={cfg.auth_type === o.v}
+                  disabled={!!pending}
+                  onSelect={() => cfg.auth_type !== o.v && put({ ...cfg, auth_type: o.v }, "auth")}
+                  icon={o.icon}
+                  title={<span className="font-mono">{o.title}</span>}
+                  description={o.text}
+                />
               ))}
-            </RadioGroup>
+            </OptionGroup>
           </div>
 
           {cfg.enabled && url ? (
@@ -592,7 +564,7 @@ export function FunctionUrlTab({ fn }: { fn: LambdaFunction }) {
                     </span>
                   ),
                 },
-                { label: "Auth type", value: <span className="font-mono text-[13px]">{cfg.auth_type}</span> },
+                { label: "Auth type", value: <Tag accent={iam ? "warning" : "info"}>{cfg.auth_type}</Tag> },
                 { label: "Path", value: "Any path below the URL is passed to the function as rawPath." },
               ]}
             />
@@ -603,9 +575,9 @@ export function FunctionUrlTab({ fn }: { fn: LambdaFunction }) {
       </Section>
 
       {cfg.enabled && url && (
-        <Section title="Invoke with curl" actions={<CopyButton value={curl} size="sm" label="Copy command" />}>
-          <pre className="bg-muted/50 overflow-x-auto rounded-md border p-3 font-mono text-[12.5px] leading-5">{curl}</pre>
-          <p className="text-muted-foreground mt-2 text-xs">
+        <Section title="Invoke with curl">
+          <CodeBlock title="Shell" code={curl} copyLabel="Copy command" />
+          <p className="text-muted-foreground mt-3 text-xs">
             The function receives the request as an API Gateway v2 event. If it returns {"{ statusCode, headers, body }"} that becomes the HTTP response;
             any other value is returned as a JSON body with status 200.
             {iam && (

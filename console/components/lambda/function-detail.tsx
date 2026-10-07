@@ -2,13 +2,15 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { AlertCircle, ArrowLeft, Download, ExternalLink, FlaskConical, Loader2, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, Copy, Download, ExternalLink, FlaskConical, Loader2, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { roleHref } from "@/components/iam/role-common"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { CopyButton, CopyableText } from "@/components/console/copy-button"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { CopyButton, CopyableText, copyText } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -16,6 +18,7 @@ import { DetailSkeleton } from "@/components/console/loading"
 import { MetricsPanel } from "@/components/console/metrics-panel"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { TimeAgo } from "@/components/console/time-ago"
 import { logGroupHref } from "@/components/cloudwatch/common"
 import { ApiError } from "@/lib/api"
@@ -101,9 +104,21 @@ export function FunctionDetail() {
                 </a>
               </Button>
             )}
-            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(true)}>
-              <Trash2 /> Delete
-            </Button>
+            <ActionsMenu
+              items={[
+                {
+                  label: "Copy ARN",
+                  icon: <Copy />,
+                  onSelect: async () => {
+                    if (await copyText(fn.arn)) toast.success("ARN copied")
+                  },
+                },
+                { label: "View versions", onSelect: () => setParam("tab", "versions") },
+                { label: "Function URL", onSelect: () => setParam("tab", "url") },
+                { separator: true },
+                { label: "Delete function", icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(true) },
+              ]}
+            />
             <Button size="sm" onClick={() => setParam("tab", "test")}>
               <FlaskConical /> Test
             </Button>
@@ -202,6 +217,19 @@ function Overview({ fn, detail }: { fn: LambdaFunction; detail: FunctionDetailDa
   const roleName = fn.role?.split("/").pop()
   const layers = fn.layers ?? []
   return (
+    <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+      <StatTile label="Memory" value={formatMemoryMB(fn.memory_mb)} />
+      <StatTile label="Timeout" value={formatTimeout(fn.timeout_seconds)} />
+      <StatTile
+        label="Concurrency"
+        tone={(detail.concurrent_executions ?? 0) > 0 ? "success" : undefined}
+        value={detail.concurrent_executions ?? 0}
+        unit={`/ ${detail.concurrency_limit ?? "-"}`}
+        caption={fn.reserved_concurrency != null ? "Running / reserved limit" : "Running / limit"}
+      />
+      <StatTile label="Code size" value={formatBytes(fn.code_size)} />
+    </div>
     <Section title="Function overview">
       <KeyValueGrid
         columns={3}
@@ -238,19 +266,7 @@ function Overview({ fn, detail }: { fn: LambdaFunction; detail: FunctionDetailDa
               <span className="text-muted-foreground">None</span>
             ),
           },
-          {
-            label: "Concurrency",
-            value: (
-              <span>
-                {detail.concurrent_executions ?? 0} running / limit {detail.concurrency_limit ?? "-"}
-                {fn.reserved_concurrency != null && <span className="text-muted-foreground text-xs"> (reserved)</span>}
-              </span>
-            ),
-          },
-          { label: "Memory", value: formatMemoryMB(fn.memory_mb) },
-          { label: "Timeout", value: formatTimeout(fn.timeout_seconds) },
           { label: "Last modified", value: <span>{formatDate(fn.last_modified)} (<TimeAgo value={fn.last_modified} />)</span> },
-          { label: "Code size", value: formatBytes(fn.code_size) },
           { label: "Code SHA-256", value: <CopyableText value={fn.code_sha256} display={`${fn.code_sha256.slice(0, 16)}…`} /> },
           { label: "Latest version", value: fn.last_version ? String(fn.last_version) : <span className="text-muted-foreground">Not published</span> },
           {
@@ -279,5 +295,6 @@ function Overview({ fn, detail }: { fn: LambdaFunction; detail: FunctionDetailDa
         ]}
       />
     </Section>
+    </div>
   )
 }

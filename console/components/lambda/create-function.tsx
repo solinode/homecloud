@@ -3,23 +3,25 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Box, FileArchive, FileCode2, Loader2, Package, Rocket, Upload, X } from "lucide-react"
+import { Box, Cpu, FileArchive, FileCode2, Loader2, Package, Rocket, Upload, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Skeleton } from "@/components/ui/skeleton"
+import { CodeBlock } from "@/components/console/code-block"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { Section } from "@/components/console/section"
+import { StatusBadge } from "@/components/console/status-badge"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
 import { RolePicker } from "@/components/iam/role-picker"
 import { api, errorMessage } from "@/lib/api"
 import { formatBytes, formatMemoryMB } from "@/lib/format"
 import { revalidate } from "@/lib/hooks"
 import type { CreateFunctionInput, LambdaFunction } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import {
   ARCHITECTURES,
@@ -29,6 +31,7 @@ import {
   LAMBDA_PATH,
   MAX_ZIP_BYTES,
   MEMORY_PRESETS,
+  RuntimeBadge,
   fileToBase64,
   formatTimeout,
   functionHref,
@@ -50,43 +53,6 @@ export function envErrors(rows: TagRow[]): string | null {
   const bad = keys.find((k) => !ENV_KEY_RE.test(k))
   if (bad) return `"${bad}" is not a valid name: use letters, digits and underscores, not starting with a digit`
   return null
-}
-
-/** OptionCard is a large radio button used for package type and code source choices. */
-function OptionCard({
-  active,
-  disabled,
-  onClick,
-  icon: Icon,
-  title,
-  text,
-}: {
-  active: boolean
-  disabled?: boolean
-  onClick: () => void
-  icon: React.ComponentType<{ className?: string }>
-  title: string
-  text: string
-}) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={active}
-      disabled={disabled}
-      onClick={onClick}
-      className={cn(
-        "flex items-start gap-3 rounded-md border p-3 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-60",
-        active ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
-      )}
-    >
-      <Icon className="text-muted-foreground mt-0.5 size-5 shrink-0" />
-      <span className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium">{title}</span>
-        <span className="text-muted-foreground text-xs">{text}</span>
-      </span>
-    </button>
-  )
 }
 
 export function CreateFunction() {
@@ -220,22 +186,22 @@ export function CreateFunction() {
                 <Input id="fn-desc" value={description} onChange={(e) => setDescription(e.target.value)} className="max-w-xl" maxLength={256} />
               </Field>
               <Field label="Package type">
-                <div role="radiogroup" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <OptionGroup label="Package type">
                   <OptionCard
-                    active={pkg === "Zip"}
-                    onClick={() => setPkg("Zip")}
+                    selected={pkg === "Zip"}
+                    onSelect={() => setPkg("Zip")}
                     icon={Package}
                     title="Zip archive"
-                    text="Pick a managed runtime; author code in the console or upload a .zip."
+                    description="Pick a managed runtime; author code in the console or upload a .zip."
                   />
                   <OptionCard
-                    active={pkg === "Image"}
-                    onClick={() => setPkg("Image")}
+                    selected={pkg === "Image"}
+                    onSelect={() => setPkg("Image")}
                     icon={Box}
                     title="Container image"
-                    text="Run an image that implements the Lambda Runtime API, e.g. from ECR."
+                    description="Run an image that implements the Lambda Runtime API, e.g. from ECR."
                   />
-                </div>
+                </OptionGroup>
               </Field>
               {pkg === "Image" ? (
                 <Field label="Container image URI" htmlFor="fn-image" error={err("image")} help="The image is pulled when the function is created and whenever its code is updated.">
@@ -248,53 +214,42 @@ export function CreateFunction() {
                   ) : !runtimes.data ? (
                     <Skeleton className="h-20 rounded-md" />
                   ) : (
-                    <div role="radiogroup" className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                      {runtimes.data.map((r) => {
-                        const active = r.name === runtime
-                        return (
-                          <button
-                            key={r.name}
-                            type="button"
-                            role="radio"
-                            aria-checked={active}
-                            onClick={() => setRuntime(r.name)}
-                            className={cn(
-                              "flex min-w-0 flex-col items-start gap-0.5 rounded-md border px-3 py-2.5 text-left transition-colors",
-                              active ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
-                            )}
-                          >
-                            <span className="text-sm font-medium">
-                              {r.label}
-                              {r.deprecated && <span className="text-muted-foreground text-xs font-normal"> (deprecated)</span>}
-                            </span>
-                            <span className="text-muted-foreground font-mono text-xs">{r.name}</span>
-                            <span className="text-muted-foreground max-w-full truncate text-xs" title={r.image}>
+                    <OptionGroup label="Runtime" columns={3}>
+                      {runtimes.data.map((r) => (
+                        <OptionCard
+                          key={r.name}
+                          selected={r.name === runtime}
+                          onSelect={() => setRuntime(r.name)}
+                          title={r.label}
+                          badge={r.deprecated ? <StatusBadge status="deprecated" label="Deprecated" tone="warning" /> : undefined}
+                          description={
+                            <span className="block truncate" title={r.image}>
                               {r.template ? `Image ${r.image}` : "Deployment package required"}
                             </span>
-                          </button>
-                        )
-                      })}
-                    </div>
+                          }
+                        >
+                          <span className="mt-1.5">
+                            <RuntimeBadge runtime={r.name} />
+                          </span>
+                        </OptionCard>
+                      ))}
+                    </OptionGroup>
                   )}
                 </Field>
               )}
               <Field label="Architecture" help="The instruction set of the execution environment.">
-                <div role="radiogroup" className="flex flex-wrap gap-2">
+                <OptionGroup label="Architecture">
                   {ARCHITECTURES.map((a) => (
-                    <Button
+                    <OptionCard
                       key={a}
-                      type="button"
-                      role="radio"
-                      aria-checked={arch === a}
-                      size="sm"
-                      variant={arch === a ? "secondary" : "outline"}
-                      onClick={() => setArch(a)}
-                      className={cn("font-mono", arch === a && "ring-primary ring-1")}
-                    >
-                      {a}
-                    </Button>
+                      selected={arch === a}
+                      onSelect={() => setArch(a)}
+                      icon={Cpu}
+                      title={<span className="font-mono">{a}</span>}
+                      description={a === "arm64" ? "64-bit ARM (Graviton, Apple silicon, Raspberry Pi)" : "64-bit x86 (Intel and AMD)"}
+                    />
                   ))}
-                </div>
+                </OptionGroup>
               </Field>
             </div>
           </Section>
@@ -302,33 +257,32 @@ export function CreateFunction() {
           {pkg === "Zip" && (
             <Section title="Code source">
               <div className="flex flex-col gap-4">
-                <div role="radiogroup" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                <OptionGroup label="Code source">
                   <OptionCard
-                    active={source === "template"}
+                    selected={source === "template"}
                     disabled={!hasTemplate}
-                    onClick={() => setSource("template")}
+                    onSelect={() => setSource("template")}
                     icon={FileCode2}
                     title="Start from runtime template"
-                    text={hasTemplate ? "A hello-world handler you can edit in the console." : `${rt?.label ?? "This runtime"} has no template: upload a package.`}
+                    description={hasTemplate ? "A hello-world handler you can edit in the console." : `${rt?.label ?? "This runtime"} has no template: upload a package.`}
                   />
                   <OptionCard
-                    active={source === "zip"}
-                    onClick={() => setSource("zip")}
+                    selected={source === "zip"}
+                    onSelect={() => setSource("zip")}
                     icon={FileArchive}
                     title="Upload a .zip file"
-                    text="A deployment package with your code and dependencies."
+                    description="A deployment package with your code and dependencies."
                   />
-                </div>
+                </OptionGroup>
 
                 {source === "template" ? (
                   rt ? (
-                    <div className="overflow-hidden rounded-md border">
-                      <div className="bg-muted/50 flex items-center justify-between gap-2 border-b px-3 py-1.5 text-xs">
-                        <span className="font-mono font-medium">{rt.default_file}</span>
-                        <span className="text-muted-foreground">Read-only preview</span>
-                      </div>
-                      <pre className="bg-muted/20 max-h-80 overflow-auto p-3 font-mono text-[12.5px] leading-5">{rt.template}</pre>
-                    </div>
+                    <CodeBlock
+                      title={rt.default_file}
+                      code={rt.template}
+                      maxHeight="20rem"
+                      actions={<span className="text-code-muted mr-1 hidden sm:inline">Read-only preview</span>}
+                    />
                   ) : (
                     <Skeleton className="h-40 rounded-md" />
                   )
@@ -349,7 +303,7 @@ export function CreateFunction() {
                         <Upload /> {zip ? "Choose another file" : "Choose .zip file"}
                       </Button>
                       {zip && (
-                        <span className="bg-muted inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-sm">
+                        <span className="bg-muted inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2 text-sm">
                           <FileArchive className="size-4 shrink-0" />
                           <span className="truncate font-mono text-[13px]">{zip.name}</span>
                           <span className="text-muted-foreground text-xs">{formatBytes(zip.size)}</span>
@@ -433,7 +387,7 @@ export function CreateFunction() {
                   </SummaryItem>
                 ) : (
                   <>
-                    <SummaryItem label="Runtime">{rt?.label ?? "-"}</SummaryItem>
+                    <SummaryItem label="Runtime">{rt ? <RuntimeBadge runtime={rt.name} label={rt.label} /> : "-"}</SummaryItem>
                     <SummaryItem label="Code">
                       {source === "template" ? (
                         <>
@@ -465,14 +419,14 @@ export function CreateFunction() {
                 </SummaryItem>
                 <SummaryItem label="Environment variables">{rowsToTags(env) ? Object.keys(rowsToTags(env)!).length : "None"}</SummaryItem>
               </dl>
-              {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
-              <div className="flex flex-col gap-2 border-t pt-4">
-                <Button type="submit" disabled={pending || (pkg === "Zip" && !runtime)}>
-                  {pending ? <Loader2 className="animate-spin" /> : <Rocket />}
-                  Create function
-                </Button>
+              {submitted && !valid && <p className="text-destructive text-xs" role="alert">Some settings need attention. Check the highlighted fields.</p>}
+              <div className="flex gap-2 border-t pt-4">
                 <Button type="button" variant="outline" asChild>
                   <Link href="/lambda/">Cancel</Link>
+                </Button>
+                <Button type="submit" className="flex-1" disabled={pending || (pkg === "Zip" && !runtime)}>
+                  {pending ? <Loader2 className="animate-spin" /> : <Rocket />}
+                  Create function
                 </Button>
               </div>
             </div>
@@ -486,7 +440,7 @@ export function CreateFunction() {
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+      <dt className="text-faint text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )

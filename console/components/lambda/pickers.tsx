@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tag } from "@/components/console/tag"
 import { seg } from "@/lib/api"
 import { useApi } from "@/lib/hooks"
 import type { LambdaFunction, LayerVersion, Queue, Topic } from "@/lib/types"
@@ -63,17 +64,19 @@ export function LayersPicker({
   return (
     <div className="flex flex-col gap-3">
       {value.length > 0 ? (
-        <ol className="divide-y rounded-md border">
+        <ol className="bg-card divide-y rounded-md border">
           {value.map((a, i) => {
             const p = splitLayerArn(a)
             return (
               <li key={a} className="flex items-center gap-2 px-3 py-2 text-sm">
-                <span className="text-muted-foreground w-5 shrink-0 text-xs">{i + 1}.</span>
+                <span className="text-faint w-5 shrink-0 font-mono text-xs tabular-nums">{i + 1}.</span>
                 <span className="min-w-0 flex-1">
-                  <Link href={layerHref(p.name)} target="_blank" className="text-primary font-medium hover:underline">
-                    {p.name}
-                  </Link>{" "}
-                  <span className="text-muted-foreground text-xs">version {p.version}</span>
+                  <span className="flex min-w-0 items-center gap-1.5">
+                    <Link href={layerHref(p.name)} target="_blank" className="text-primary truncate font-medium underline-offset-2 hover:underline">
+                      {p.name}
+                    </Link>
+                    <Tag>v{p.version}</Tag>
+                  </span>
                   <span className="text-muted-foreground block truncate font-mono text-xs" title={a}>
                     {a}
                   </span>
@@ -106,7 +109,7 @@ export function LayersPicker({
                 {(layers.data ?? []).map((l) => (
                   <SelectItem key={l.name} value={l.name}>
                     {l.name}
-                    {l.description && <span className="text-muted-foreground text-xs">{l.description}</span>}
+                    {l.description && <span className="text-muted-foreground ml-2 text-xs">{l.description}</span>}
                   </SelectItem>
                 ))}
               </SelectContent>

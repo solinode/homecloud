@@ -5,6 +5,7 @@ import { CheckCircle2, ChevronDown, ChevronUp, Loader2, Upload, X, XCircle } fro
 
 import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
+import { StatusBadge } from "@/components/console/status-badge"
 import { errorMessage, seg, upload, type UploadHandle } from "@/lib/api"
 import { formatBytes, pluralize } from "@/lib/format"
 import { cn } from "@/lib/utils"
@@ -140,9 +141,9 @@ export function UploadPanel({ uploads }: { uploads: ReturnType<typeof useUploads
   const pct = totalBytes ? Math.round((loadedBytes / totalBytes) * 100) : active ? 0 : 100
 
   return (
-    <div className="bg-card fixed right-4 bottom-4 left-4 z-40 flex max-h-[60vh] flex-col overflow-hidden rounded-lg border shadow-lg sm:left-auto sm:w-[26rem]">
+    <div className="bg-popover text-popover-foreground fixed right-4 bottom-4 left-4 z-40 flex max-h-[60vh] flex-col overflow-hidden rounded-xl border shadow-lg sm:left-auto sm:w-[26rem]">
       <div className="flex items-center gap-2 border-b px-3 py-2">
-        {active ? <Loader2 className="text-primary size-4 animate-spin" /> : failed ? <XCircle className="text-destructive size-4" /> : <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />}
+        {active ? <Loader2 className="text-primary size-4 animate-spin" /> : failed ? <XCircle className="text-destructive size-4" /> : <CheckCircle2 className="text-success size-4" />}
         <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-medium">
             {active ? `Uploading ${pluralize(inFlight, "file")}` : `Uploaded ${done} of ${pluralize(items.length, "file")}`}
@@ -177,8 +178,9 @@ export function UploadPanel({ uploads }: { uploads: ReturnType<typeof useUploads
                   <span className="min-w-0 flex-1 truncate text-sm" title={it.key}>
                     {it.key}
                   </span>
-                  {it.status === "done" && <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />}
-                  {it.status === "error" && <XCircle className="text-destructive size-4 shrink-0" />}
+                  {it.status === "done" && <StatusBadge status="success" label="Done" />}
+                  {it.status === "error" && <StatusBadge status="failed" label="Failed" />}
+                  {it.status === "cancelled" && <StatusBadge status="cancelled" label="Cancelled" tone="neutral" />}
                   {(it.status === "queued" || it.status === "uploading") && (
                     <button
                       type="button"

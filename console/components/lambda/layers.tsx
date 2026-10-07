@@ -1,11 +1,9 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import Link from "next/link"
 import { FileArchive, Layers, Loader2, Plus, Upload, X } from "lucide-react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -13,28 +11,30 @@ import { Input } from "@/components/ui/input"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
+import { StatTile } from "@/components/console/stat-tile"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage, seg } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { LambdaFunction, LayerVersion } from "@/lib/types"
 
-import { ARCHITECTURES, FUNCTIONS_PATH, LAYERS_PATH, MAX_ZIP_BYTES, fileToBase64, functionHref, layerHref, useRuntimes } from "./common"
+import { ARCHITECTURES, FUNCTIONS_PATH, LAYERS_PATH, MAX_ZIP_BYTES, fileToBase64, functionHref, layerHref, runtimeAccent, useRuntimes } from "./common"
 
 const LAYER_NAME_RE = /^[a-zA-Z0-9_-]{1,140}$/
 
-function Compat({ items }: { items?: string[] | null }) {
+function Compat({ items, runtimes }: { items?: string[] | null; runtimes?: boolean }) {
   if (!items?.length) return <span className="text-muted-foreground">Any</span>
   return (
     <span className="flex flex-wrap gap-1">
       {items.map((r) => (
-        <Badge key={r} variant="outline" className="font-mono text-[11px] font-normal">
+        <Tag key={r} accent={runtimes ? runtimeAccent(r) : "neutral"}>
           {r}
-        </Badge>
+        </Tag>
       ))}
     </span>
   )
@@ -55,15 +55,11 @@ function LayersList() {
       id: "name",
       header: "Name",
       value: (l) => l.name,
-      cell: (l) => (
-        <Link href={layerHref(l.name)} className={cellLinkClass()}>
-          {l.name}
-        </Link>
-      ),
+      cell: (l) => <CellLink href={layerHref(l.name)}>{l.name}</CellLink>,
     },
-    { id: "version", header: "Latest version", value: (l) => l.version, cell: (l) => l.version },
-    { id: "description", header: "Description", value: (l) => l.description, cell: (l) => l.description || "-", hideBelow: "md" },
-    { id: "runtimes", header: "Compatible runtimes", value: (l) => (l.compatible_runtimes ?? []).join(","), cell: (l) => <Compat items={l.compatible_runtimes} />, hideBelow: "lg" },
+    { id: "version", header: "Latest version", value: (l) => l.version, cell: (l) => <span className="font-mono text-[13px]">{l.version}</span> },
+    { id: "description", header: "Description", value: (l) => l.description, cell: (l) => <CellText max="20rem">{l.description}</CellText>, hideBelow: "md" },
+    { id: "runtimes", header: "Compatible runtimes", value: (l) => (l.compatible_runtimes ?? []).join(","), cell: (l) => <Compat items={l.compatible_runtimes} runtimes />, hideBelow: "lg" },
     {
       id: "arch",
       header: "Architectures",
@@ -125,9 +121,9 @@ function LayerVersions({ name }: { name: string }) {
   const usedBy = (arn: string) => (functions.data ?? []).filter((f) => f.layers?.includes(arn))
 
   const columns: Column<LayerVersion>[] = [
-    { id: "version", header: "Version", value: (v) => v.version, cell: (v) => <span className="font-medium">{v.version}</span> },
-    { id: "description", header: "Description", value: (v) => v.description, cell: (v) => v.description || "-", hideBelow: "sm" },
-    { id: "runtimes", header: "Compatible runtimes", value: (v) => (v.compatible_runtimes ?? []).join(","), cell: (v) => <Compat items={v.compatible_runtimes} />, hideBelow: "md" },
+    { id: "version", header: "Version", value: (v) => v.version, cell: (v) => <span className="font-mono text-[13px] font-medium">{v.version}</span> },
+    { id: "description", header: "Description", value: (v) => v.description, cell: (v) => <CellText max="20rem">{v.description}</CellText>, hideBelow: "sm" },
+    { id: "runtimes", header: "Compatible runtimes", value: (v) => (v.compatible_runtimes ?? []).join(","), cell: (v) => <Compat items={v.compatible_runtimes} runtimes />, hideBelow: "md" },
     {
       id: "arch",
       header: "Architectures",
@@ -135,7 +131,7 @@ function LayerVersions({ name }: { name: string }) {
       cell: (v) => <Compat items={v.compatible_architectures} />,
       hideBelow: "lg",
     },
-    { id: "size", header: "Size", value: (v) => v.code_size, cell: (v) => formatBytes(v.code_size), hideBelow: "md" },
+    { id: "size", header: "Size", value: (v) => v.code_size, cell: (v) => <span className="whitespace-nowrap tabular-nums">{formatBytes(v.code_size)}</span>, hideBelow: "md" },
     {
       id: "used",
       header: "Used by ($LATEST)",
@@ -143,11 +139,11 @@ function LayerVersions({ name }: { name: string }) {
       cell: (v) => {
         const fns = usedBy(v.arn)
         return fns.length ? (
-          <span className="flex flex-wrap gap-x-2">
+          <span className="flex flex-col gap-0.5">
             {fns.map((f) => (
-              <Link key={f.name} href={functionHref(f.name, "configuration")} className={cellLinkClass()} onClick={(e) => e.stopPropagation()}>
+              <CellLink key={f.name} href={functionHref(f.name, "configuration")} max="14rem">
                 {f.name}
-              </Link>
+              </CellLink>
             ))}
           </span>
         ) : (
@@ -166,7 +162,7 @@ function LayerVersions({ name }: { name: string }) {
     <div className="flex flex-col gap-4">
       <PageHeader
         title={name}
-        description={versions.data?.[0]?.layer_arn}
+        description={versions.data?.[0]?.layer_arn ? <span className="font-mono text-xs break-all">{versions.data[0].layer_arn}</span> : undefined}
         breadcrumbs={[{ label: "Lambda", href: "/lambda/" }, { label: "Layers", href: "/lambda/layers/" }, { label: name }]}
         actions={
           <Button size="sm" onClick={() => setPublishing(true)}>
@@ -174,6 +170,20 @@ function LayerVersions({ name }: { name: string }) {
           </Button>
         }
       />
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatTile label="Versions" value={versions.data?.length ?? 0} loading={versions.isLoading} />
+        <StatTile
+          label="Latest version"
+          value={versions.data?.length ? Math.max(...versions.data.map((v) => v.version)) : "-"}
+          loading={versions.isLoading}
+        />
+        <StatTile
+          label="Functions using it"
+          value={(functions.data ?? []).filter((f) => (f.layers ?? []).some((a) => (versions.data ?? []).some((v) => v.arn === a))).length}
+          caption="$LATEST of each function"
+          loading={versions.isLoading || functions.isLoading}
+        />
+      </div>
       <DataTable
         title="Versions"
         description="Versions are immutable. Deleting one keeps it working for functions that already use it."
@@ -286,7 +296,7 @@ function PublishLayerDialog({ open, onOpenChange, layer, base }: { open: boolean
             </DialogDescription>
           </DialogHeader>
           {!layer && (
-            <Field label="Name" htmlFor="layer-name" error={touched || name ? errors.name : undefined}>
+            <Field label="Name" htmlFor="layer-name" error={touched || name ? errors.name : undefined} help="1-140 letters, digits, hyphens and underscores.">
               <Input id="layer-name" value={name} onChange={(e) => setName(e.target.value)} className="font-mono" autoFocus spellCheck={false} placeholder="my-deps" />
             </Field>
           )}
@@ -309,7 +319,7 @@ function PublishLayerDialog({ open, onOpenChange, layer, base }: { open: boolean
                 <Upload /> {zip ? "Choose another file" : "Choose .zip file"}
               </Button>
               {zip && (
-                <span className="bg-muted inline-flex max-w-full items-center gap-1.5 rounded-md border px-2 py-1 text-sm">
+                <span className="bg-muted inline-flex h-8 max-w-full items-center gap-1.5 rounded-md border px-2 text-sm">
                   <FileArchive className="size-4 shrink-0" />
                   <span className="truncate font-mono text-[13px]">{zip.name}</span>
                   <span className="text-muted-foreground text-xs">{formatBytes(zip.size)}</span>
@@ -320,7 +330,7 @@ function PublishLayerDialog({ open, onOpenChange, layer, base }: { open: boolean
               )}
             </div>
           </Field>
-          <Field label="Compatible architectures" optional>
+          <Field label="Compatible architectures" optional help="Leave empty if the layer works on any architecture.">
             <div className="flex flex-wrap gap-4">
               {ARCHITECTURES.map((a) => (
                 <label key={a} className="flex items-center gap-2 font-mono text-sm">
@@ -331,7 +341,7 @@ function PublishLayerDialog({ open, onOpenChange, layer, base }: { open: boolean
             </div>
           </Field>
           <Field label="Compatible runtimes" optional help="Used to filter layers when adding them to a function.">
-            <div className="grid grid-cols-1 gap-2 rounded-md border p-3 sm:grid-cols-2">
+            <div className="bg-muted/30 grid grid-cols-1 gap-2 rounded-md border p-3 sm:grid-cols-2">
               {(runtimes.data ?? []).map((r) => (
                 <label key={r.name} className="flex items-center gap-2 text-sm">
                   <Checkbox checked={compat.includes(r.name)} onCheckedChange={() => setCompat(toggle(compat, r.name))} />
@@ -340,7 +350,7 @@ function PublishLayerDialog({ open, onOpenChange, layer, base }: { open: boolean
               ))}
             </div>
           </Field>
-          <Field label="License" htmlFor="layer-license" optional>
+          <Field label="License" htmlFor="layer-license" optional help="An SPDX identifier, a URL or the full license text.">
             <Input id="layer-license" value={license} onChange={(e) => setLicense(e.target.value)} placeholder="MIT" maxLength={512} />
           </Field>
           <DialogFooter>

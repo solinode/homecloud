@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
-import { Loader2, Network, Plus, Waypoints } from "lucide-react"
+import { Database, Inbox, Loader2, Network, Plus, Waypoints } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -13,15 +13,16 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
-import { Section } from "@/components/console/section"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag, methodAccent } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
-import { MethodBadge, apiHref } from "@/components/apigateway/common"
+import { apiHref } from "@/components/apigateway/common"
 import { tableHref } from "@/components/dynamodb/common"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
@@ -53,16 +54,17 @@ function SourceCell({ m }: { m: EventSourceMapping }) {
   return (
     <span className="flex min-w-0 flex-col">
       {table ? (
-        <Link href={tableHref(table)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()} title={m.event_source_arn}>
+        <CellLink href={tableHref(table)} title={m.event_source_arn}>
           {table}
-        </Link>
+        </CellLink>
       ) : (
-        <Link href={queueHref(m.queue_name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()} title={m.event_source_arn}>
+        <CellLink href={queueHref(m.queue_name)} title={m.event_source_arn}>
           {m.queue_name}
-        </Link>
+        </CellLink>
       )}
-      <span className="text-muted-foreground text-xs">
-        {table ? `DynamoDB stream${m.starting_position ? ` · ${m.starting_position}` : ""}` : "SQS queue"}
+      <span className="mt-1 flex items-center gap-1.5">
+        <Tag accent={table ? "info" : "warning"}>{table ? "DynamoDB stream" : "SQS"}</Tag>
+        {table && m.starting_position && <span className="text-muted-foreground font-mono text-[11px]">{m.starting_position}</span>}
       </span>
     </span>
   )
@@ -72,7 +74,7 @@ function ResultBadge({ result }: { result: string }) {
   if (!result) return <span className="text-muted-foreground">-</span>
   if (result === "OK") return <StatusBadge status="ok" label="OK" tone="success" />
   if (result.startsWith("PROBLEM")) return <StatusBadge status="error" label={result.replace(/^PROBLEM:\s*/, "Problem: ")} tone="danger" />
-  return <span className="text-muted-foreground text-sm">{result}</span>
+  return <CellText muted>{result}</CellText>
 }
 
 function EnabledSwitch({ m }: { m: EventSourceMapping }) {
@@ -96,7 +98,7 @@ function EnabledSwitch({ m }: { m: EventSourceMapping }) {
           }
         }}
       />
-      <span className="text-xs">{m.enabled ? "Enabled" : "Disabled"}</span>
+      <span className={m.enabled ? "text-success text-xs font-medium" : "text-muted-foreground text-xs"}>{m.enabled ? "Enabled" : "Disabled"}</span>
     </span>
   )
 }
@@ -125,11 +127,7 @@ export function MappingsTable({ functionName }: { functionName?: string }) {
             id: "function",
             header: "Function",
             value: (m: EventSourceMapping) => m.function_name,
-            cell: (m: EventSourceMapping) => (
-              <Link href={functionHref(m.function_name, "triggers")} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-                {m.function_name}
-              </Link>
-            ),
+            cell: (m: EventSourceMapping) => <CellLink href={functionHref(m.function_name, "triggers")}>{m.function_name}</CellLink>,
           },
         ]),
     {
@@ -138,7 +136,7 @@ export function MappingsTable({ functionName }: { functionName?: string }) {
       value: (m) => sourceName(m),
       cell: (m) => <SourceCell m={m} />,
     },
-    { id: "batch", header: "Batch size", value: (m) => m.batch_size, cell: (m) => m.batch_size, hideBelow: "sm" },
+    { id: "batch", header: "Batch size", value: (m) => m.batch_size, cell: (m) => <span className="tabular-nums">{m.batch_size}</span>, hideBelow: "sm" },
     { id: "enabled", header: "State", value: (m) => (m.enabled ? "enabled" : "disabled"), cell: (m) => <EnabledSwitch m={m} /> },
     { id: "result", header: "Last result", value: (m) => m.last_processing_result, cell: (m) => <ResultBadge result={m.last_processing_result} />, hideBelow: "md" },
     { id: "invoked", header: "Last invoked", value: (m) => m.last_invoked_at ?? "", cell: (m) => <TimeAgo value={m.last_invoked_at} />, hideBelow: "md" },
@@ -146,7 +144,7 @@ export function MappingsTable({ functionName }: { functionName?: string }) {
       id: "uuid",
       header: "UUID",
       value: (m) => m.id,
-      cell: (m) => <span className="text-muted-foreground font-mono text-xs">{m.id}</span>,
+      cell: (m) => <CellText mono muted>{m.id}</CellText>,
       hideBelow: "lg",
     },
   ]
@@ -344,16 +342,17 @@ export function AddTriggerDialog({ open, onOpenChange, functionName }: { open: b
               )}
             </DialogDescription>
           </DialogHeader>
-          <Field label="Source" htmlFor="trg-kind">
-            <Select value={kind} onValueChange={(v) => setKind(v as SourceKind)}>
-              <SelectTrigger id="trg-kind" className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="sqs">SQS queue</SelectItem>
-                <SelectItem value="dynamodb">DynamoDB stream</SelectItem>
-              </SelectContent>
-            </Select>
+          <Field label="Source">
+            <OptionGroup label="Source">
+              <OptionCard selected={kind === "sqs"} onSelect={() => setKind("sqs")} icon={Inbox} title="SQS queue" description="Batches of queue messages." />
+              <OptionCard
+                selected={kind === "dynamodb"}
+                onSelect={() => setKind("dynamodb")}
+                icon={Database}
+                title="DynamoDB stream"
+                description="Ordered item-level change records."
+              />
+            </OptionGroup>
           </Field>
           {!functionName && (
             <Field label="Function" htmlFor="trg-fn" error={touched && !fn ? "Choose a function" : undefined}>
@@ -376,42 +375,42 @@ export function AddTriggerDialog({ open, onOpenChange, functionName }: { open: b
             </Field>
           )}
           {kind === "sqs" ? (
-          <Field
-            label="SQS queue"
-            htmlFor="trg-queue"
-            error={touched && !queue ? "Choose a queue" : undefined}
-            help={
-              queues.data && queues.data.length === 0 ? (
-                <>
-                  No queues yet.{" "}
-                  <Link href="/sqs/" className="text-primary hover:underline">
-                    Create a queue
-                  </Link>{" "}
-                  first.
-                </>
-              ) : q ? (
-                <span className="font-mono">{q.arn}</span>
-              ) : undefined
-            }
-          >
-            {queues.error ? (
-              <ErrorState error={queues.error} onRetry={() => queues.mutate()} />
-            ) : (
-              <Select value={queue} onValueChange={setQueue} disabled={!queues.data}>
-                <SelectTrigger id="trg-queue" className="w-full">
-                  <SelectValue placeholder={queues.data ? "Choose a queue" : "Loading queues..."} />
-                </SelectTrigger>
-                <SelectContent>
-                  {(queues.data ?? []).map((x) => (
-                    <SelectItem key={x.name} value={x.name}>
-                      {x.name}
-                      {x.fifo && <span className="text-muted-foreground text-xs">FIFO</span>}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            )}
-          </Field>
+            <Field
+              label="SQS queue"
+              htmlFor="trg-queue"
+              error={touched && !queue ? "Choose a queue" : undefined}
+              help={
+                queues.data && queues.data.length === 0 ? (
+                  <>
+                    No queues yet.{" "}
+                    <Link href="/sqs/" className="text-primary hover:underline">
+                      Create a queue
+                    </Link>{" "}
+                    first.
+                  </>
+                ) : q ? (
+                  <span className="font-mono">{q.arn}</span>
+                ) : undefined
+              }
+            >
+              {queues.error ? (
+                <ErrorState error={queues.error} onRetry={() => queues.mutate()} />
+              ) : (
+                <Select value={queue} onValueChange={setQueue} disabled={!queues.data}>
+                  <SelectTrigger id="trg-queue" className="w-full">
+                    <SelectValue placeholder={queues.data ? "Choose a queue" : "Loading queues..."} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {(queues.data ?? []).map((x) => (
+                      <SelectItem key={x.name} value={x.name}>
+                        {x.name}
+                        {x.fifo && <Tag accent="violet">FIFO</Tag>}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              )}
+            </Field>
           ) : (
             <>
               <Field
@@ -570,7 +569,12 @@ function BatchSizeDialog({ mapping, onClose }: { mapping: EventSourceMapping | n
               {mapping ? sourceName(mapping) : ""} → {mapping?.function_name}
             </DialogDescription>
           </DialogHeader>
-          <Field label="Batch size" htmlFor="edit-batch" error={err ?? undefined}>
+          <Field
+            label="Batch size"
+            htmlFor="edit-batch"
+            error={err ?? undefined}
+            help={mapping ? `1-${BATCH_MAX[sourceKind(mapping)]} ${sourceKind(mapping) === "sqs" ? "messages" : "records"} per invocation.` : undefined}
+          >
             <Input id="edit-batch" type="number" min={1} value={batch} onChange={(e) => setBatch(e.target.value)} autoFocus className="w-28" />
           </Field>
           <DialogFooter>
@@ -588,6 +592,30 @@ function BatchSizeDialog({ mapping, onClose }: { mapping: EventSourceMapping | n
   )
 }
 
+type RouteRow = { api: HttpApi; route: NonNullable<HttpApi["routes"]>[number] }
+
+const routeColumns: Column<RouteRow>[] = [
+  {
+    id: "method",
+    header: "Method",
+    value: (x) => x.route.method,
+    cell: (x) => <Tag accent={methodAccent(x.route.method)}>{x.route.method}</Tag>,
+  },
+  { id: "path", header: "Path", value: (x) => x.route.path, cell: (x) => <CellText mono>{x.route.path}</CellText> },
+  { id: "api", header: "API", value: (x) => x.api.name, cell: (x) => <CellLink href={apiHref(x.api.id)}>{x.api.name}</CellLink> },
+  {
+    id: "endpoint",
+    header: "Invoke URL",
+    value: (x) => x.api.endpoint + x.route.path,
+    cell: (x) => (
+      <CellText mono muted max="28rem">
+        {x.api.endpoint + x.route.path}
+      </CellText>
+    ),
+    hideBelow: "md",
+  },
+]
+
 /** TriggersTab: SQS mappings plus the API Gateway routes that target the function. */
 export function TriggersTab({ fn }: { fn: LambdaFunction }) {
   const apis = useApi<HttpApi[]>("/api/v1/apigateway/apis", { refreshInterval: 30_000 })
@@ -599,9 +627,18 @@ export function TriggersTab({ fn }: { fn: LambdaFunction }) {
   return (
     <div className="flex flex-col gap-4">
       <MappingsTable functionName={fn.name} />
-      <Section
-        title={`API Gateway routes (${apis.data ? routes.length : "…"})`}
+      <DataTable
+        title="API Gateway routes"
         description="HTTP API routes that invoke this function."
+        data={apis.data ? routes : undefined}
+        columns={routeColumns}
+        rowId={(x) => `${x.api.id}-${x.route.id}`}
+        loading={apis.isLoading}
+        error={apis.error}
+        onRetry={() => apis.mutate()}
+        onRefresh={() => apis.mutate()}
+        refreshing={apis.isValidating}
+        noSearch
         actions={
           <Button variant="outline" size="sm" asChild>
             <Link href="/apigateway/">
@@ -609,39 +646,21 @@ export function TriggersTab({ fn }: { fn: LambdaFunction }) {
             </Link>
           </Button>
         }
-        flush={routes.length > 0}
-      >
-        {apis.error ? (
-          <ErrorState error={apis.error} onRetry={() => apis.mutate()} />
-        ) : !apis.data ? (
-          <p className="text-muted-foreground text-sm">Loading…</p>
-        ) : routes.length === 0 ? (
-          <p className="text-muted-foreground text-sm">
-            No API routes target this function. Add a route in{" "}
-            <Link href="/apigateway/" className="text-primary hover:underline">
-              API Gateway
-            </Link>{" "}
-            to expose it over HTTP.
-          </p>
-        ) : (
-          <ul className="divide-y">
-            {routes.map(({ api: a, route: r }) => (
-              <li key={`${a.id}-${r.id}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2.5 text-sm">
-                <MethodBadge method={r.method} />
-                <span className="font-mono text-[13px] break-all">{r.path}</span>
-                <span className="text-muted-foreground">in</span>
-                <Link href={apiHref(a.id)} className={cellLinkClass()}>
-                  {a.name}
+        empty={
+          <EmptyState
+            icon={Network}
+            title="No API routes"
+            description="No API routes target this function. Add a route in API Gateway to expose it over HTTP."
+            action={
+              <Button size="sm" asChild>
+                <Link href="/apigateway/">
+                  <Plus /> Add a route in API Gateway
                 </Link>
-                <span className="text-muted-foreground font-mono text-xs break-all sm:ml-auto">
-                  {a.endpoint}
-                  {r.path}
-                </span>
-              </li>
-            ))}
-          </ul>
-        )}
-      </Section>
+              </Button>
+            }
+          />
+        }
+      />
     </div>
   )
 }

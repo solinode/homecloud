@@ -15,6 +15,7 @@ import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
+import { TimeAgo } from "@/components/console/time-ago"
 import { api, authUrl, errorMessage, seg } from "@/lib/api"
 import { baseName, formatBytes, formatDate, pluralize } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
@@ -78,7 +79,7 @@ export function PresignDialog({ bucket, objectKey, open, onOpenChange }: { bucke
           </DialogDescription>
         </DialogHeader>
         <div className="flex flex-col gap-4">
-          <Field label="Expires after">
+          <Field label="Expires after" htmlFor="presign-expiry" help="Changing the expiry invalidates the URL shown below; create a new one.">
             <Select
               value={expires}
               onValueChange={(v) => {
@@ -86,7 +87,7 @@ export function PresignDialog({ bucket, objectKey, open, onOpenChange }: { bucke
                 setResult(null)
               }}
             >
-              <SelectTrigger className="w-full sm:w-48">
+              <SelectTrigger id="presign-expiry" className="w-full sm:w-48">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -99,9 +100,9 @@ export function PresignDialog({ bucket, objectKey, open, onOpenChange }: { bucke
             </Select>
           </Field>
           {result && (
-            <Field label="Presigned URL" help={`Expires ${formatDate(result.expires_at)}`}>
+            <Field label="Presigned URL" htmlFor="presign-url" help={`Expires ${formatDate(result.expires_at)}`}>
               <div className="flex gap-2">
-                <Input readOnly value={result.url} className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
+                <Input id="presign-url" readOnly value={result.url} className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
                 <CopyButton value={result.url} size="sm" toastMessage="Presigned URL copied" />
               </div>
             </Field>
@@ -162,10 +163,10 @@ export function DeleteObjectsDialog({
         toast.success(`Deleted ${pluralize(done, "item")}`)
       }}
     >
-      <ul className="bg-muted/40 max-h-48 overflow-y-auto rounded-md border text-sm">
+      <ul className="bg-muted/50 max-h-48 overflow-y-auto rounded-md border text-sm">
         {[...folders, ...files].map((k) => (
           <li key={k} className="flex items-center gap-2 border-b px-3 py-1.5 last:border-0">
-            {k.endsWith("/") ? <Folder className="size-4 shrink-0 text-amber-500" /> : <File className="text-muted-foreground size-4 shrink-0" />}
+            {k.endsWith("/") ? <Folder className="text-warning size-4 shrink-0" /> : <File className="text-muted-foreground size-4 shrink-0" />}
             <span className="min-w-0 truncate font-mono text-[13px]" title={k}>
               {k}
             </span>
@@ -306,7 +307,7 @@ export function ObjectSheet({
                   { label: "Key", value: <CopyableText value={data.key} />, wide: true },
                   { label: "Size", value: `${formatBytes(data.size)} (${data.size.toLocaleString()} bytes)` },
                   { label: "Type", value: data.content_type },
-                  { label: "Last modified", value: formatDate(data.last_modified) },
+                  { label: "Last modified", value: <TimeAgo value={data.last_modified} /> },
                   { label: "Version ID", value: data.version_id ? <CopyableText value={data.version_id} /> : "null" },
                   { label: "ETag", value: <CopyableText value={data.etag.replace(/"/g, "")} />, wide: true },
                   { label: "S3 URI", value: <CopyableText value={uri} />, wide: true },
@@ -315,13 +316,14 @@ export function ObjectSheet({
                 ]}
               />
               <div className="flex flex-col gap-2">
-                <h3 className="text-sm font-semibold">Metadata</h3>
+                <h3 className="hc-eyebrow">Metadata</h3>
                 {meta.length === 0 ? (
                   <p className="text-muted-foreground text-sm">No user-defined metadata.</p>
                 ) : (
-                  <table className="w-full rounded-md border text-sm">
+                  <div className="overflow-x-auto rounded-md border">
+                  <table className="w-full text-sm">
                     <thead>
-                      <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
+                      <tr className="bg-muted text-muted-foreground border-b text-left text-xs">
                         <th className="px-3 py-1.5 font-semibold">Key</th>
                         <th className="px-3 py-1.5 font-semibold">Value</th>
                       </tr>
@@ -335,6 +337,7 @@ export function ObjectSheet({
                       ))}
                     </tbody>
                   </table>
+                  </div>
                 )}
               </div>
             </>

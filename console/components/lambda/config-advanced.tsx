@@ -7,15 +7,15 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { Field } from "@/components/console/form-field"
 import { KeyValueGrid } from "@/components/console/key-value"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { Section } from "@/components/console/section"
+import { Tag, protocolAccent } from "@/components/console/tag"
 import { ApiError, api, errorMessage } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { EventInvokeConfig, FunctionDetail, LambdaFunction } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import { LAMBDA_PATH, fnPath, useAccountSettings } from "./common"
 import { DestinationPicker, destinationKind } from "./pickers"
@@ -120,26 +120,16 @@ function ConcurrencyDialog({ open, onOpenChange, fn, unreserved }: { open: boole
             <DialogTitle>Edit concurrency</DialogTitle>
             <DialogDescription>Reserving concurrency guarantees capacity for this function and caps it at the same number.</DialogDescription>
           </DialogHeader>
-          <RadioGroup value={mode} onValueChange={(v) => setMode(v as typeof mode)} className="gap-2">
+          <OptionGroup label="Concurrency" columns={1}>
             {(
               [
                 { v: "unreserved", title: "Use unreserved account concurrency", text: `Shares the account pool${unreserved != null ? ` (${unreserved} available)` : ""}.` },
                 { v: "reserved", title: "Reserve concurrency", text: "Set 0 to throttle every invocation, e.g. to pause a function." },
               ] as const
             ).map((o) => (
-              <label
-                key={o.v}
-                htmlFor={`conc-${o.v}`}
-                className={cn("flex cursor-pointer items-start gap-3 rounded-md border p-3", mode === o.v && "border-primary bg-primary/5 dark:bg-primary/10")}
-              >
-                <RadioGroupItem id={`conc-${o.v}`} value={o.v} className="mt-0.5" />
-                <span className="flex flex-col gap-0.5">
-                  <span className="text-sm font-medium">{o.title}</span>
-                  <span className="text-muted-foreground text-xs">{o.text}</span>
-                </span>
-              </label>
+              <OptionCard key={o.v} selected={mode === o.v} onSelect={() => setMode(o.v)} title={o.title} description={o.text} />
             ))}
-          </RadioGroup>
+          </OptionGroup>
           {mode === "reserved" && (
             <Field label="Reserved concurrency" htmlFor="conc-value" error={err ?? undefined} help={max != null ? `0-${max}` : undefined}>
               <Input id="conc-value" type="number" min={0} max={max} value={value} onChange={(e) => setValue(e.target.value)} className="w-32" autoFocus />
@@ -178,9 +168,9 @@ function DestinationValue({ arn }: { arn?: string }) {
   const label = { sqs: "SQS", sns: "SNS", lambda: "Lambda", events: "EventBridge", "": "" }[kind]
   return (
     <span className="flex min-w-0 flex-col">
-      <span>
-        {label && <span className="text-muted-foreground text-xs">{label}: </span>}
-        {arn.split(/[:/]/).pop()}
+      <span className="flex min-w-0 items-center gap-1.5">
+        {label && <Tag accent={kind === "events" ? "violet" : protocolAccent(kind)}>{label}</Tag>}
+        <span className="truncate">{arn.split(/[:/]/).pop()}</span>
       </span>
       <span className="text-muted-foreground font-mono text-xs break-all">{arn}</span>
     </span>

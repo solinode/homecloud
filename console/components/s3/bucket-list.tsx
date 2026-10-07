@@ -1,33 +1,23 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { Copy, HardDrive, Plus, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { copyText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
-import { StatusBadge } from "@/components/console/status-badge"
-import { formatDate } from "@/lib/format"
+import { StatTile } from "@/components/console/stat-tile"
+import { StatusBadge, statusLabel, statusTone } from "@/components/console/status-badge"
+import { TimeAgo } from "@/components/console/time-ago"
 import { useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { Bucket, S3Status } from "@/lib/types"
 import { toast } from "sonner"
 
 import { CreateBucketDialog, DeleteBucketDialog } from "./bucket-dialogs"
 import { bucketHref, S3AccessCard } from "./common"
-
-function StatCard({ label, children, loading }: { label: string; children: React.ReactNode; loading?: boolean }) {
-  return (
-    <div className="bg-card flex flex-col gap-2 rounded-lg border p-4 shadow-xs">
-      <span className="text-muted-foreground text-xs font-medium">{label}</span>
-      {loading ? <Skeleton className="h-7 w-24" /> : <div className="min-w-0">{children}</div>}
-    </div>
-  )
-}
 
 export function BucketList() {
   const { data, error, isLoading, isValidating, mutate } = useApi<Bucket[]>("/api/v1/s3/buckets")
@@ -55,19 +45,15 @@ export function BucketList() {
       id: "name",
       header: "Name",
       value: (b) => b.name,
-      cell: (b) => (
-        <Link href={bucketHref(b.name)} className="text-primary font-medium hover:underline" onClick={(e) => e.stopPropagation()}>
-          {b.name}
-        </Link>
-      ),
+      cell: (b) => <CellLink href={bucketHref(b.name)}>{b.name}</CellLink>,
     },
-    { id: "region", header: "Region", value: (b) => b.region, cell: (b) => <span className="font-mono text-[13px]">{b.region}</span>, hideBelow: "sm" },
+    { id: "region", header: "Region", value: (b) => b.region, cell: (b) => <CellText mono>{b.region}</CellText>, hideBelow: "sm" },
     {
       id: "access",
       header: "Access",
       value: (b) => (b.public ? "Public" : "Private"),
       cell: (b) =>
-        b.public ? <StatusBadge status="public" label="Public" tone="warning" /> : <span className="text-muted-foreground">Bucket and objects not public</span>,
+        b.public ? <StatusBadge status="public" label="Public" tone="warning" /> : <CellText muted>Bucket and objects not public</CellText>,
     },
     {
       id: "website",
@@ -76,7 +62,7 @@ export function BucketList() {
       cell: (b) => (b.website ? <StatusBadge status="enabled" label="Enabled" /> : <span className="text-muted-foreground">Disabled</span>),
       hideBelow: "md",
     },
-    { id: "created", header: "Creation date", value: (b) => b.created_at, cell: (b) => <span className="whitespace-nowrap">{formatDate(b.created_at)}</span>, hideBelow: "sm" },
+    { id: "created", header: "Creation date", value: (b) => b.created_at, cell: (b) => <TimeAgo value={b.created_at} />, hideBelow: "sm" },
   ]
 
   return (
@@ -88,24 +74,21 @@ export function BucketList() {
       />
 
       <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-        <StatCard label="Total buckets" loading={isLoading}>
-          <span className="text-2xl font-semibold tabular-nums">{data?.length ?? 0}</span>
-        </StatCard>
-        <StatCard label="Public buckets" loading={isLoading}>
-          <span className="text-2xl font-semibold tabular-nums">{publicCount}</span>
-        </StatCard>
-        <StatCard label="S3 endpoint" loading={status.isLoading}>
-          {status.error ? (
-            <StatusBadge status="error" label="Unavailable" />
-          ) : status.data ? (
-            <div className="flex flex-col gap-1">
-              <StatusBadge status={status.data.status} className="w-fit" />
-              <span className="text-muted-foreground truncate font-mono text-xs" title={status.data.endpoint}>
+        <StatTile label="Total buckets" value={data?.length ?? 0} loading={isLoading} />
+        <StatTile label="Public buckets" value={publicCount} tone={publicCount > 0 ? "warning" : undefined} loading={isLoading} />
+        <StatTile
+          label="S3 endpoint"
+          loading={status.isLoading}
+          tone={status.error ? "danger" : status.data ? statusTone(status.data.status) : undefined}
+          value={<span className="text-[22px]">{status.error ? "Unavailable" : status.data ? statusLabel(status.data.status) : "-"}</span>}
+          caption={
+            status.data ? (
+              <span className="font-mono text-xs" title={status.data.endpoint}>
                 {status.data.endpoint} · {status.data.region}
               </span>
-            </div>
-          ) : null}
-        </StatCard>
+            ) : undefined
+          }
+        />
       </div>
 
       <DataTable

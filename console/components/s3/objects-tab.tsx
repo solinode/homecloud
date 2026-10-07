@@ -7,10 +7,12 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { copyText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
+import { Tag } from "@/components/console/tag"
+import { TimeAgo } from "@/components/console/time-ago"
 import { seg } from "@/lib/api"
-import { baseName, formatBytes, formatDate, pluralize } from "@/lib/format"
+import { baseName, formatBytes, pluralize } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { ObjectListing } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -32,9 +34,9 @@ const IMAGE_EXT = new Set(["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "i
 const TEXT_EXT = new Set(["txt", "md", "json", "csv", "log", "yaml", "yml", "xml", "html", "css", "js", "ts", "go", "py", "sh"])
 
 function FileIcon({ row }: { row: Row }) {
-  if (row.folder) return <Folder className="size-4 shrink-0 fill-amber-400/30 text-amber-500" />
+  if (row.folder) return <Folder className="fill-warning/20 text-warning size-4 shrink-0" />
   const ext = objectExt(row.key)
-  if (IMAGE_EXT.has(ext)) return <ImageIcon className="size-4 shrink-0 text-sky-600 dark:text-sky-400" />
+  if (IMAGE_EXT.has(ext)) return <ImageIcon className="text-info size-4 shrink-0" />
   if (TEXT_EXT.has(ext)) return <FileText className="text-muted-foreground size-4 shrink-0" />
   return <File className="text-muted-foreground size-4 shrink-0" />
 }
@@ -113,7 +115,7 @@ export function ObjectsTab({ bucket, prefix, onPrefixChange }: { bucket: string;
       cell: (r) => (
         <button
           type="button"
-          className="text-primary inline-flex max-w-[28rem] items-center gap-2 text-left font-medium hover:underline"
+          className="text-primary inline-flex max-w-[28rem] items-center gap-2 text-left font-medium whitespace-nowrap underline-offset-2 hover:underline"
           onClick={(e) => {
             e.stopPropagation()
             if (r.folder) navigate(r.key)
@@ -122,14 +124,14 @@ export function ObjectsTab({ bucket, prefix, onPrefixChange }: { bucket: string;
           title={r.key}
         >
           <FileIcon row={r} />
-          <span className="truncate">
+          <span className="min-w-0 truncate">
             {r.name}
             {r.folder && "/"}
           </span>
         </button>
       ),
     },
-    { id: "type", header: "Type", value: (r) => (r.folder ? "Folder" : objectExt(r.key)), cell: (r) => (r.folder ? "Folder" : objectExt(r.key) || "-"), hideBelow: "sm" },
+    { id: "type", header: "Type", value: (r) => (r.folder ? "Folder" : objectExt(r.key)), cell: (r) => <CellText muted={!r.folder && !objectExt(r.key)}>{r.folder ? "Folder" : objectExt(r.key) || "-"}</CellText>, hideBelow: "sm" },
     {
       id: "size",
       header: "Size",
@@ -140,10 +142,10 @@ export function ObjectsTab({ bucket, prefix, onPrefixChange }: { bucket: string;
       id: "modified",
       header: "Last modified",
       value: (r) => r.lastModified ?? "",
-      cell: (r) => <span className="whitespace-nowrap">{r.folder ? "-" : formatDate(r.lastModified)}</span>,
+      cell: (r) => (r.folder ? <span className="text-muted-foreground">-</span> : <TimeAgo value={r.lastModified} />),
       hideBelow: "md",
     },
-    { id: "class", header: "Storage class", value: (r) => r.storageClass ?? "", cell: (r) => (r.folder ? "-" : r.storageClass), hideBelow: "lg" },
+    { id: "class", header: "Storage class", value: (r) => r.storageClass ?? "", cell: (r) => (r.folder || !r.storageClass ? <span className="text-muted-foreground">-</span> : <Tag>{r.storageClass}</Tag>), hideBelow: "lg" },
   ]
 
   const onDragEnter = (e: React.DragEvent) => {
@@ -201,7 +203,7 @@ export function ObjectsTab({ bucket, prefix, onPrefixChange }: { bucket: string;
         title="Objects"
         description={
           data?.truncated && data.prefix === prefix ? (
-            <span className="text-amber-700 dark:text-amber-400">Showing the first 1,000 items of this folder. Use the AWS CLI or an SDK to list everything.</span>
+            <span className="text-warning">Showing the first 1,000 items of this folder. Use the AWS CLI or an SDK to list everything.</span>
           ) : (
             "Objects are the files stored in this bucket."
           )
@@ -258,8 +260,8 @@ export function ObjectsTab({ bucket, prefix, onPrefixChange }: { bucket: string;
       />
 
       {dragging && (
-        <div className="border-primary bg-primary/5 pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-lg border-2 border-dashed backdrop-blur-[1px]">
-          <div className="bg-card flex flex-col items-center gap-2 rounded-lg border px-6 py-4 shadow-md">
+        <div className="border-brand bg-brand-soft/60 pointer-events-none absolute inset-0 z-20 flex items-center justify-center rounded-lg border-2 border-dashed backdrop-blur-[1px]">
+          <div className="bg-popover flex flex-col items-center gap-2 rounded-lg border px-6 py-4 shadow-md">
             <UploadCloud className="text-primary size-8" />
             <p className="text-sm font-medium">Drop files to upload</p>
             <p className="text-muted-foreground font-mono text-xs">

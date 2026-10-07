@@ -8,7 +8,7 @@ import { FlaskConical, FunctionSquare, Globe, Lock, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -24,7 +24,7 @@ export function FunctionUrlIndicator({ fn }: { fn: LambdaFunction }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span className="text-primary inline-flex items-center gap-1 text-xs font-medium">
+        <span className="text-primary inline-flex items-center gap-1 text-xs font-medium whitespace-nowrap">
           <Icon className="size-3.5" /> {fn.function_url.auth_type === "HC_IAM" ? "IAM" : "Public"}
         </span>
       </TooltipTrigger>
@@ -48,24 +48,13 @@ export function FunctionsList() {
       id: "name",
       header: "Function name",
       value: (f) => f.name,
-      cell: (f) => (
-        <Link href={functionHref(f.name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-          {f.name}
-        </Link>
-      ),
+      cell: (f) => <CellLink href={functionHref(f.name)}>{f.name}</CellLink>,
     },
     {
       id: "description",
       header: "Description",
       value: (f) => f.description,
-      cell: (f) =>
-        f.description ? (
-          <span className="line-clamp-2 max-w-xs" title={f.description}>
-            {f.description}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">-</span>
-        ),
+      cell: (f) => <CellText max="20rem">{f.description}</CellText>,
       hideBelow: "lg",
     },
     {
@@ -79,12 +68,12 @@ export function FunctionsList() {
       id: "arch",
       header: "Architecture",
       value: (f) => (f.architectures ?? []).join(","),
-      cell: (f) => <span className="font-mono text-xs">{(f.architectures ?? []).join(", ") || "x86_64"}</span>,
+      cell: (f) => <CellText mono>{(f.architectures ?? []).join(", ") || "x86_64"}</CellText>,
       hideBelow: "lg",
     },
-    { id: "memory", header: "Memory", value: (f) => f.memory_mb, cell: (f) => formatMemoryMB(f.memory_mb), hideBelow: "sm" },
-    { id: "timeout", header: "Timeout", value: (f) => f.timeout_seconds, cell: (f) => formatTimeout(f.timeout_seconds), hideBelow: "md" },
-    { id: "size", header: "Code size", value: (f) => f.code_size, cell: (f) => formatBytes(f.code_size), hideBelow: "lg" },
+    { id: "memory", header: "Memory", value: (f) => f.memory_mb, cell: (f) => <span className="whitespace-nowrap tabular-nums">{formatMemoryMB(f.memory_mb)}</span>, hideBelow: "sm" },
+    { id: "timeout", header: "Timeout", value: (f) => f.timeout_seconds, cell: (f) => <span className="whitespace-nowrap tabular-nums">{formatTimeout(f.timeout_seconds)}</span>, hideBelow: "md" },
+    { id: "size", header: "Code size", value: (f) => f.code_size, cell: (f) => <span className="whitespace-nowrap tabular-nums">{formatBytes(f.code_size)}</span>, hideBelow: "lg" },
     {
       id: "url",
       header: "Function URL",

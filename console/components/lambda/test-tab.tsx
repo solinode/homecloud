@@ -8,12 +8,14 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { CopyButton } from "@/components/console/copy-button"
+import { CodeBlock, TerminalPane, term } from "@/components/console/code-block"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { JsonEditor, jsonError } from "@/components/console/json-editor"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { Section } from "@/components/console/section"
+import { StatusBadge } from "@/components/console/status-badge"
+import { httpStatusTone } from "@/components/console/tag"
 import { request } from "@/lib/api"
 import { formatNumber } from "@/lib/format"
 import { revalidate } from "@/lib/hooks"
@@ -229,7 +231,7 @@ export function TestTab({ fn }: { fn: LambdaFunction }) {
                 </SelectContent>
               </Select>
             </Field>
-            <Field label="Event name" htmlFor="test-name">
+            <Field label="Event name" htmlFor="test-name" error={eventName.trim().length > 64 ? nameErr : undefined}>
               <Input id="test-name" value={eventName} onChange={(e) => setEventName(e.target.value)} placeholder="my-test-event" maxLength={64} />
             </Field>
             <div className="flex flex-wrap gap-2">
@@ -297,14 +299,16 @@ export function TestTab({ fn }: { fn: LambdaFunction }) {
             </Field>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Templates:</span>
+            <span className="hc-eyebrow">Templates</span>
             {tpls.map((t) => (
               <Button key={t.id} type="button" variant="secondary" size="sm" className="h-7 text-xs" onClick={() => pick(`tpl:${t.id}`)}>
                 {t.label}
               </Button>
             ))}
           </div>
-          <JsonEditor value={body} onChange={setBody} rows={12} />
+          <Field label="Event JSON">
+            <JsonEditor value={body} onChange={setBody} rows={12} />
+          </Field>
         </div>
       </Section>
 
@@ -313,11 +317,12 @@ export function TestTab({ fn }: { fn: LambdaFunction }) {
       {queued && (
         <Section
           title={
-            <span className="flex items-center gap-2 text-sky-700 dark:text-sky-400">
-              <CheckCircle2 className="size-4" /> Event queued (202 Accepted)
+            <span className="flex items-center gap-2">
+              <CheckCircle2 className="text-info size-4" /> Event queued
             </span>
           }
-          className="border-sky-600/30 dark:border-sky-400/30"
+          actions={<StatusBadge status="202" label="202 Accepted" tone="info" />}
+          className="border-info/30"
         >
           <KeyValueGrid
             columns={3}
@@ -350,54 +355,49 @@ export function InvokeResultView({ result }: { result: InvokeResult }) {
   return (
     <Section
       title={
-        <span
-          className={cn(
-            "flex items-center gap-2",
-            failed ? "text-red-700 dark:text-red-400" : "text-emerald-700 dark:text-emerald-400",
-          )}
-        >
-          {failed ? <AlertCircle className="size-4" /> : <CheckCircle2 className="size-4" />}
-          Execution result: {failed ? "failed" : "succeeded"}
+        <span className="flex items-center gap-2">
+          {failed ? <AlertCircle className="text-danger size-4" /> : <CheckCircle2 className="text-success size-4" />}
+          Execution result
         </span>
       }
-      className={cn(failed ? "border-red-600/30 dark:border-red-400/30" : "border-emerald-600/30 dark:border-emerald-400/30")}
+      actions={<StatusBadge status={failed ? "failed" : "success"} label={failed ? "Failed" : "Succeeded"} />}
+      className={failed ? "border-danger/30" : "border-success/30"}
       bodyClassName="flex flex-col gap-4"
     >
       <KeyValueGrid
         columns={4}
         items={[
-          { label: "Status code", value: String(result.status_code) },
+          { label: "Status code", value: <StatusBadge status={String(result.status_code)} tone={httpStatusTone(result.status_code)} /> },
           { label: "Duration", value: `${formatNumber(result.duration_ms, 2)} ms` },
           { label: "Billed duration", value: `${formatNumber(result.billed_duration_ms, 0)} ms` },
           { label: "Cold start", value: result.cold_start ? "Yes (new execution environment)" : "No" },
           { label: "Executed version", value: <span className="font-mono text-[13px]">{result.executed_version ?? "$LATEST"}</span> },
-          { label: "Function error", value: result.function_error ?? "" },
+          { label: "Function error", value: result.function_error ? <span className="text-danger">{result.function_error}</span> : "" },
           { label: "Request ID", value: <span className="font-mono text-[13px] break-all">{result.request_id}</span>, wide: true },
         ]}
       />
+      <CodeBlock title="Response" code={payload} copyLabel="Copy response" wrap maxHeight="24rem" tone={failed ? "danger" : undefined} />
       <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">Response</h3>
-          <CopyButton value={payload} label="Copy response" />
-        </div>
-        <pre className="bg-muted/50 max-h-96 overflow-auto rounded-md border p-3 font-mono text-[12.5px] leading-5 whitespace-pre-wrap break-all">{payload}</pre>
-      </div>
-      <div className="flex flex-col gap-1.5">
-        <div className="flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">Function logs</h3>
-          {result.logs && <CopyButton value={result.logs} label="Copy logs" />}
-        </div>
         {result.logs ? (
-          <pre className="bg-muted/50 max-h-80 overflow-auto rounded-md border p-3 font-mono text-[12.5px] leading-5 whitespace-pre-wrap break-all">
+          <TerminalPane title="Function logs" copyValue={result.logs} height="auto" bodyClassName="max-h-80">
             {result.logs.split("\n").map((line, i) => (
-              <span key={i} className={cn(/^(START|END|REPORT|INIT_START) /.test(line) && "text-muted-foreground font-semibold")}>
-                {line}
-                {"\n"}
-              </span>
+              <div
+                key={i}
+                className={cn(
+                  "break-all whitespace-pre-wrap",
+                  /^(START|END|REPORT|INIT_START) /.test(line) && cn(term.muted, "font-semibold"),
+                  /^\[?(ERROR|Traceback)|Error:/.test(line) && term.error,
+                )}
+              >
+                {line || " "}
+              </div>
             ))}
-          </pre>
+          </TerminalPane>
         ) : (
-          <p className="text-muted-foreground text-sm">The function wrote nothing to stdout or stderr.</p>
+          <>
+            <h3 className="hc-eyebrow">Function logs</h3>
+            <p className="text-muted-foreground text-sm">The function wrote nothing to stdout or stderr.</p>
+          </>
         )}
         <p className="text-muted-foreground text-xs">The last 4 KB of output are shown here; the full log is in the Logs tab.</p>
       </div>

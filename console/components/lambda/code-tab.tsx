@@ -13,6 +13,7 @@ import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { Section } from "@/components/console/section"
+import { StatusBadge } from "@/components/console/status-badge"
 import { api, authUrl, errorMessage } from "@/lib/api"
 import { formatBytes, pluralize } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
@@ -222,7 +223,7 @@ export function CodeTab({ fn, active }: { fn: LambdaFunction; active: boolean })
       title={
         <span className="flex items-center gap-2">
           Code source
-          {dirty && <span className="text-xs font-normal text-amber-700 dark:text-amber-400">Changes not deployed</span>}
+          {dirty && <StatusBadge status="modified" label="Changes not deployed" tone="warning" />}
         </span>
       }
       actions={
@@ -241,15 +242,15 @@ export function CodeTab({ fn, active }: { fn: LambdaFunction; active: boolean })
       bodyClassName="flex flex-col gap-3"
     >
       {!handlerFound && (
-        <div className="flex gap-2 rounded-md border border-amber-600/30 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>
+        <Alert variant="warning">
+          <AlertTriangle />
+          <AlertDescription>
             The handler <span className="font-mono">{fn.handler}</span> expects{" "}
             {handlerCandidates.length > 1 ? "one of " : ""}
             <span className="font-mono">{handlerCandidates.slice(handlerCandidates.length > 1 ? 1 : 0).join(", ") || "file.function"}</span>, which is not
             in the package. Invocations will fail until you add it or change the handler in Configuration.
-          </span>
-        </div>
+          </AlertDescription>
+        </Alert>
       )}
 
       <div className="flex flex-col gap-2">
@@ -264,11 +265,11 @@ export function CodeTab({ fn, active }: { fn: LambdaFunction; active: boolean })
                 onClick={() => setCurrent(n)}
                 className={cn(
                   "-mb-px flex shrink-0 items-center gap-1.5 border-b-2 px-3 py-1.5 font-mono text-[13px] whitespace-nowrap transition-colors",
-                  n === current ? "border-primary text-foreground" : "text-muted-foreground hover:text-foreground border-transparent",
+                  n === current ? "border-brand text-foreground" : "text-muted-foreground hover:text-foreground border-transparent",
                 )}
               >
                 {n}
-                {changed(n) && <span className="size-1.5 rounded-full bg-amber-500" aria-label="modified" />}
+                {changed(n) && <span className="bg-warning size-1.5 rounded-full" aria-label="modified" />}
               </button>
             ))}
           </div>
@@ -299,7 +300,7 @@ export function CodeTab({ fn, active }: { fn: LambdaFunction; active: boolean })
             onChange={(v) => setFiles((f) => ({ ...f, [current]: v }))}
           />
         ) : (
-          <p className="text-muted-foreground rounded-md border p-8 text-center text-sm">The package has no files. Add one to get started.</p>
+          <p className="text-muted-foreground rounded-md border border-dashed p-8 text-center text-sm">The package has no files. Add one to get started.</p>
         )}
         <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 text-xs">
           <span>
@@ -402,7 +403,12 @@ function FileNameDialog({
             <DialogTitle>{rename ? `Rename ${state?.from}` : "New file"}</DialogTitle>
             <DialogDescription>Paths are relative to the package root (/var/task). Use / for folders, e.g. lib/helpers.py.</DialogDescription>
           </DialogHeader>
-          <Field label="File name" htmlFor="file-name" error={touched || name ? error : undefined}>
+          <Field
+            label="File name"
+            htmlFor="file-name"
+            error={touched || name ? error : undefined}
+            help="A relative path such as utils.py or lib/helpers.js."
+          >
             <Input
               id="file-name"
               autoFocus
