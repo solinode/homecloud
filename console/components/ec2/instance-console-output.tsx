@@ -14,7 +14,7 @@ import { formatTime } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
 import type { ConsoleOutput, Instance } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { INSTANCES_PATH } from "./instance-actions"
+import { INSTANCES_PATH, isVMInstance } from "./instance-actions"
 
 // Docker log lines start with an RFC 3339 timestamp.
 const TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z /gm
@@ -59,8 +59,8 @@ export function InstanceConsoleOutput({ instance }: { instance: Instance }) {
 
   return (
     <Section
-      title="Console output"
-      description="The instance's stdout and stderr (the container log), including user data output."
+      title={isVMInstance(instance) ? "System log" : "Console output"}
+      description={isVMInstance(instance) ? "The VM serial console: boot messages, cloud-init and user data output." : "The instance's stdout and stderr (the container log), including user data output."}
       actions={
         <>
           <div className="flex items-center gap-2">

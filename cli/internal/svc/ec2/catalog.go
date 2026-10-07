@@ -55,6 +55,30 @@ type Image struct {
 	AWSName string `json:"-"`
 	// OwnerID is the catalog image's owner in the EC2 API (the vendor's AWS account).
 	OwnerID string `json:"-"`
+	// VMBase names the cloud image (vm.Bases) a VM image boots; empty for images
+	// that run as containers. Ref is empty for VM images.
+	VMBase string `json:"vm_base,omitempty"`
+	// Images made from a VM instance (CreateImage) carry their own flattened
+	// disk in the Docker volume VMDisk instead of a VMBase, plus what a launch
+	// needs to know about it.
+	VMDisk   string `json:"vm_disk,omitempty"`
+	VMUser   string `json:"vm_user,omitempty"`
+	VMArch   string `json:"vm_arch,omitempty"` // aarch64 | x86_64
+	VMDiskGB int    `json:"vm_disk_gb,omitempty"`
+	// Virtualization is "vm" (QEMU guest with its own kernel) or "container".
+	Virtualization string `json:"virtualization"`
+}
+
+// IsVM reports whether the image boots a virtual machine.
+func (im Image) IsVM() bool { return im.VMBase != "" || im.VMDisk != "" }
+
+// normalized fills derived fields.
+func (im Image) normalized() Image {
+	im.Virtualization = "container"
+	if im.IsVM() {
+		im.Virtualization = "vm"
+	}
+	return im
 }
 
 var catalog = []Image{
@@ -64,6 +88,11 @@ var catalog = []Image{
 		AWSName: "ubuntu/images/hvm-ssd/ubuntu-jammy-22.04-{deb}-server-20240101", OwnerID: ownerCanonical},
 	{ID: "ami-debian-12", Name: "Debian 12", Description: "Debian GNU/Linux 12 (bookworm)", Ref: "debian:12", Platform: "linux", KeepAlive: true,
 		AWSName: "debian-12-{deb}-20240101-0000", OwnerID: ownerDebian},
+	// Virtual machine images: official cloud images booted under QEMU (see the vm package).
+	{ID: "ami-ubuntu-24-04-vm", Name: "Ubuntu Server 24.04 LTS (VM)", Description: "Canonical Ubuntu 24.04 (Noble Numbat) cloud image, booted as a virtual machine with its own kernel and cloud-init", Platform: "linux", VMBase: "ubuntu-24.04",
+		AWSName: "homecloud/vm/ubuntu-noble-24.04-{deb}-server-20260926", OwnerID: ownerCanonical},
+	{ID: "ami-debian-12-vm", Name: "Debian 12 (VM)", Description: "Debian GNU/Linux 12 (bookworm) cloud image, booted as a virtual machine with its own kernel and cloud-init", Platform: "linux", VMBase: "debian-12",
+		AWSName: "homecloud/vm/debian-12-{deb}-20260923-2610", OwnerID: ownerDebian},
 	{ID: "ami-amazonlinux-2023", Name: "Amazon Linux 2023", Description: "Amazon Linux 2023 base image", Ref: "amazonlinux:2023", Platform: "linux", KeepAlive: true,
 		AWSName: "al2023-ami-2023.0.20240101.0-kernel-6.1-{rpm}"},
 	{ID: "ami-rocky-9", Name: "Rocky Linux 9", Description: "Enterprise Linux compatible", Ref: "rockylinux:9", Platform: "linux", KeepAlive: true},

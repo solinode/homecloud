@@ -77,6 +77,13 @@ func (m *imds) forget(id string) {
 	}
 }
 
+func (s *Service) imdsName() string {
+	if s.IMDSContainer != "" {
+		return s.IMDSContainer
+	}
+	return imdsContainer
+}
+
 func (s *Service) initIMDS() {
 	if s.imds == nil {
 		s.imds = &imds{s: s, key: core.RandHex(40), tokens: map[string]imdsToken{}, creds: map[string]cachedCred{}}
@@ -118,13 +125,13 @@ func (s *Service) RunIMDS(ctx context.Context) {
 
 // VPCCreated attaches the metadata helper to a new VPC.
 func (s *Service) VPCCreated(v vpc.VPC) {
-	_ = s.env.Docker.ConnectIP(v.Network, imdsContainer, vpc.MetadataAddress(v.CIDR))
+	_ = s.env.Docker.ConnectIP(v.Network, s.imdsName(), vpc.MetadataAddress(v.CIDR))
 }
 
 // NetworkChanged re-routes the metadata address in a VPC's running instances
 // after its network was recreated.
 func (s *Service) NetworkChanged(v vpc.VPC) {
-	_ = s.env.Docker.ConnectIP(v.Network, imdsContainer, vpc.MetadataAddress(v.CIDR))
+	_ = s.env.Docker.ConnectIP(v.Network, s.imdsName(), vpc.MetadataAddress(v.CIDR))
 	for _, i := range store.List[Instance](s.env.Store, cInstances) {
 		if i.VpcID == v.ID && i.State == "running" && i.ContainerID != "" {
 			s.metadataRoute(context.Background(), i.ContainerID, i.VpcID)
@@ -171,7 +178,7 @@ http {
 // it to every VPC network.
 func (s *Service) ensureIMDS(ctx context.Context) error {
 	conf := []byte(s.imdsConfig())
-	c, err := s.env.Docker.Inspect(imdsContainer)
+	c, err := s.env.Docker.Inspect(s.imdsName())
 	if err == nil && c.State.Running {
 		// Reload only when the configuration (the secret) changed.
 		res, err := s.env.Docker.Exec(ctx, c.ID, []string{"cat", "/etc/nginx/nginx.conf"}, nil)
@@ -188,7 +195,7 @@ func (s *Service) ensureIMDS(ctx context.Context) error {
 			_ = s.env.Docker.Remove(c.ID)
 		}
 		id, err := s.env.Docker.Run(ctx, runtime.RunSpec{
-			Name: imdsContainer, Image: imdsImage,
+			Name: s.imdsName(), Image: imdsImage,
 			Entrypoint: []string{"/bin/sh", "-c"},
 			Cmd:        []string{"ip addr add " + imdsIP + "/32 dev lo 2>/dev/null; exec nginx -g 'daemon off;'"},
 			Labels:     runtime.Labels("ec2", "server", map[string]string{"homecloud.name": "instance metadata service"}),
@@ -208,7 +215,7 @@ func (s *Service) ensureIMDS(ctx context.Context) error {
 		}
 	}
 	for _, v := range s.vpc.List() {
-		if err := s.env.Docker.ConnectIP(v.Network, imdsContainer, vpc.MetadataAddress(v.CIDR)); err != nil {
+		if err := s.env.Docker.ConnectIP(v.Network, s.imdsName(), vpc.MetadataAddress(v.CIDR)); err != nil {
 			log.Printf("ec2: attach metadata service to %s: %v", v.ID, err)
 		}
 	}

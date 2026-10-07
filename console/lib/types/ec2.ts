@@ -42,6 +42,15 @@ export interface Instance {
   iam_profile_arn?: string
   iam_profile_id?: string
   metadata_options?: MetadataOptions
+  /** VM instances: "kvm" (hardware accelerated) or "emulated" (no /dev/kvm, slow). Absent for containers. */
+  virtualization?: "kvm" | "emulated" | (string & {})
+  vm_user?: string
+}
+
+/** What this host can run; GET /api/v1/ec2/capabilities. */
+export interface Ec2Capabilities {
+  /** "kvm" = VMs accelerated, "emulated" = no /dev/kvm (slow), "unavailable" */
+  vm: "kvm" | "emulated" | "unavailable" | (string & {})
 }
 
 /** Instance metadata service (IMDS) options. */
@@ -72,6 +81,9 @@ export interface Image {
   state: string
   created_at?: string
   source_instance?: string
+  /** "vm" (own kernel, QEMU guest) or "container" */
+  virtualization?: "vm" | "container" | (string & {})
+  vm_base?: string
 }
 
 export interface Volume {
@@ -100,6 +112,8 @@ export interface RunInstancesInput {
   tags?: Tags
   volumes?: { volume_id?: string; size_gb?: number; mount_path: string; delete_on_termination?: boolean }[]
   file_systems?: FileSystemMount[]
+  /** VM images only: root disk size */
+  root_volume?: { size_gb?: number; delete_on_termination?: boolean }
   key_name?: string
   /** instance profile name or ARN */
   iam_instance_profile?: string

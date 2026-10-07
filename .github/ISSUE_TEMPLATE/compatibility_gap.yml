@@ -1,0 +1,76 @@
+name: AWS compatibility gap
+description: An AWS CLI command, SDK call, Terraform resource or CloudFormation template that works on AWS but not on HomeCloud.
+labels: ["aws-api"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        These reports drive what gets implemented next, so thank you. Check [docs/aws-compat.md](https://github.com/solinode/homecloud/blob/main/docs/aws-compat.md) first: it lists what each service supports and what is known to be missing.
+  - type: input
+    id: service
+    attributes:
+      label: AWS service and operation
+      placeholder: e.g. SQS ListQueueTags, aws_dynamodb_table, AWS::ECS::Cluster
+    validations:
+      required: true
+  - type: dropdown
+    id: tool
+    attributes:
+      label: Tool
+      options:
+        - AWS CLI
+        - boto3 / botocore
+        - AWS SDK for JavaScript
+        - AWS SDK for Go
+        - AWS SDK for Java
+        - Other AWS SDK
+        - Terraform / OpenTofu
+        - AWS CDK
+        - CloudFormation
+        - Pulumi
+        - Other
+      multiple: true
+    validations:
+      required: true
+  - type: input
+    id: tool-version
+    attributes:
+      label: Tool version
+      placeholder: e.g. aws-cli/2.17.0, hashicorp/aws 5.60.0
+  - type: textarea
+    id: repro
+    attributes:
+      label: Request that fails
+      description: The smallest command, code or configuration that shows it.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: What HomeCloud returns
+      description: The error (e.g. `UnknownOperationException`, `InvalidAction`) or the wrong output. For Terraform, `TF_LOG=debug` output around the failing call helps.
+      render: text
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: What AWS does
+      description: The expected response or behavior, with a link to the AWS API reference if you have one.
+  - type: textarea
+    id: why
+    attributes:
+      label: How it blocks you
+      description: Is there a workaround? Is this one call in a larger stack (which)?
+  - type: input
+    id: version
+    attributes:
+      label: HomeCloud version
+      description: Output of `homecloud version`.
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to implement this (see CONTRIBUTING.md, "Making changes").
