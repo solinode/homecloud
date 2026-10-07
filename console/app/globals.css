@@ -46,7 +46,7 @@
   --brand: #f06418;
   --brand-soft: rgba(240, 100, 24, 0.09);
   --brand-line: rgba(240, 100, 24, 0.3);
-  --primary: #c2470b;
+  --primary: #b8400a;
   --primary-foreground: #ffffff;
 
   --success: #15803d;
@@ -105,7 +105,7 @@
   --brand: #ff7a2e;
   --brand-soft: rgba(255, 122, 46, 0.12);
   --brand-line: rgba(255, 122, 46, 0.3);
-  --primary: #ff9150;
+  --primary: #ffa36b;
   --primary-foreground: #160903;
 
   --success: #4ade80;
@@ -258,7 +258,8 @@
       linear-gradient(90deg, var(--chart-grid) 1px, transparent 1px);
     background-size: 48px 48px;
     background-position: center top;
-    mask-image: radial-gradient(ellipse 70% 60% at 50% 0%, #000 25%, transparent 75%);
+    mask-image: radial-gradient(ellipse 60% 50% at 50% 0%, #000 10%, transparent 70%);
+    opacity: 0.7;
   }
   .hc-backdrop::after {
     content: '';

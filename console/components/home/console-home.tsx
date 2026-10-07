@@ -262,11 +262,11 @@ export function ConsoleHome() {
           <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
             <div className="flex min-w-0 flex-col gap-6 xl:col-span-2">
               <Panel title="Resources by service" action={<span className="text-faint text-xs">live counts</span>}>
-                <ul className="grid grid-cols-1 gap-px overflow-hidden rounded-b-xl bg-[var(--border)] sm:grid-cols-2 xl:grid-cols-3">
+                <ul className="grid grid-cols-2 gap-px overflow-hidden rounded-b-xl bg-[var(--border)] xl:grid-cols-3">
                   {inUse.map((c) => (
                     <li key={c.key} className="bg-card">
-                      <Link href={c.href} className="hover:bg-muted/50 group flex items-center gap-3 px-4 py-3.5 transition-colors">
-                        <ServiceIcon service={c} size="md" />
+                      <Link href={c.href} className="hover:bg-muted/50 group flex items-center gap-3 px-3.5 py-3 transition-colors sm:px-4 sm:py-3.5">
+                        <ServiceIcon service={c} size="md" className="hidden sm:inline-flex" />
                         <span className="min-w-0 flex-1">
                           <span className="block truncate text-[13px] font-medium">{c.name}</span>
                           <span className={cn("block truncate text-xs", c.warn ? "text-warning" : "text-faint")}>{c.error ? "unavailable" : c.sub}</span>
@@ -283,6 +283,7 @@ export function ConsoleHome() {
                   {Array.from({ length: (3 - (inUse.length % 3)) % 3 }, (_, i) => (
                     <li key={`pad-${i}`} className="bg-card hidden xl:block" aria-hidden />
                   ))}
+                  {inUse.length % 2 === 1 && <li className="bg-card xl:hidden" aria-hidden />}
                 </ul>
                 {unused.length > 0 && (
                   <div className="flex flex-wrap items-center gap-1.5 border-t px-4 py-3">

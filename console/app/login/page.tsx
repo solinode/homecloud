@@ -99,7 +99,7 @@ export default function LoginPage() {
           </div>
           <div className="text-faint mt-6 flex flex-col gap-2 text-center text-xs leading-relaxed">
             <p>
-              First run? The root password is printed once in the <code className="text-muted-foreground font-mono">homecloud serve</code> log.
+              First run? The root password is printed once in the server log.
             </p>
             <p>
               Forgot it? Run{" "}

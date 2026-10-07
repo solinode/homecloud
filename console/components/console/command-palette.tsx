@@ -58,6 +58,22 @@ const itemCls =
 const groupCls =
   "px-2 pb-2 [&_[cmdk-group-heading]]:px-2.5 [&_[cmdk-group-heading]]:pt-3 [&_[cmdk-group-heading]]:pb-1.5 [&_[cmdk-group-heading]]:font-mono [&_[cmdk-group-heading]]:text-[11px] [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:tracking-[0.08em] [&_[cmdk-group-heading]]:text-faint [&_[cmdk-group-heading]]:uppercase"
 
+/**
+ * matchScore ranks by words rather than cmdk's scattered-letter fuzzy match:
+ * every search word must start a word in the item (so "buck" finds S3 via
+ * "Buckets", not Lambda). Items whose name starts with the query rank first.
+ */
+function matchScore(value: string, search: string): number {
+  const words = search.toLowerCase().trim().split(/\s+/).filter(Boolean)
+  if (!words.length) return 1
+  const v = value.toLowerCase()
+  const tokens = v.split(/[\s/:.,()·-]+/)
+  if (!words.every((w) => tokens.some((t) => t.startsWith(w)) || (w.length > 2 && v.includes(w)))) return 0
+  // value is "<kind> <name> ...": prefer a match on the name itself
+  const name = v.split(" ").slice(1, 3).join(" ")
+  return name.startsWith(words.join(" ")) ? 1 : name.includes(words[0]) ? 0.8 : 0.5
+}
+
 function Enter() {
   return <CornerDownLeft className="text-faint ml-auto size-3.5 opacity-0 group-data-[selected=true]/item:opacity-100" />
 }
@@ -102,7 +118,7 @@ function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (
           className="bg-popover data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=open]:zoom-in-[0.98] fixed top-[12vh] left-1/2 z-50 w-[calc(100%-1.5rem)] max-w-[640px] -translate-x-1/2 overflow-hidden rounded-xl border border-border-strong shadow-lg duration-150"
         >
           <DialogPrimitive.Title className="sr-only">Search HomeCloud</DialogPrimitive.Title>
-          <Cmdk loop className="flex flex-col" label="Search services, pages, resources and actions">
+          <Cmdk loop filter={matchScore} className="flex flex-col" label="Search services, pages, resources and actions">
             <div className="flex h-14 items-center gap-3 border-b px-4">
               <Search className="text-muted-foreground size-4 shrink-0" />
               <Cmdk.Input
@@ -131,7 +147,7 @@ function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (
               )}
               <Cmdk.Group heading="Services" className={groupCls}>
                 {SERVICES.filter((s) => !s.comingSoon).map((s) => (
-                  <Cmdk.Item key={s.id} value={`service ${s.name} ${s.short} ${s.description} ${s.category}`} onSelect={() => go(s.href)} className={itemCls}>
+                  <Cmdk.Item key={s.id} value={`service ${s.name} ${s.short} ${s.description} ${s.category} ${(s.nav ?? []).flatMap((n) => n.items.map((i) => i.label)).join(" ")}`} onSelect={() => go(s.href)} className={itemCls}>
                     <ServiceIcon service={s} size="sm" />
                     <span className="font-medium">{s.name}</span>
                     <span className="text-faint hidden truncate text-xs sm:inline">{s.description}</span>
