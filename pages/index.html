@@ -12,20 +12,20 @@
 <meta property="og:title" content="HomeCloud: an AWS-compatible cloud you run yourself">
 <meta property="og:description" content="Point Terraform, the AWS CLI and the SDKs at it. Lambda, RDS, EC2 and about 30 other services run as real containers and VMs on your machine. One binary, AGPL-3.0.">
 <meta property="og:image" content="https://homecloud.pages.dev/images/og.png">
-<meta property="og:image:width" content="2160">
-<meta property="og:image:height" content="1350">
-<meta property="og:image:alt" content="The HomeCloud web console home page, listing EC2, Lambda, S3, RDS and other services with their resource counts.">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="HomeCloud: your own AWS, on your own machine. Shown next to the HomeCloud web console.">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="HomeCloud: an AWS-compatible cloud you run yourself">
 <meta name="twitter:description" content="Point Terraform, the AWS CLI and the SDKs at it. Real containers and VMs on your own machine.">
 <meta name="twitter:image" content="https://homecloud.pages.dev/images/og.png">
-<meta name="theme-color" content="#fbfbf9" media="(prefers-color-scheme: light)">
-<meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+<meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
-<script>try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="apple-touch-icon" href="/images/apple-touch-icon.png">
+<script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/geist-mono.woff2" as="font" type="font/woff2" crossorigin>
 <link rel="stylesheet" href="/site.css">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-SW07QRM18M"></script>
 <script>
@@ -39,173 +39,389 @@
 <a class="skip" href="#main">Skip to content</a>
 
 <header class="site-header">
-  <div class="wrap">
+  <div class="wrap header-row">
     <a class="brand" href="/" aria-label="HomeCloud home">
-      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M8 16.5 16 9l8 7.5" fill="none" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 22.5h10" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round"/></svg>
-      HomeCloud
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#hc-mark"/></svg>
+      <span>HomeCloud</span>
     </a>
-    <nav class="site-nav" aria-label="Main">
-      <a class="opt" href="#services">Services</a>
-      <a class="opt" href="#ci">Tests &amp; CI</a>
-      <a class="opt" href="#self-hosting">Self-hosting</a>
-      <a class="opt2" href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
-      <a href="https://github.com/solinode/homecloud">GitHub</a>
-      <button class="theme-btn" id="theme" type="button" aria-label="Toggle color theme">
+    <nav class="site-nav" id="site-nav" aria-label="Main">
+      <a href="#unchanged">How it works</a>
+      <a href="#services">Services</a>
+      <a href="#ci">Tests &amp; CI</a>
+      <a href="#self-hosting">Self-hosting</a>
+      <a href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
+      <a class="nav-demo" href="/demo/">Demo</a>
+    </nav>
+    <div class="header-actions">
+      <button class="icon-btn" id="theme" type="button" aria-label="Toggle color theme">
         <svg class="moon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z" stroke-linejoin="round"/></svg>
         <svg class="sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg>
       </button>
-    </nav>
+      <a class="btn btn-ghost btn-sm gh" href="https://github.com/solinode/homecloud">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.07 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .32.21.69.82.57A12 12 0 0 0 12 .3"/></svg>
+        <span>GitHub</span>
+      </a>
+      <button class="icon-btn menu-btn" id="menu" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="site-nav">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path class="l1" d="M2.5 5.5h11"/><path class="l2" d="M2.5 10.5h11"/></svg>
+      </button>
+    </div>
   </div>
 </header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="hc-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF8F45"/><stop offset="1" stop-color="#E5480C"/></linearGradient>
+    <symbol id="hc-mark" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="url(#hc-grad)"/><path fill="#fff" fill-rule="evenodd" d="M15.06 6.3a1.5 1.5 0 0 1 1.88 0l8.2 6.62c.35.28.56.71.56 1.17v9.41A2.5 2.5 0 0 1 23.2 26H8.8a2.5 2.5 0 0 1-2.5-2.5v-9.41c0-.46.2-.89.56-1.17ZM11.3 15.6a1.3 1.3 0 0 0 0 2.6h6.4a1.3 1.3 0 0 0 0-2.6Zm0 4.6a1.3 1.3 0 0 0 0 2.6h6.4a1.3 1.3 0 0 0 0-2.6Zm8.4-3.3a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0Zm0 4.6a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0Z"/></symbol>
+  </defs>
+</svg>
 
 <main id="main">
 
 <section class="hero">
-  <div class="wrap">
-    <a class="release" href="https://github.com/solinode/homecloud/releases/tag/v0.4.0"><strong>v0.4.0</strong> &nbsp;VM instances, a container image, a GitHub Action and testcontainers <span aria-hidden="true">&rarr;</span></a>
+  <div class="hero-bg" aria-hidden="true"></div>
+  <div class="wrap hero-inner">
+    <a class="pill" href="https://github.com/solinode/homecloud/releases/tag/v0.4.0">
+      <span class="pill-tag">v0.4.0</span>
+      <span class="pill-text">VM instances, a container image, a GitHub Action and testcontainers</span>
+      <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M6 4l4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    </a>
 
-    <h1>An AWS-compatible cloud you run yourself.</h1>
-    <p class="lead">Point your Terraform, AWS CLI and SDK code at HomeCloud and it works as it does against AWS. The difference is where it runs: <strong>Lambda functions, databases, load balancers and EC2 instances are real containers and VMs on your own machine.</strong> One binary, about 30 services, open source.</p>
+    <h1>Your own AWS,<br> on your own machine.</h1>
+    <p class="lead">HomeCloud speaks the AWS APIs. Point Terraform, the AWS CLI or boto3 at it, and Lambda, RDS and EC2 come up as <em>real containers and VMs</em> on your own hardware. One binary, about 30 services, open source.</p>
 
-    <div class="install">
-      <div class="tabs" role="tablist" aria-label="Install method">
-        <button class="tab" role="tab" id="t-unix" aria-controls="p-unix" aria-selected="true">macOS / Linux</button>
-        <button class="tab" role="tab" id="t-win" aria-controls="p-win" aria-selected="false" tabindex="-1">Windows</button>
-        <button class="tab" role="tab" id="t-docker" aria-controls="p-docker" aria-selected="false" tabindex="-1">Docker</button>
+    <div class="hero-ctas">
+      <a class="btn btn-primary" href="/demo/" title="Runs in your browser with sample data. Nothing to install.">Try the live demo <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9m-4-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+      <a class="btn btn-ghost" href="https://github.com/solinode/homecloud/tree/main/docs">Read the docs</a>
+    </div>
+
+    <div class="install" id="install">
+      <div class="seg" role="tablist" aria-label="Install method">
+        <button class="seg-tab" role="tab" id="t-unix" aria-controls="p-unix" aria-selected="true">macOS / Linux</button>
+        <button class="seg-tab" role="tab" id="t-win" aria-controls="p-win" aria-selected="false" tabindex="-1">Windows</button>
+        <button class="seg-tab" role="tab" id="t-docker" aria-controls="p-docker" aria-selected="false" tabindex="-1">Docker</button>
       </div>
       <div class="panel" role="tabpanel" id="p-unix" aria-labelledby="t-unix">
         <div class="cmd">
-          <pre><span class="p" aria-hidden="true">$ </span><code id="cmd-unix" data-script="sh">curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh</code></pre>
-          <button class="btn btn-primary" type="button" data-copy="cmd-unix">Copy</button>
+          <pre><span class="prompt" aria-hidden="true">$</span><code id="cmd-unix" data-script="sh">curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh</code></pre>
+          <button class="copy" type="button" data-copy="cmd-unix" aria-label="Copy install command"><svg class="i-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.6V3.3a1.8 1.8 0 0 0-1.8-1.8H4.3a1.8 1.8 0 0 0-1.8 1.8v4.4a1.8 1.8 0 0 0 1.8 1.8h.3"/></svg><svg class="i-ok" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg></button>
         </div>
-        <p class="install-note">Then run <code>homecloud serve</code> and open <code>http://127.0.0.1:8080</code>. Needs Docker (Engine, Docker Desktop or OrbStack).</p>
+        <p class="install-note">Then run <code>homecloud serve</code> and open <code>127.0.0.1:8080</code>. Needs Docker Engine, Docker Desktop or OrbStack.</p>
       </div>
       <div class="panel" role="tabpanel" id="p-win" aria-labelledby="t-win" hidden>
         <div class="cmd">
-          <pre><span class="p" aria-hidden="true">&gt; </span><code id="cmd-win" data-script="ps1">irm https://homecloud.pages.dev/scripts/install.ps1 | iex</code></pre>
-          <button class="btn btn-primary" type="button" data-copy="cmd-win">Copy</button>
+          <pre><span class="prompt" aria-hidden="true">&gt;</span><code id="cmd-win" data-script="ps1">irm https://homecloud.pages.dev/scripts/install.ps1 | iex</code></pre>
+          <button class="copy" type="button" data-copy="cmd-win" aria-label="Copy install command"><svg class="i-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.6V3.3a1.8 1.8 0 0 0-1.8-1.8H4.3a1.8 1.8 0 0 0-1.8 1.8v4.4a1.8 1.8 0 0 0 1.8 1.8h.3"/></svg><svg class="i-ok" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg></button>
         </div>
-        <p class="install-note">In PowerShell. Then run <code>homecloud serve</code> and open <code>http://127.0.0.1:8080</code>. Needs Docker Desktop.</p>
+        <p class="install-note">In PowerShell. Then run <code>homecloud serve</code> and open <code>127.0.0.1:8080</code>. Needs Docker Desktop.</p>
       </div>
       <div class="panel" role="tabpanel" id="p-docker" aria-labelledby="t-docker" hidden>
         <div class="cmd">
           <pre><code id="cmd-docker">docker run -d --name homecloud -p 127.0.0.1:8080:8080 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   -v homecloud-data:/data ghcr.io/solinode/homecloud</code></pre>
-          <button class="btn btn-primary" type="button" data-copy="cmd-docker">Copy</button>
+          <button class="copy" type="button" data-copy="cmd-docker" aria-label="Copy docker command"><svg class="i-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.6V3.3a1.8 1.8 0 0 0-1.8-1.8H4.3a1.8 1.8 0 0 0-1.8 1.8v4.4a1.8 1.8 0 0 0 1.8 1.8h.3"/></svg><svg class="i-ok" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg></button>
         </div>
         <p class="install-note"><code>docker logs homecloud</code> shows the root console password once. Images for amd64 and arm64.</p>
       </div>
+      <p class="sr-only" role="status" id="copy-status"></p>
+    </div>
+  </div>
+
+  <div class="wrap stage-wrap">
+    <div class="stage">
+      <div class="win win-back" aria-hidden="true">
+        <div class="win-bar"><i></i><i></i><i></i><span>127.0.0.1:8080/ec2</span></div>
+        <img src="/images/ec2-instances.webp" width="1600" height="1000" alt="" decoding="async">
+      </div>
+      <figure class="win win-front">
+        <div class="win-bar" aria-hidden="true"><i></i><i></i><i></i><span>127.0.0.1:8080</span></div>
+        <img src="/images/console-home.webp" width="1600" height="1000" fetchpriority="high" decoding="async" alt="The HomeCloud console home page: a grid of services (EC2, Lambda, S3, RDS, DynamoDB, SQS, SNS, EventBridge, ECS and more) with counts of running resources in each.">
+      </figure>
+      <figure class="term">
+        <figcaption class="term-bar"><i></i><i></i><i></i><span>~/shop &mdash; zsh</span></figcaption>
+<pre><code><span class="t-p">$</span> eval "$(homecloud aws-env)"
+<span class="t-p">$</span> terraform apply -auto-approve
+<span class="t-d">aws_s3_bucket.assets: Creation complete</span>
+<span class="t-d">aws_db_instance.orders: Creation complete</span>
+<span class="t-d">aws_lambda_function.api: Creation complete</span>
+<span class="t-ok">Apply complete! Resources: 3 added.</span>
+<span class="t-p">$</span> docker ps --format '{{.Image}}' | head -3
+<span class="t-d">postgres:17-alpine</span>
+<span class="t-d">public.ecr.aws/lambda/python:3.12</span>
+<span class="t-d">cgr.dev/chainguard/minio:latest</span></code></pre>
+      </figure>
+    </div>
+  </div>
+
+  <div class="wrap">
+    <div class="works-with reveal">
+      <p>Tested with the tools you already use</p>
+      <ul>
+        <li><span class="glyph glyph-term" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="2" y="3.5" width="20" height="17" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 9l3 3-3 3M12 15h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span>AWS CLI</li>
+        <li><span class="logo" style="--src:url(/images/logos/python.svg)" aria-hidden="true"></span>boto3</li>
+        <li><span class="logo" style="--src:url(/images/logos/terraform.svg)" aria-hidden="true"></span>Terraform</li>
+        <li><span class="logo" style="--src:url(/images/logos/opentofu.svg)" aria-hidden="true"></span>OpenTofu</li>
+        <li><span class="logo" style="--src:url(/images/logos/githubactions.svg)" aria-hidden="true"></span>GitHub Actions</li>
+        <li><span class="logo" style="--src:url(/images/logos/docker.svg)" aria-hidden="true"></span>Docker</li>
+        <li><img class="logo-img" src="/images/logos/testcontainers.svg" width="20" height="20" alt="" aria-hidden="true">Testcontainers</li>
+      </ul>
     </div>
 
-    <div class="hero-actions">
-      <a class="btn btn-secondary" href="/demo/">Try the demo console <span aria-hidden="true">&rarr;</span></a>
-      <span class="aside">Runs in your browser with sample data. Nothing to install.</span>
-    </div>
-
-    <figure class="shot hero-shot">
-      <img src="/images/console-home.webp" width="1600" height="1000" alt="The HomeCloud console home page: a grid of services (EC2, Lambda, S3, RDS, DynamoDB, SQS, SNS, EventBridge, ECS and more) with counts of running resources in each.">
-    </figure>
-
-    <dl class="facts">
-      <div><dt>17 of 17</dt><dd>terraform-aws-modules scenarios apply, re-plan clean and destroy, nightly</dd></div>
+    <dl class="stats reveal">
+      <div><dt>17<span>/17</span></dt><dd>terraform-aws-modules scenarios apply, re-plan clean and destroy, nightly</dd></div>
       <div><dt>~30</dt><dd>AWS services behind one endpoint, with IAM enforced on every call</dd></div>
-      <div><dt>1 binary</dt><dd>API, console and CLI. Docker runs everything else</dd></div>
-      <div><dt>AGPL-3.0</dt><dd>Every feature is in the open code. There is no paid tier</dd></div>
+      <div><dt>1<span> binary</span></dt><dd>API, console and CLI. Docker runs everything else</dd></div>
+      <div><dt>AGPL<span>-3.0</span></dt><dd>Every feature is in the open code. There is no paid tier</dd></div>
     </dl>
   </div>
 </section>
 
 <section class="section" id="unchanged" aria-labelledby="unchanged-h">
   <div class="wrap">
-    <div class="section-head">
-      <h2 id="unchanged-h">Your AWS code, unchanged</h2>
+    <header class="section-head reveal">
+      <p class="eyebrow">How it works</p>
+      <h2 id="unchanged-h">Your AWS code, unchanged.</h2>
       <p>HomeCloud speaks the AWS wire protocols (SigV4, awsJson, awsQuery, REST), so the tools you already use only need a different endpoint. <code>homecloud aws-env</code> prints it, with the access keys it created on first start.</p>
-    </div>
-    <div class="pair">
-      <div class="code">
-        <div class="code-title"><span>shell</span><span>AWS CLI</span></div>
-<pre><code><span class="c"># AWS_ENDPOINT_URL, keys and region</span>
-eval "$(homecloud aws-env)"
+    </header>
 
-aws sts get-caller-identity
-aws s3 mb s3://demo
-echo hi | aws s3 cp - s3://demo/hello.txt
-aws sqs create-queue --queue-name jobs</code></pre>
-      </div>
-      <div class="code">
-        <div class="code-title"><span>main.tf</span><span>Terraform / OpenTofu</span></div>
-<pre><code>provider "aws" {
+    <div class="how">
+      <div class="how-code reveal">
+        <div class="code">
+          <div class="code-bar"><span class="file">shell</span><span class="tag">AWS CLI</span></div>
+<pre><code><span class="c"># AWS_ENDPOINT_URL, keys and region</span>
+<span class="k">eval</span> <span class="s">"$(homecloud aws-env)"</span>
+
+<span class="f">aws</span> sts get-caller-identity
+<span class="f">aws</span> s3 mb s3://demo
+<span class="k">echo</span> hi | <span class="f">aws</span> s3 cp - s3://demo/hello.txt
+<span class="f">aws</span> sqs create-queue --queue-name jobs</code></pre>
+        </div>
+        <div class="code">
+          <div class="code-bar"><span class="file">main.tf</span><span class="tag">Terraform / OpenTofu</span></div>
+<pre><code><span class="k">provider</span> <span class="s">"aws"</span> {
   region            = <span class="s">"us-east-1"</span>
   <span class="c"># buckets by path, not by host name</span>
-  s3_use_path_style = true
+  s3_use_path_style = <span class="n">true</span>
 }
 
-resource "aws_sqs_queue" "jobs" {
+<span class="k">resource</span> <span class="s">"aws_sqs_queue"</span> <span class="s">"jobs"</span> {
   name = <span class="s">"jobs"</span>
 }
 <span class="c"># the provider reads AWS_ENDPOINT_URL too</span></code></pre>
+        </div>
       </div>
+
+      <figure class="flow reveal" aria-labelledby="flow-cap">
+        <figcaption id="flow-cap" class="sr-only">How a request flows: your tools send AWS API calls to HomeCloud on port 8080, which checks the signature and IAM policy, records the call, and runs the work as containers and VMs on Docker.</figcaption>
+        <div class="flow-col">
+          <p class="flow-label">Your tools</p>
+          <ul class="chips">
+            <li>aws CLI</li><li>boto3</li><li>Terraform</li><li>OpenTofu</li><li>CloudFormation</li>
+          </ul>
+        </div>
+        <div class="flow-line" aria-hidden="true"><span></span></div>
+        <div class="flow-col flow-hc">
+          <p class="flow-label">HomeCloud <code>:8080</code></p>
+          <ol class="steps">
+            <li><b>SigV4</b> signature checked</li>
+            <li><b>IAM</b> policy evaluated</li>
+            <li><b>CloudTrail</b> records the call</li>
+          </ol>
+        </div>
+        <div class="flow-line" aria-hidden="true"><span></span></div>
+        <div class="flow-col">
+          <p class="flow-label">Docker on your host</p>
+          <ul class="grid-chips">
+            <li><b>Lambda</b><span>AWS runtime images</span></li>
+            <li><b>RDS</b><span>PostgreSQL, MySQL</span></li>
+            <li><b>S3</b><span>MinIO</span></li>
+            <li><b>EC2</b><span>containers, QEMU VMs</span></li>
+            <li><b>ELB</b><span>nginx</span></li>
+            <li><b>Route 53</b><span>CoreDNS</span></li>
+          </ul>
+        </div>
+      </figure>
     </div>
 
-    <ul class="works">
-      <li><strong>AWS CLI v2</strong>Tested: the compatibility suite drives the real <code>aws</code> CLI in CI.</li>
-      <li><strong>boto3</strong>Tested in CI, including Cognito SRP sign-in through pycognito.</li>
-      <li><strong>Terraform and OpenTofu</strong>Tested with the stock <code>hashicorp/aws</code> provider, plus the nightly modules suite.</li>
-      <li><strong>CloudFormation</strong>Tested: stacks, change sets, updates with rollback, the boto3 waiters.</li>
-      <li><strong>AWS CDK</strong>Partly: synthesized templates deploy through change sets; <code>cdk deploy</code> end to end is not verified yet.</li>
-      <li><strong>Other SDKs and Pulumi</strong>Same protocols and SigV4, so expected to work, but not covered by tests. Reports welcome.</li>
-    </ul>
+    <div class="compat reveal">
+      <table>
+        <caption class="sr-only">Client compatibility</caption>
+        <thead><tr><th scope="col">Client</th><th scope="col">Status</th><th scope="col">Notes</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">AWS CLI v2</th><td><span class="badge ok">Tested</span></td><td>The compatibility suite drives the real <code>aws</code> CLI in CI.</td></tr>
+          <tr><th scope="row">boto3</th><td><span class="badge ok">Tested</span></td><td>In CI, including Cognito SRP sign-in through pycognito.</td></tr>
+          <tr><th scope="row">Terraform, OpenTofu</th><td><span class="badge ok">Tested</span></td><td>The stock <code>hashicorp/aws</code> provider, plus the nightly modules suite.</td></tr>
+          <tr><th scope="row">CloudFormation</th><td><span class="badge ok">Tested</span></td><td>Stacks, change sets, updates with rollback, the boto3 waiters.</td></tr>
+          <tr><th scope="row">AWS CDK</th><td><span class="badge part">Partly</span></td><td>Synthesized templates deploy through change sets; <code>cdk deploy</code> end to end is not verified yet.</td></tr>
+          <tr><th scope="row">Other SDKs, Pulumi</th><td><span class="badge maybe">Expected</span></td><td>Same protocols and SigV4, but not covered by tests. Reports welcome.</td></tr>
+        </tbody>
+      </table>
+    </div>
   </div>
 </section>
 
 <section class="section" id="services" aria-labelledby="services-h">
   <div class="wrap">
-    <div class="section-head">
-      <h2 id="services-h">What runs</h2>
-      <p>Each service is something real underneath, so an integration test hits the same kind of thing production does. Everything here is managed through the AWS CLI, SDKs and Terraform, and also appears in the console.</p>
+    <header class="section-head reveal">
+      <p class="eyebrow">What runs</p>
+      <h2 id="services-h">Real infrastructure behind every API.</h2>
+      <p>Each service is something real underneath, so an integration test hits the same kind of thing production does. All of it is managed through the AWS CLI, SDKs and Terraform, and shows up in the console.</p>
+    </header>
+
+    <div class="bento">
+      <article class="tile t-compute reveal">
+        <div class="tile-text">
+          <p class="tile-k">Compute</p>
+          <h3>Instances you can shell into.</h3>
+          <p>EC2 instances are containers. Two images, Ubuntu 24.04 and Debian 12, boot real VMs under QEMU, with KVM when the host has it. EBS, AMIs, Auto Scaling, ECS (Fargate) and ECR too.</p>
+        </div>
+        <div class="crop crop-ec2"><img src="/images/ec2-instances.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="EC2 instances list with names, instance IDs, running or stopped state, instance types, images and private IPs."></div>
+      </article>
+
+      <article class="tile t-db reveal">
+        <p class="tile-k">Databases</p>
+        <h3>The real engines.</h3>
+        <table class="mini">
+          <tbody>
+            <tr><th scope="row">RDS</th><td>PostgreSQL <span>&middot;</span> MySQL <span>&middot;</span> MariaDB</td></tr>
+            <tr><th scope="row">ElastiCache</th><td>Redis <span>&middot;</span> Valkey <span>&middot;</span> Memcached</td></tr>
+            <tr><th scope="row">DynamoDB</th><td>GSIs, transactions, PartiQL, TTL, streams</td></tr>
+          </tbody>
+        </table>
+<pre class="snip snip-end"><code><span class="f">aws</span> rds create-db-instance \
+  --engine postgres --engine-version 17 \
+  --db-instance-identifier orders ...
+<span class="c"># runs postgres:17-alpine on your VPC network</span></code></pre>
+      </article>
+
+      <article class="tile t-fn reveal">
+        <p class="tile-k">Serverless</p>
+        <h3>AWS's own Lambda runtimes.</h3>
+<pre class="snip"><code><span class="f">aws</span> lambda invoke \
+  --function-name api:live \
+  out.json
+<span class="c">{ "StatusCode": 200,
+  "ExecutedVersion": "3" }</span></code></pre>
+        <p>Versions, aliases, layers, function URLs, SQS and stream triggers. API Gateway HTTP APIs and Step Functions.</p>
+      </article>
+
+      <article class="tile t-net reveal">
+        <p class="tile-k">Networking</p>
+        <h3>What answers the call.</h3>
+        <ul class="map">
+          <li><span>Security groups</span><i aria-hidden="true"></i><b>iptables</b></li>
+          <li><span>ELB v2</span><i aria-hidden="true"></i><b>nginx</b></li>
+          <li><span>Route 53</span><i aria-hidden="true"></i><b>CoreDNS</b></li>
+          <li><span>ACM</span><i aria-hidden="true"></i><b>private CA</b></li>
+          <li><span>VPC</span><i aria-hidden="true"></i><b>Docker networks</b></li>
+        </ul>
+      </article>
+
+      <article class="tile t-iam reveal">
+        <p class="tile-k">Identity &amp; security</p>
+        <h3>One policy evaluator for all of it.</h3>
+<pre class="snip"><code>{
+  <span class="s">"Effect"</span>: <span class="s">"Allow"</span>,
+  <span class="s">"Action"</span>: <span class="s">"s3:GetObject"</span>,
+  <span class="s">"Condition"</span>: { <span class="s">"StringEquals"</span>:
+    { <span class="s">"aws:PrincipalTag/team"</span>: <span class="s">"web"</span> } }
+}</code></pre>
+        <p>Conditions, roles, permissions boundaries and <code>iam:PassRole</code>. STS, Cognito, KMS, Secrets Manager, SSM Parameter Store.</p>
+      </article>
+
+      <article class="tile t-s3 reveal">
+        <p class="tile-k">Storage</p>
+        <h3>S3 on MinIO.</h3>
+        <ul class="ticks">
+          <li>Versioning and lifecycle rules</li>
+          <li>Presigned URLs</li>
+          <li>Bucket policies</li>
+          <li>EFS as Docker volumes</li>
+        </ul>
+      </article>
+
+      <article class="tile t-msg reveal">
+        <p class="tile-k">Messaging</p>
+        <h3>Fan out like production.</h3>
+        <div class="fan" aria-label="An SNS topic delivers to SQS, Lambda and HTTP subscribers, with filter policies." role="img">
+          <span class="fan-src">SNS topic</span>
+          <span class="fan-lines" aria-hidden="true"></span>
+          <span class="fan-dst"><span>SQS</span><span>Lambda</span><span>HTTP</span></span>
+        </div>
+        <p>Standard and FIFO queues with DLQs, filter policies, EventBridge rules and Scheduler.</p>
+      </article>
+
+      <article class="tile t-obs reveal">
+        <div class="tile-text">
+          <p class="tile-k">Observability</p>
+          <h3>Metrics and logs for every resource.</h3>
+          <p>CloudWatch alarms, Logs Insights, and CloudTrail: a record of every API call.</p>
+        </div>
+        <div class="crop crop-cw"><img src="/images/cloudwatch.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="CloudWatch metrics graphs and alarms."></div>
+      </article>
+
+      <article class="tile t-cfn reveal">
+        <p class="tile-k">Infrastructure as code</p>
+        <h3>CloudFormation, with rollback.</h3>
+        <p>Change sets, and updates that roll back on failure. No nested stacks or custom resources yet.</p>
+        <div class="metric"><b>17/17</b><span>terraform-aws-modules scenarios pass: apply, a real check, a clean re-plan and destroy.</span></div>
+      </article>
+
+      <article class="tile t-limits reveal">
+        <p class="tile-k">Limits, up front</p>
+        <h3>What it is not.</h3>
+        <ul class="ticks ticks-no">
+          <li>One Docker host, one region (<code>us-east-1</code>), one account</li>
+          <li>Network ACLs and NAT gateways are recorded, not enforced</li>
+          <li>Not every operation of every service: check the <a href="https://github.com/solinode/homecloud/blob/main/docs/aws-compat.md">compatibility reference</a></li>
+        </ul>
+      </article>
     </div>
-    <table class="svc">
-      <thead><tr><th scope="col">Area</th><th scope="col">Services</th><th scope="col">What does the work</th></tr></thead>
-      <tbody>
-        <tr><th scope="row">Compute</th><td>EC2, EBS, AMIs, Auto Scaling, ECS (Fargate), ECR</td><td>Instances are containers you can shell into. Two images, Ubuntu 24.04 and Debian 12, boot real VMs under QEMU, with KVM when the host has it.</td></tr>
-        <tr><th scope="row">Storage</th><td>S3, EFS</td><td>MinIO, with versioning, lifecycle, presigned URLs and bucket policies. EFS is Docker volumes.</td></tr>
-        <tr><th scope="row">Databases</th><td>RDS, ElastiCache, DynamoDB</td><td>Real PostgreSQL, MySQL and MariaDB; Redis, Valkey and Memcached. DynamoDB with GSIs, transactions, PartiQL, TTL and streams.</td></tr>
-        <tr><th scope="row">Serverless</th><td>Lambda, API Gateway (HTTP APIs), Step Functions</td><td>AWS's own Lambda runtime images. Versions, aliases, layers, function URLs, SQS and stream triggers.</td></tr>
-        <tr><th scope="row">Messaging</th><td>SQS, SNS, EventBridge, Scheduler</td><td>Standard and FIFO queues with DLQs; SNS to SQS, Lambda and HTTP with filter policies.</td></tr>
-        <tr><th scope="row">Networking</th><td>VPC, security groups, ELB v2, Route 53, ACM</td><td>Security groups are iptables rules. Load balancers are nginx, DNS is CoreDNS, certificates come from a private CA.</td></tr>
-        <tr><th scope="row">Identity &amp; security</th><td>IAM, STS, Cognito, KMS, Secrets Manager, SSM Parameter Store</td><td>One policy evaluator for every service, with conditions, roles, permissions boundaries and <code>iam:PassRole</code>.</td></tr>
-        <tr><th scope="row">Observability</th><td>CloudWatch, CloudWatch Logs, CloudTrail</td><td>Metrics and logs for every resource, alarms, Logs Insights, and a record of every API call.</td></tr>
-        <tr><th scope="row">Infrastructure as code</th><td>CloudFormation</td><td>Change sets and updates with rollback. No nested stacks or custom resources yet.</td></tr>
-      </tbody>
-    </table>
-    <p class="limits"><strong>Limits, up front:</strong> HomeCloud runs on one Docker host and serves one region (<code>us-east-1</code>) and one account. Some things are recorded rather than enforced, like network ACLs and NAT gateways. The <a href="https://github.com/solinode/homecloud/blob/main/docs/aws-compat.md">compatibility reference</a> lists supported operations and differences per service.</p>
+
+    <details class="all-services reveal">
+      <summary>Every service, and what does the work <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 6l4 4 4-4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></summary>
+      <div class="svc-wrap"><table class="svc">
+        <thead><tr><th scope="col">Area</th><th scope="col">Services</th><th scope="col">What does the work</th></tr></thead>
+        <tbody>
+          <tr><th scope="row">Compute</th><td>EC2, EBS, AMIs, Auto Scaling, ECS (Fargate), ECR</td><td>Instances are containers you can shell into. Two images, Ubuntu 24.04 and Debian 12, boot real VMs under QEMU, with KVM when the host has it.</td></tr>
+          <tr><th scope="row">Storage</th><td>S3, EFS</td><td>MinIO, with versioning, lifecycle, presigned URLs and bucket policies. EFS is Docker volumes.</td></tr>
+          <tr><th scope="row">Databases</th><td>RDS, ElastiCache, DynamoDB</td><td>Real PostgreSQL, MySQL and MariaDB; Redis, Valkey and Memcached. DynamoDB with GSIs, transactions, PartiQL, TTL and streams.</td></tr>
+          <tr><th scope="row">Serverless</th><td>Lambda, API Gateway (HTTP APIs), Step Functions</td><td>AWS's own Lambda runtime images. Versions, aliases, layers, function URLs, SQS and stream triggers.</td></tr>
+          <tr><th scope="row">Messaging</th><td>SQS, SNS, EventBridge, Scheduler</td><td>Standard and FIFO queues with DLQs; SNS to SQS, Lambda and HTTP with filter policies.</td></tr>
+          <tr><th scope="row">Networking</th><td>VPC, security groups, ELB v2, Route 53, ACM</td><td>Security groups are iptables rules. Load balancers are nginx, DNS is CoreDNS, certificates come from a private CA.</td></tr>
+          <tr><th scope="row">Identity &amp; security</th><td>IAM, STS, Cognito, KMS, Secrets Manager, SSM Parameter Store</td><td>One policy evaluator for every service, with conditions, roles, permissions boundaries and <code>iam:PassRole</code>.</td></tr>
+          <tr><th scope="row">Observability</th><td>CloudWatch, CloudWatch Logs, CloudTrail</td><td>Metrics and logs for every resource, alarms, Logs Insights, and a record of every API call.</td></tr>
+          <tr><th scope="row">Infrastructure as code</th><td>CloudFormation</td><td>Change sets and updates with rollback. No nested stacks or custom resources yet.</td></tr>
+        </tbody>
+      </table></div>
+    </details>
   </div>
 </section>
 
 <section class="section" id="ci" aria-labelledby="ci-h">
   <div class="wrap">
-    <div class="section-head">
-      <h2 id="ci-h">For tests and CI</h2>
-      <p>Use it as a drop-in AWS for integration tests: no cloud credentials in CI, no bill, nothing left behind. HomeCloud's own end-to-end job runs on a stock GitHub Actions runner.</p>
-    </div>
-    <div class="ci">
-      <div class="ci-tabs" role="tablist" aria-label="Integration">
-        <button class="tab" role="tab" id="t-gha" aria-controls="p-gha" aria-selected="true">GitHub Action<small>Install, start, export AWS_*</small></button>
-        <button class="tab" role="tab" id="t-py" aria-controls="p-py" aria-selected="false" tabindex="-1"><span class="hide-sm">testcontainers-</span>python<small>A pytest fixture</small></button>
-        <button class="tab" role="tab" id="t-go" aria-controls="p-go" aria-selected="false" tabindex="-1"><span class="hide-sm">testcontainers-</span>go<small>From a Go test</small></button>
-        <button class="tab" role="tab" id="t-sh" aria-controls="p-sh" aria-selected="false" tabindex="-1">Any CI<small>The binary and a health check</small></button>
+    <header class="section-head reveal">
+      <p class="eyebrow">Tests &amp; CI</p>
+      <h2 id="ci-h">A drop-in AWS for integration tests.</h2>
+      <p>No cloud credentials in CI, no bill, nothing left behind. HomeCloud's own end-to-end job runs on a stock GitHub Actions runner.</p>
+    </header>
+    <div class="ci reveal">
+      <div class="ci-tabs" role="tablist" aria-label="Integration" aria-orientation="vertical">
+        <button class="ci-tab" role="tab" id="t-gha" aria-controls="p-gha" aria-selected="true"><span class="logo" style="--src:url(/images/logos/githubactions.svg)" aria-hidden="true"></span><span><b>GitHub Action</b><small>Install, start, export AWS_*</small></span></button>
+        <button class="ci-tab" role="tab" id="t-py" aria-controls="p-py" aria-selected="false" tabindex="-1"><span class="logo" style="--src:url(/images/logos/python.svg)" aria-hidden="true"></span><span><b>testcontainers-python</b><small>A pytest fixture</small></span></button>
+        <button class="ci-tab" role="tab" id="t-go" aria-controls="p-go" aria-selected="false" tabindex="-1"><img class="logo-img" src="/images/logos/testcontainers.svg" width="20" height="20" alt="" aria-hidden="true"><span><b>testcontainers-go</b><small>From a Go test</small></span></button>
+        <button class="ci-tab" role="tab" id="t-sh" aria-controls="p-sh" aria-selected="false" tabindex="-1"><span class="glyph glyph-term" aria-hidden="true"><svg viewBox="0 0 24 24"><rect x="2" y="3.5" width="20" height="17" rx="3.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M6.5 9l3 3-3 3M12 15h5" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/></svg></span><span><b>Any CI</b><small>The binary and a health check</small></span></button>
       </div>
-      <div>
+      <div class="ci-panels">
         <div class="panel" role="tabpanel" id="p-gha" aria-labelledby="t-gha">
           <div class="code">
-            <div class="code-title"><span>.github/workflows/test.yml</span></div>
-<pre><code>steps:
-  - uses: actions/checkout@v4
-  - uses: solinode/homecloud/integrations/github-action@main
-    with:
-      services-wait: s3    <span class="c"># wait for MinIO too</span>
-  - run: |
+            <div class="code-bar"><span class="file">.github/workflows/test.yml</span></div>
+<pre><code><span class="k">steps</span>:
+  - <span class="k">uses</span>: actions/checkout@v4
+  - <span class="k">uses</span>: <span class="f">solinode/homecloud/integrations/github-action@main</span>
+    <span class="k">with</span>:
+      <span class="k">services-wait</span>: s3    <span class="c"># wait for MinIO too</span>
+  - <span class="k">run</span>: |
       aws s3 mb s3://artifacts
       pytest               <span class="c"># boto3 reads AWS_ENDPOINT_URL</span></code></pre>
           </div>
@@ -213,15 +429,15 @@ resource "aws_sqs_queue" "jobs" {
         </div>
         <div class="panel" role="tabpanel" id="p-py" aria-labelledby="t-py" hidden>
           <div class="code">
-            <div class="code-title"><span>conftest.py</span></div>
-<pre><code>from testcontainers_homecloud import HomeCloudContainer
+            <div class="code-bar"><span class="file">conftest.py</span></div>
+<pre><code><span class="k">from</span> testcontainers_homecloud <span class="k">import</span> HomeCloudContainer
 
-@pytest.fixture(scope=<span class="s">"session"</span>)
-def homecloud():
-    with HomeCloudContainer() as hc:
-        yield hc
+<span class="f">@pytest.fixture</span>(scope=<span class="s">"session"</span>)
+<span class="k">def</span> <span class="f">homecloud</span>():
+    <span class="k">with</span> HomeCloudContainer() <span class="k">as</span> hc:
+        <span class="k">yield</span> hc
 
-def test_upload(homecloud):
+<span class="k">def</span> <span class="f">test_upload</span>(homecloud):
     s3 = homecloud.get_client(<span class="s">"s3"</span>)
     s3.create_bucket(Bucket=<span class="s">"test"</span>)</code></pre>
           </div>
@@ -229,120 +445,131 @@ def test_upload(homecloud):
         </div>
         <div class="panel" role="tabpanel" id="p-go" aria-labelledby="t-go" hidden>
           <div class="code">
-            <div class="code-title"><span>store_test.go</span></div>
-<pre><code>hc, err := homecloud.Run(ctx, homecloud.DefaultImage)
-testcontainers.CleanupContainer(t, hc)
-if err != nil {
-	t.Fatal(err)
+            <div class="code-bar"><span class="file">store_test.go</span></div>
+<pre><code>hc, err := homecloud.<span class="f">Run</span>(ctx, homecloud.DefaultImage)
+testcontainers.<span class="f">CleanupContainer</span>(t, hc)
+<span class="k">if</span> err != <span class="n">nil</span> {
+	t.<span class="f">Fatal</span>(err)
 }
-s3c := s3.NewFromConfig(hc.AWSConfig(), func(o *s3.Options) {
-	o.UsePathStyle = true
+s3c := s3.<span class="f">NewFromConfig</span>(hc.<span class="f">AWSConfig</span>(), <span class="k">func</span>(o *s3.Options) {
+	o.UsePathStyle = <span class="n">true</span>
 })</code></pre>
           </div>
           <p>Terminating the container also removes every container, network and volume HomeCloud created.</p>
         </div>
         <div class="panel" role="tabpanel" id="p-sh" aria-labelledby="t-sh" hidden>
           <div class="code">
-            <div class="code-title"><span>ci.sh</span></div>
-<pre><code>curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh
-nohup homecloud serve &gt; homecloud.log 2&gt;&amp;1 &amp;
-until curl -fs localhost:8080/api/v1/health; do sleep 2; done
-eval "$(homecloud aws-env)"
-terraform apply -auto-approve   <span class="c"># or your test suite</span></code></pre>
+            <div class="code-bar"><span class="file">ci.sh</span></div>
+<pre><code><span class="f">curl</span> -fsSL https://homecloud.pages.dev/scripts/install.sh | sh
+<span class="f">nohup</span> homecloud serve &gt; homecloud.log 2&gt;&amp;1 &amp;
+<span class="k">until</span> <span class="f">curl</span> -fs localhost:8080/api/v1/health; <span class="k">do</span> sleep 2; <span class="k">done</span>
+<span class="k">eval</span> <span class="s">"$(homecloud aws-env)"</span>
+<span class="f">terraform</span> apply -auto-approve   <span class="c"># or your test suite</span></code></pre>
           </div>
           <p>Works on any runner with Docker. Run one HomeCloud per Docker host at a time.</p>
         </div>
       </div>
     </div>
-    <p class="more"><a href="https://github.com/solinode/homecloud/blob/main/docs/integrations.md">Testing and CI guide</a> &middot; <a href="https://github.com/solinode/homecloud/blob/main/docs/compatibility.md">Terraform modules results</a></p>
+    <p class="more reveal"><a href="https://github.com/solinode/homecloud/blob/main/docs/integrations.md">Testing and CI guide <span aria-hidden="true">&rarr;</span></a><a href="https://github.com/solinode/homecloud/blob/main/docs/compatibility.md">Terraform modules results <span aria-hidden="true">&rarr;</span></a></p>
   </div>
 </section>
 
 <section class="section" id="console" aria-labelledby="console-h">
   <div class="wrap">
-    <div class="section-head">
-      <h2 id="console-h">A console in the box</h2>
-      <p>The web console is built into the binary and works offline. It is modeled on AWS's, so the layout will be familiar. These are from the <a href="/demo/">demo</a>.</p>
-    </div>
-    <div class="shots">
-      <figure>
-        <div class="shot"><img src="/images/ec2-instances.webp" width="1600" height="1000" loading="lazy" alt="EC2 instances list with names, instance IDs, running or stopped state, instance types, images and private IPs."></div>
-        <figcaption><strong>EC2.</strong> Instances in your VPCs, with a browser shell.</figcaption>
-      </figure>
-      <figure>
-        <div class="shot"><img src="/images/lambda-function.webp" width="1600" height="1000" loading="lazy" alt="A Lambda function page with its configuration and code editor."></div>
-        <figcaption><strong>Lambda.</strong> Functions, versions, aliases, an in-browser editor.</figcaption>
-      </figure>
-      <figure>
-        <div class="shot"><img src="/images/dynamodb-table.webp" width="1600" height="1000" loading="lazy" alt="A DynamoDB table page showing items and the query editor."></div>
-        <figcaption><strong>DynamoDB.</strong> Tables, queries, an item editor.</figcaption>
-      </figure>
-      <figure>
-        <div class="shot"><img src="/images/cloudwatch.webp" width="1600" height="1000" loading="lazy" alt="CloudWatch metrics graphs and alarms."></div>
-        <figcaption><strong>CloudWatch.</strong> Metrics, alarms and logs for every resource.</figcaption>
-      </figure>
+    <header class="section-head reveal">
+      <p class="eyebrow">Console</p>
+      <h2 id="console-h">A console in the box.</h2>
+      <p>The web console is built into the binary and works offline. It is modeled on AWS's, so the layout will feel familiar. These are from the <a href="/demo/">demo</a>, which runs in your browser with sample data. Nothing to install.</p>
+    </header>
+    <div class="gallery reveal">
+      <div class="gal-tabs" role="tablist" aria-label="Console screens">
+        <button class="gal-tab" role="tab" id="t-g1" aria-controls="p-g1" aria-selected="true">EC2</button>
+        <button class="gal-tab" role="tab" id="t-g2" aria-controls="p-g2" aria-selected="false" tabindex="-1">Lambda</button>
+        <button class="gal-tab" role="tab" id="t-g3" aria-controls="p-g3" aria-selected="false" tabindex="-1">DynamoDB</button>
+        <button class="gal-tab" role="tab" id="t-g4" aria-controls="p-g4" aria-selected="false" tabindex="-1">CloudWatch</button>
+      </div>
+      <div class="win win-gal">
+        <div class="win-bar" aria-hidden="true"><i></i><i></i><i></i><span id="gal-url">127.0.0.1:8080/ec2</span></div>
+        <figure class="panel gal-panel" role="tabpanel" id="p-g1" aria-labelledby="t-g1" data-url="127.0.0.1:8080/ec2">
+          <img src="/images/ec2-instances.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="EC2 instances list with names, instance IDs, running or stopped state, instance types, images and private IPs.">
+          <figcaption><b>EC2.</b> Instances in your VPCs, with a browser shell. <a href="/demo/ec2/">Open in the demo</a></figcaption>
+        </figure>
+        <figure class="panel gal-panel" role="tabpanel" id="p-g2" aria-labelledby="t-g2" data-url="127.0.0.1:8080/lambda/function" hidden>
+          <img src="/images/lambda-function.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="A Lambda function page with its configuration and code editor.">
+          <figcaption><b>Lambda.</b> Functions, versions, aliases, an in-browser editor. <a href="/demo/lambda/">Open in the demo</a></figcaption>
+        </figure>
+        <figure class="panel gal-panel" role="tabpanel" id="p-g3" aria-labelledby="t-g3" data-url="127.0.0.1:8080/dynamodb/table" hidden>
+          <img src="/images/dynamodb-table.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="A DynamoDB table page showing items and the query editor.">
+          <figcaption><b>DynamoDB.</b> Tables, queries, an item editor. <a href="/demo/dynamodb/">Open in the demo</a></figcaption>
+        </figure>
+        <figure class="panel gal-panel" role="tabpanel" id="p-g4" aria-labelledby="t-g4" data-url="127.0.0.1:8080/cloudwatch" hidden>
+          <img src="/images/cloudwatch.webp" width="1600" height="1000" loading="lazy" decoding="async" alt="CloudWatch metrics graphs and alarms.">
+          <figcaption><b>CloudWatch.</b> Metrics, alarms and logs for every resource. <a href="/demo/cloudwatch/">Open in the demo</a></figcaption>
+        </figure>
+      </div>
     </div>
   </div>
 </section>
 
 <section class="section" id="compare" aria-labelledby="compare-h">
-  <div class="wrap">
-    <div class="section-head">
-      <h2 id="compare-h">When to use something else</h2>
+  <div class="wrap two-col">
+    <header class="section-head reveal">
+      <p class="eyebrow">Honest comparison</p>
+      <h2 id="compare-h">When to use something else.</h2>
       <p>HomeCloud is one of several ways to run AWS without AWS, and it is not always the right one.</p>
-    </div>
-    <table class="compare">
-      <tbody>
-        <tr class="us"><th scope="row">HomeCloud</th><td>You want AWS APIs with real compute behind them, a console and IAM enforced, on your own machine or server, for free.</td></tr>
-        <tr><th scope="row">LocalStack</th><td>You need much wider service coverage (Kinesis, EKS, Athena, REST API Gateway&hellip;), several regions or accounts, or a lighter container for CI. Pro covers most of those.</td></tr>
-        <tr><th scope="row">moto</th><td>You want fast, in-process mocks for Python unit tests that reset between tests.</td></tr>
-        <tr><th scope="row">MinIO + k3s</th><td>You only need S3-compatible storage, plus Kubernetes for compute.</td></tr>
-        <tr><th scope="row">OpenStack</th><td>You need a multi-node private cloud with real VMs, and have people to run it.</td></tr>
-        <tr><th scope="row">AWS itself</th><td>You need exactly AWS's behavior. For final integration and staging tests, nothing replaces it.</td></tr>
-      </tbody>
-    </table>
-    <p class="more"><a href="https://github.com/solinode/homecloud/blob/main/docs/comparison.md">The full comparison</a>, with where each one is better than HomeCloud.</p>
+      <p class="more"><a href="https://github.com/solinode/homecloud/blob/main/docs/comparison.md">The full comparison <span aria-hidden="true">&rarr;</span></a></p>
+    </header>
+    <dl class="compare reveal">
+      <div class="us"><dt>HomeCloud</dt><dd>You want AWS APIs with real compute behind them, a console and IAM enforced, on your own machine or server, for free.</dd></div>
+      <div><dt>LocalStack</dt><dd>You need much wider service coverage (Kinesis, EKS, Athena, REST API Gateway&hellip;), several regions or accounts, or a lighter container for CI. Pro covers most of those.</dd></div>
+      <div><dt>moto</dt><dd>You want fast, in-process mocks for Python unit tests that reset between tests.</dd></div>
+      <div><dt>MinIO + k3s</dt><dd>You only need S3-compatible storage, plus Kubernetes for compute.</dd></div>
+      <div><dt>OpenStack</dt><dd>You need a multi-node private cloud with real VMs, and have people to run it.</dd></div>
+      <div><dt>AWS itself</dt><dd>You need exactly AWS's behavior. For final integration and staging tests, nothing replaces it.</dd></div>
+    </dl>
   </div>
 </section>
 
 <section class="section" id="self-hosting" aria-labelledby="self-h">
   <div class="wrap">
-    <div class="section-head">
-      <h2 id="self-h">Running it</h2>
-      <p>HomeCloud is built to be left running for a team, a classroom or a homelab, not only started for a test run.</p>
+    <header class="section-head reveal">
+      <p class="eyebrow">Self-hosting</p>
+      <h2 id="self-h">Built to be left running.</h2>
+      <p>For a team, a classroom or a homelab, not only for a test run.</p>
+    </header>
+    <div class="notes">
+      <article class="note reveal"><code class="chip">linux &middot; macos &middot; windows</code><h3>One binary, one host</h3><p>A Go binary for amd64 and arm64. Every service it offers runs as a container on the same Docker Engine.</p></article>
+      <article class="note reveal"><code class="chip">homecloud service install</code><h3>On a VPS or home server</h3><p>2 vCPUs and 4 GB to try it; 4+ vCPUs and 8&ndash;16 GB to be comfortable. Sets up systemd or launchd.</p></article>
+      <article class="note reveal"><code class="chip">127.0.0.1 &rarr; LAN, Tailscale</code><h3>Reach it from elsewhere</h3><p>It binds to <code>127.0.0.1</code> by default. Bind it to a LAN or Tailscale address, with built-in TLS or behind a reverse proxy.</p></article>
+      <article class="note reveal"><code class="chip">homecloud backup</code><h3>Backups</h3><p>Archives the state and every HomeCloud volume: databases, S3 objects, images, EBS volumes. <code>restore</code> works on the same or a new server.</p></article>
+      <article class="note reveal"><code class="chip">homecloud upgrade</code><h3>Upgrades</h3><p>Checks the release's SHA-256 before replacing the binary; data migrates on the next start. <code>homecloud doctor</code> checks the host.</p></article>
+      <article class="note reveal"><code class="chip">/var/run/docker.sock</code><h3>Security</h3><p>It needs the Docker socket, which is root on the host, so HomeCloud admins are host admins. Audits are <a href="https://github.com/solinode/homecloud/blob/main/docs/security-audit-2026-10.md">published</a>.</p></article>
     </div>
-    <dl class="notes">
-      <div><dt>One binary, one host</dt><dd>A Go binary for Linux, macOS and Windows on amd64 and arm64. Every service it offers runs as a container on the same Docker Engine.</dd></div>
-      <div><dt>On a VPS or home server</dt><dd>2 vCPUs and 4 GB to try it; 4+ vCPUs and 8&ndash;16 GB to be comfortable. <code>homecloud service install</code> sets up systemd or launchd.</dd></div>
-      <div><dt>Reach it from elsewhere</dt><dd>It binds to <code>127.0.0.1</code> by default. Bind it to a LAN or Tailscale address, with built-in TLS or behind a reverse proxy.</dd></div>
-      <div><dt>Backups</dt><dd><code>homecloud backup</code> archives the state and every HomeCloud volume: databases, S3 objects, images, EBS volumes. <code>restore</code> works on the same or a new server.</dd></div>
-      <div><dt>Upgrades</dt><dd><code>homecloud upgrade</code> checks the release's SHA-256 before replacing the binary; data migrates on the next start. <code>homecloud doctor</code> checks the host.</dd></div>
-      <div><dt>Security</dt><dd>It needs the Docker socket, which is root on the host, so HomeCloud admins are host admins. Audits are <a href="https://github.com/solinode/homecloud/blob/main/docs/security-audit-2026-10.md">published</a>.</dd></div>
-    </dl>
-    <p class="more"><a href="https://github.com/solinode/homecloud/blob/main/docs/install-server.md">Install on a server</a>: Docker, TLS, firewall, DNS, backups and upgrades, step by step.</p>
+    <p class="more reveal"><a href="https://github.com/solinode/homecloud/blob/main/docs/install-server.md">Install on a server: Docker, TLS, firewall, DNS, backups and upgrades <span aria-hidden="true">&rarr;</span></a></p>
   </div>
 </section>
 
-<section class="section" id="open-source" aria-labelledby="oss-h">
+<section class="section cta" id="open-source" aria-labelledby="oss-h">
   <div class="wrap">
-    <div class="oss">
-      <div class="body">
-        <h2 id="oss-h">Open source</h2>
-        <p style="margin-top:14px">HomeCloud is licensed under the <strong>GNU AGPL-3.0</strong>. If you run a modified HomeCloud as a service for others, share your changes.</p>
-        <p>It is a young project: the first release was in September 2026. Expect rough edges and please report them. If your code needs an AWS operation that is missing, a compatibility gap issue is the most useful thing you can send.</p>
+    <div class="cta-card reveal">
+      <div class="cta-glow" aria-hidden="true"></div>
+      <svg class="cta-mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#hc-mark"/></svg>
+      <h2 id="oss-h">Open source, all of it.</h2>
+      <p>Licensed under the <strong>GNU AGPL-3.0</strong>. If you run a modified HomeCloud as a service for others, share your changes. It is a young project, first released in September 2026: expect rough edges and please report them. A missing AWS operation is best reported as a compatibility gap.</p>
+      <div class="cta-actions">
+        <a class="btn btn-primary" href="https://github.com/solinode/homecloud">Star on GitHub</a>
+        <a class="btn btn-ghost" href="https://discord.gg/pemra9uaC9">Chat on Discord</a>
       </div>
-      <ul class="linklist">
-        <li><a href="https://github.com/solinode/homecloud">Source on GitHub <span>solinode/homecloud</span></a></li>
-        <li><a href="https://github.com/solinode/homecloud/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22">Good first issues <span>GitHub</span></a></li>
-        <li><a href="https://github.com/solinode/homecloud/issues/new?template=compatibility_gap.yml">Report a compatibility gap <span>GitHub</span></a></li>
-        <li><a href="https://github.com/solinode/homecloud/blob/main/CONTRIBUTING.md">Contributing guide <span>GitHub</span></a></li>
-        <li><a href="https://discord.gg/pemra9uaC9">Chat with us <span>Discord</span></a></li>
+      <ul class="cta-links">
+        <li><a href="https://github.com/solinode/homecloud/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22">Good first issues</a></li>
+        <li><a href="https://github.com/solinode/homecloud/issues/new?template=compatibility_gap.yml">Report a compatibility gap</a></li>
+        <li><a href="https://github.com/solinode/homecloud/blob/main/CONTRIBUTING.md">Contributing guide</a></li>
       </ul>
     </div>
-    <div class="partners">
+    <div class="partners reveal">
       <p>Supported by</p>
-      <a class="ts" href="https://tailscale.com/"><img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" alt="Tailscale" width="108" height="60"></a>
-      <a class="cr" href="https://coderabbit.ai/"><img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png" alt="CodeRabbit" width="101" height="22"></a>
+      <a href="https://tailscale.com/" class="partner"><span class="wordmark wm-ts" role="img" aria-label="Tailscale"></span></a>
+      <a href="https://www.coderabbit.ai/" class="partner"><span class="wordmark wm-cr" role="img" aria-label="CodeRabbit"></span></a>
     </div>
   </div>
 </section>
@@ -350,17 +577,34 @@ terraform apply -auto-approve   <span class="c"># or your test suite</span></cod
 </main>
 
 <footer class="site-footer">
-  <div class="wrap">
-    <span>HomeCloud &middot; AGPL-3.0 &middot; &copy; 2026</span>
-    <nav aria-label="Footer">
-      <a href="https://github.com/solinode/homecloud/blob/main/CHANGELOG.md">Changelog</a>
+  <div class="wrap footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="/" aria-label="HomeCloud home"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#hc-mark"/></svg><span>HomeCloud</span></a>
+      <p>An AWS-compatible cloud you run yourself.</p>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="/demo/">Demo console</a>
       <a href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/docs/compatibility.md">Compatibility</a>
+    </nav>
+    <nav aria-label="Community">
+      <h2>Community</h2>
+      <a href="https://github.com/solinode/homecloud">GitHub</a>
+      <a href="https://discord.gg/pemra9uaC9">Discord</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/CONTRIBUTING.md">Contributing</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
       <a href="/files/Project%20Concept_%20_HomeCloud_.pdf">Concept (PDF)</a>
       <a href="/files/but,%20why_.pdf">But, why? (PDF)</a>
       <a href="/files/funding.json">funding.json</a>
-      <a href="https://discord.gg/pemra9uaC9">Discord</a>
-      <a href="https://github.com/solinode/homecloud">GitHub</a>
     </nav>
+  </div>
+  <div class="wrap footer-legal">
+    <p>&copy; 2026 HomeCloud &middot; AGPL-3.0</p>
+    <p>AWS and the names of AWS services are trademarks of Amazon.com, Inc. HomeCloud is not affiliated with or endorsed by Amazon. Other logos belong to their owners and indicate compatibility only.</p>
   </div>
 </footer>
 
