@@ -3,17 +3,20 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Check, Eye, EyeOff, Info, KeyRound, Loader2, Rocket } from "lucide-react"
+import { Eye, EyeOff, Info, KeyRound, Loader2, Rocket } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
+import { cellLinkClass } from "@/components/console/data-table"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
@@ -22,7 +25,7 @@ import { formatMemoryMB, formatNumber } from "@/lib/format"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { CreateDbInput, DbInstance, Subnet } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { EngineLogo, FAMILIES, RDS_PATH, dbHref, formatVcpu, idError, inFamily, passwordError, supportsSnapshots, useEngines, type Family } from "./shared"
+import { EngineCell, EngineLogo, FAMILIES, RDS_PATH, dbHref, formatVcpu, idError, inFamily, passwordError, supportsSnapshots, useEngines, type Family } from "./shared"
 
 const AUTO_SUBNET = "auto"
 const USER_RE = /^[a-zA-Z][a-zA-Z0-9_]{0,31}$/
@@ -192,40 +195,28 @@ export function CreateWizard({ family }: { family: Family }) {
               </div>
             ) : (
               <div className="flex flex-col gap-4">
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-4" role="radiogroup" aria-label="Engine">
-                  {familyEngines.map((e) => {
-                    const active = e.name === engineName
-                    return (
-                      <button
+                <Field label="Engine type" error={err("engine")}>
+                  <OptionGroup label="Engine" columns={familyEngines.length >= 4 ? 4 : 3}>
+                    {familyEngines.map((e) => (
+                      <OptionCard
                         key={e.name}
-                        type="button"
-                        role="radio"
-                        aria-checked={active}
-                        onClick={() => setEngineName(e.name)}
-                        className={cn(
-                          "relative flex flex-col gap-2 rounded-lg border p-3 text-left transition-colors",
-                          active ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
-                        )}
+                        selected={e.name === engineName}
+                        onSelect={() => setEngineName(e.name)}
+                        title={
+                          <span className="flex items-center gap-2.5">
+                            <EngineLogo engine={e.name} size="sm" />
+                            {e.label.replace(" (DocumentDB compatible)", "")}
+                          </span>
+                        }
                       >
-                        {active && (
-                          <span className="bg-primary text-primary-foreground absolute top-2 right-2 flex size-5 items-center justify-center rounded-full">
-                            <Check className="size-3.5" />
-                          </span>
-                        )}
-                        <span className="flex items-center gap-2.5 pr-6">
-                          <EngineLogo engine={e.name} size="lg" />
-                          <span className="flex min-w-0 flex-col">
-                            <span className="text-sm font-medium">{e.label.replace(" (DocumentDB compatible)", "")}</span>
-                            <span className="text-muted-foreground text-xs">
-                              {e.kind === "document" ? "DocumentDB compatible" : `Versions ${e.versions.join(", ")}`}
-                            </span>
-                          </span>
+                        <span className="text-faint mt-1 font-mono text-[11px]">
+                          {e.kind === "document" ? "DocumentDB compatible" : `Versions ${e.versions.join(", ")}`}
                         </span>
-                        <span className="text-muted-foreground line-clamp-2 text-xs">{ENGINE_BLURB[e.name]}</span>
-                      </button>
-                    )
-                  })}
-                </div>
+                        <span className="text-muted-foreground mt-1 line-clamp-2 text-xs leading-relaxed">{ENGINE_BLURB[e.name]}</span>
+                      </OptionCard>
+                    ))}
+                  </OptionGroup>
+                </Field>
                 {engine && (
                   <Field label="Engine version" htmlFor="db-version" className="max-w-xs">
                     <Select value={version} onValueChange={(v) => v && setVersion(v)}>
@@ -267,7 +258,8 @@ export function CreateWizard({ family }: { family: Family }) {
               </Field>
 
               {engine && (engine.has_users || engine.has_password) ? (
-                <div className="flex flex-col gap-4 rounded-md border p-4">
+                <fieldset className="bg-muted/30 flex flex-col gap-4 rounded-lg border p-4">
+                  <legend className="sr-only">{engine.has_users ? "Credentials settings" : "Auth token"}</legend>
                   <div className="flex items-center gap-2 text-sm font-medium">
                     <KeyRound className="text-muted-foreground size-4" />
                     {engine.has_users ? "Credentials settings" : "Auth token"}
@@ -326,12 +318,14 @@ export function CreateWizard({ family }: { family: Family }) {
                       </Field>
                     </div>
                   )}
-                </div>
+                </fieldset>
               ) : engine ? (
-                <p className="text-muted-foreground flex gap-1.5 text-sm">
-                  <Info className="mt-0.5 size-4 shrink-0" />
-                  {engine.label} has no authentication: any client inside the VPC (or on this host, when public) can connect.
-                </p>
+                <Alert variant="warning">
+                  <Info />
+                  <AlertDescription>
+                    {engine.label} has no authentication: any client inside the VPC (or on this host, when public) can connect.
+                  </AlertDescription>
+                </Alert>
               ) : null}
             </div>
           </Section>
@@ -341,34 +335,21 @@ export function CreateWizard({ family }: { family: Family }) {
             {!engines.data ? (
               <Skeleton className="h-24 rounded-lg" />
             ) : (
-              <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 2xl:grid-cols-4" role="radiogroup" aria-label="Class">
-                {classes.map((c) => {
-                  const active = c.name === cls
-                  return (
-                    <button
+              <Field label={family === "rds" ? "DB instance class" : "Node type"} error={err("cls")}>
+                <OptionGroup label="Class" columns={4}>
+                  {classes.map((c) => (
+                    <OptionCard
                       key={c.name}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      onClick={() => setCls(c.name)}
-                      className={cn(
-                        "flex items-center justify-between gap-2 rounded-lg border px-3 py-2.5 text-left transition-colors",
-                        active ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
-                      )}
-                    >
-                      <span className="flex flex-col">
-                        <span className="font-mono text-[13px] font-medium">{c.name}</span>
-                        <span className="text-muted-foreground text-xs">
-                          {formatVcpu(c.vcpus)} · {formatMemoryMB(c.memory_mb)}
-                        </span>
-                      </span>
-                      {active && <Check className="text-primary size-4" />}
-                    </button>
-                  )
-                })}
-              </div>
+                      selected={c.name === cls}
+                      onSelect={() => setCls(c.name)}
+                      title={<span className="font-mono text-[13px]">{c.name}</span>}
+                      description={`${formatVcpu(c.vcpus)} · ${formatMemoryMB(c.memory_mb)}`}
+                      className="p-3"
+                    />
+                  ))}
+                </OptionGroup>
+              </Field>
             )}
-            {err("cls") && <p className="text-destructive mt-2 text-xs">{err("cls")}</p>}
           </Section>
 
           {/* ---- Connectivity ---- */}
@@ -381,7 +362,7 @@ export function CreateWizard({ family }: { family: Family }) {
                   subnet ? (
                     <>
                       VPC{" "}
-                      <Link href="/vpc/" className="text-primary font-mono hover:underline">
+                      <Link href="/vpc/" className={cn(cellLinkClass(), "font-mono font-normal")}>
                         {subnet.vpc_id}
                       </Link>{" "}
                       · {subnet.cidr} · {subnet.availability_zone} · {formatNumber(subnet.available_ips)} available IPs
@@ -457,10 +438,12 @@ export function CreateWizard({ family }: { family: Family }) {
                   <Input id="db-retention" type="number" min={0} max={35} value={retention} onChange={(e) => setRetention(e.target.value)} className="w-28" />
                 </Field>
               ) : engine ? (
-                <p className="text-muted-foreground flex gap-1.5 text-sm">
-                  <Info className="mt-0.5 size-4 shrink-0" />
-                  {engine.label} keeps data only in memory, so {cfg.snaps} are not available.
-                </p>
+                <Alert variant="info">
+                  <Info />
+                  <AlertDescription>
+                    {engine.label} keeps data only in memory, so {cfg.snaps} are not available.
+                  </AlertDescription>
+                </Alert>
               ) : null}
               <div className="flex items-start gap-3">
                 <Switch id="db-protect" checked={protect} onCheckedChange={setProtect} className="mt-0.5" />
@@ -483,10 +466,7 @@ export function CreateWizard({ family }: { family: Family }) {
               <dl className="flex flex-col gap-3 text-sm">
                 <SummaryItem label="Engine">
                   {engine ? (
-                    <span className="flex items-center gap-2">
-                      <EngineLogo engine={engine.name} size="xs" />
-                      {engine.label.replace(" (DocumentDB compatible)", "")} {version}
-                    </span>
+                    <EngineCell engine={engine.name} version={version} engines={familyEngines} />
                   ) : (
                     "-"
                   )}
@@ -519,13 +499,13 @@ export function CreateWizard({ family }: { family: Family }) {
                 <SummaryItem label="Deletion protection">{protect ? "Enabled" : "Disabled"}</SummaryItem>
               </dl>
               {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
-              <div className="flex flex-col gap-2 border-t pt-4">
+              <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2 border-t pt-4">
+                <Button type="button" variant="outline" asChild>
+                  <Link href={cfg.base}>Cancel</Link>
+                </Button>
                 <Button type="submit" disabled={pending || !engine}>
                   {pending ? <Loader2 className="animate-spin" /> : <Rocket />}
                   {title}
-                </Button>
-                <Button type="button" variant="outline" asChild>
-                  <Link href={cfg.base}>Cancel</Link>
                 </Button>
               </div>
               <p className="text-muted-foreground text-xs">
@@ -543,7 +523,7 @@ export function CreateWizard({ family }: { family: Family }) {
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+      <dt className="text-faint mb-0.5 text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )

@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
@@ -57,9 +57,9 @@ function columns(cfg: FamilyConfig, engines: DbEngine[] | undefined): Column<DbI
       id: "id",
       header: cfg.idLabel,
       cell: (i) => (
-        <Link href={dbHref(i.kind, i.id)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] font-medium hover:underline">
+        <CellLink href={dbHref(i.kind, i.id)} mono>
           {i.id}
-        </Link>
+        </CellLink>
       ),
       value: (i) => i.id,
     },
@@ -87,7 +87,7 @@ function columns(cfg: FamilyConfig, engines: DbEngine[] | undefined): Column<DbI
     {
       id: "endpoint",
       header: "Endpoint",
-      cell: (i) => <span className="font-mono text-[13px] whitespace-nowrap">{endpointText(i) || "-"}</span>,
+      cell: (i) => <CellText mono>{endpointText(i)}</CellText>,
       value: (i) => `${endpointText(i)} ${i.endpoint.private_ip}`,
       hideBelow: "md",
     },

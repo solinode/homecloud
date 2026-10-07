@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, Save } from "lucide-react"
+import { AlertCircle, ArrowLeft, CheckCircle2, Loader2, Save, Workflow, Zap } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -17,7 +17,8 @@ import { JsonEditor, jsonError } from "@/components/console/json-editor"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { TagList, TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { RolePicker } from "@/components/iam/role-picker"
 import { ApiError, api, errorMessage } from "@/lib/api"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
@@ -217,14 +218,19 @@ export function StateMachineEditor() {
                     : "High-volume, short-lived workflows (up to 5 minutes)."
               }
             >
-              <RadioGroup value={type} onValueChange={(v) => setType(v as StateMachineType)} disabled={editing} className="flex flex-wrap gap-4" aria-label="Type">
+              <OptionGroup label="Type" columns={2}>
                 {(["STANDARD", "EXPRESS"] as const).map((t) => (
-                  <label key={t} className="flex items-center gap-2 text-sm">
-                    <RadioGroupItem value={t} />
-                    {t === "STANDARD" ? "Standard" : "Express"}
-                  </label>
+                  <OptionCard
+                    key={t}
+                    selected={type === t}
+                    onSelect={() => setType(t)}
+                    disabled={editing}
+                    icon={t === "STANDARD" ? Workflow : Zap}
+                    title={t === "STANDARD" ? "Standard" : "Express"}
+                    className="p-3"
+                  />
                 ))}
-              </RadioGroup>
+              </OptionGroup>
             </Field>
             <Field
               label="Execution role"
@@ -288,11 +294,13 @@ export function StateMachineEditor() {
           ) : (
             <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
               <div className="flex min-w-0 flex-col gap-3">
-                <JsonEditor id="sm-definition" value={text} onChange={setText} rows={22} />
+                <Field label="Definition (JSON)" htmlFor="sm-definition" error={err("definition")}>
+                  <JsonEditor id="sm-definition" value={text} onChange={setText} rows={22} />
+                </Field>
                 <ValidationResult validation={validation} jsonInvalid={!!localError} />
               </div>
               <div className="flex min-w-0 flex-col gap-2 lg:sticky lg:top-4">
-                <p className="text-muted-foreground text-xs font-medium">Graph preview{localError ? " (last valid JSON)" : ""}</p>
+                <p className="hc-eyebrow">Graph preview{localError ? " (last valid JSON)" : ""}</p>
                 <StateMachineGraph definition={preview} className="min-h-64" />
               </div>
             </div>
@@ -333,21 +341,24 @@ function ValidationResult({ validation, jsonInvalid }: { validation: Validation;
   const { result } = validation
   if (result.valid) {
     return (
-      <p className="flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+      <p className="text-success flex items-center gap-1.5 text-sm font-medium">
         <CheckCircle2 className="size-4" /> Valid Amazon States Language definition
       </p>
     )
   }
   return (
-    <div className="border-destructive/30 bg-destructive/5 text-destructive rounded-md border p-3 text-sm">
-      <p className="flex items-center gap-1.5 font-medium">
-        <AlertCircle className="size-4" /> {result.errors.length} validation error{result.errors.length === 1 ? "" : "s"}
-      </p>
-      <ul className="mt-1.5 list-disc space-y-0.5 pl-6 font-mono text-[12.5px] break-words">
-        {[...result.errors].sort().map((e, i) => (
-          <li key={i}>{e}</li>
-        ))}
-      </ul>
-    </div>
+    <Alert variant="destructive">
+      <AlertCircle />
+      <AlertTitle>
+        {result.errors.length} validation error{result.errors.length === 1 ? "" : "s"}
+      </AlertTitle>
+      <AlertDescription>
+        <ul className="list-disc space-y-0.5 pl-4 font-mono text-[12.5px] break-words">
+          {[...result.errors].sort().map((e, i) => (
+            <li key={i}>{e}</li>
+          ))}
+        </ul>
+      </AlertDescription>
+    </Alert>
   )
 }

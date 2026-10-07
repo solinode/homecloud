@@ -6,7 +6,6 @@ import { useRouter } from "next/navigation"
 import { Archive, Camera, History, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -16,11 +15,12 @@ import { Switch } from "@/components/ui/switch"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage, seg } from "@/lib/api"
 import { formatBytes, formatDate } from "@/lib/format"
@@ -47,7 +47,11 @@ function snapColumns(cfg: FamilyConfig, withSource: boolean, engines: ReturnType
     {
       id: "id",
       header: `${cfg.Snap} ID`,
-      cell: (s) => <span className="font-mono text-[13px] font-medium">{s.id}</span>,
+      cell: (s) => (
+        <CellText mono className="font-medium">
+          {s.id}
+        </CellText>
+      ),
       value: (s) => s.id,
     },
   ]
@@ -57,9 +61,9 @@ function snapColumns(cfg: FamilyConfig, withSource: boolean, engines: ReturnType
         id: "source",
         header: `Source ${cfg.noun}`,
         cell: (s) => (
-          <Link href={dbHref(s.kind, s.source_instance)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] hover:underline">
+          <CellLink href={dbHref(s.kind, s.source_instance)} mono>
             {s.source_instance}
-          </Link>
+          </CellLink>
         ),
         value: (s) => s.source_instance,
       },
@@ -76,7 +80,11 @@ function snapColumns(cfg: FamilyConfig, withSource: boolean, engines: ReturnType
     {
       id: "type",
       header: "Type",
-      cell: (s) => <Badge variant={s.type === "manual" ? "outline" : "secondary"}>{s.type === "manual" ? "Manual" : "Automated"}</Badge>,
+      cell: (s) => (
+        <Tag mono={false} accent={s.type === "manual" ? "brand" : "neutral"}>
+          {s.type === "manual" ? "Manual" : "Automated"}
+        </Tag>
+      ),
       value: (s) => s.type,
       hideBelow: "sm",
     },
@@ -98,7 +106,7 @@ function snapColumns(cfg: FamilyConfig, withSource: boolean, engines: ReturnType
         ),
       value: (s) => s.status,
     },
-    { id: "size", header: "Size", cell: (s) => formatBytes(s.size_bytes), value: (s) => s.size_bytes, hideBelow: "sm" },
+    { id: "size", header: "Size", cell: (s) => <span className="tabular-nums whitespace-nowrap">{formatBytes(s.size_bytes)}</span>, value: (s) => s.size_bytes, hideBelow: "sm" },
     {
       id: "created",
       header: "Created",

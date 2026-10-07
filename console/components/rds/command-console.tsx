@@ -5,7 +5,9 @@ import { AlertCircle, Eraser } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { TerminalPane, term } from "@/components/console/code-block"
 import { Section } from "@/components/console/section"
+import { Tag } from "@/components/console/tag"
 import { api, errorMessage, seg } from "@/lib/api"
 import type { DbInstance, DbQueryResult } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -149,7 +151,7 @@ export function CommandConsole({ inst }: { inst: DbInstance }) {
   return (
     <div className="flex flex-col gap-4">
       {!available && (
-        <Alert>
+        <Alert variant="warning">
           <AlertCircle />
           <AlertTitle>The cluster is {inst.status}</AlertTitle>
           <AlertDescription>Commands can run only while the cluster is available.</AlertDescription>
@@ -165,61 +167,52 @@ export function CommandConsole({ inst }: { inst: DbInstance }) {
         }
       >
         <div className="flex flex-col gap-3">
-          <div
-            className="flex h-[420px] cursor-text flex-col overflow-hidden rounded-md border border-zinc-800 bg-zinc-950 font-mono text-[12.5px] leading-relaxed text-zinc-100"
-            onClick={() => window.getSelection()?.toString() || inputRef.current?.focus()}
-          >
-            <div ref={scroller} className="flex-1 overflow-auto p-3">
+          <div className="cursor-text" onClick={() => window.getSelection()?.toString() || inputRef.current?.focus()}>
+            <TerminalPane ref={scroller} title={`${cli} · ${inst.id}`} height="420px">
               {lines.length === 0 && (
-                <p className="text-zinc-500">
+                <p className={cn("mb-1.5", term.muted)}>
                   Connected to {inst.id} ({inst.engine} {inst.engine_version}). Type a command and press Enter. ↑/↓ browse history, Ctrl+L clears.
                 </p>
               )}
               {lines.map((l) => (
                 <div key={l.n} className="mb-1.5">
                   <div className="break-all whitespace-pre-wrap">
-                    <span className="text-emerald-400">&gt; </span>
+                    <span className={term.prompt}>&gt; </span>
                     {l.cmd}
                   </div>
                   {l.pending ? (
-                    <div className="text-zinc-500">...</div>
+                    <div className={term.muted}>...</div>
                   ) : l.out === "" ? (
-                    <div className="text-zinc-500 italic">(nil or empty)</div>
+                    <div className={cn("italic", term.muted)}>(nil or empty)</div>
                   ) : (
-                    <div className={cn("break-all whitespace-pre-wrap", l.error ? "text-red-400" : "text-zinc-200")}>{l.out}</div>
+                    <div className={cn("break-all whitespace-pre-wrap", l.error && term.error)}>{l.out}</div>
                   )}
                 </div>
               ))}
-            </div>
-            <div className="flex items-center gap-2 border-t border-zinc-800 px-3 py-2">
-              <span className="hidden shrink-0 text-emerald-400 sm:inline">{prompt}</span>
-              <span className="shrink-0 text-emerald-400 sm:hidden">&gt;</span>
-              <input
-                ref={inputRef}
-                value={input}
-                onChange={(e) => (setInput(e.target.value), setPos(-1))}
-                onKeyDown={onKey}
-                disabled={!available}
-                spellCheck={false}
-                autoComplete="off"
-                autoCapitalize="off"
-                aria-label="Command"
-                placeholder={available ? "PING" : ""}
-                className="min-w-0 flex-1 bg-transparent text-zinc-100 outline-none placeholder:text-zinc-600 disabled:opacity-50"
-              />
-            </div>
+              <div className="flex items-center gap-2">
+                <span className={cn("hidden shrink-0 sm:inline", term.prompt)}>{prompt}</span>
+                <span className={cn("shrink-0 sm:hidden", term.prompt)}>&gt;</span>
+                <input
+                  ref={inputRef}
+                  value={input}
+                  onChange={(e) => (setInput(e.target.value), setPos(-1))}
+                  onKeyDown={onKey}
+                  disabled={!available}
+                  spellCheck={false}
+                  autoComplete="off"
+                  autoCapitalize="off"
+                  aria-label="Command"
+                  placeholder={available ? "PING" : ""}
+                  className="text-code-foreground placeholder:text-code-comment min-w-0 flex-1 bg-transparent outline-none disabled:opacity-50"
+                />
+              </div>
+            </TerminalPane>
           </div>
           <div className="flex flex-wrap items-center gap-1.5">
             <span className="text-muted-foreground text-xs">Try:</span>
             {EXAMPLES.map((x) => (
-              <button
-                key={x}
-                type="button"
-                disabled={!available || busy}
-                onClick={() => run(x)}
-                className="bg-muted hover:bg-accent rounded border px-2 py-0.5 font-mono text-xs transition-colors disabled:opacity-50"
-              >
-                {x}
+              <button key={x} type="button" disabled={!available || busy} onClick={() => run(x)} className="transition-opacity disabled:opacity-50">
+                <Tag className="hover:bg-accent hover:text-foreground cursor-pointer transition-colors">{x}</Tag>
               </button>
             ))}
           </div>

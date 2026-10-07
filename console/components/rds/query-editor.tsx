@@ -6,11 +6,13 @@ import { AlertCircle, CheckCircle2, History, Loader2, Play, Trash2 } from "lucid
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Textarea } from "@/components/ui/textarea"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyButton } from "@/components/console/copy-button"
+import { Field } from "@/components/console/form-field"
 import { Section } from "@/components/console/section"
+import { Tag } from "@/components/console/tag"
 import { api, errorMessage, seg } from "@/lib/api"
 import { formatNumber, formatTime, pluralize } from "@/lib/format"
 import type { DbInstance, DbQueryResult } from "@/lib/types"
@@ -141,7 +143,7 @@ export function QueryEditor({ inst }: { inst: DbInstance }) {
   return (
     <div className="flex flex-col gap-4">
       {!available && (
-        <Alert>
+        <Alert variant="warning">
           <AlertCircle />
           <AlertTitle>The database is {inst.status}</AlertTitle>
           <AlertDescription>Queries can run only while the database is available.</AlertDescription>
@@ -178,7 +180,7 @@ export function QueryEditor({ inst }: { inst: DbInstance }) {
                     >
                       <span className="line-clamp-2 font-mono text-xs break-all whitespace-pre-wrap">{h.text}</span>
                       <span className="text-muted-foreground flex items-center gap-1.5 text-[11px]">
-                        {h.ok ? <CheckCircle2 className="size-3 text-emerald-600" /> : <AlertCircle className="text-destructive size-3" />}
+                        {h.ok ? <CheckCircle2 className="text-success size-3" /> : <AlertCircle className="text-danger size-3" />}
                         {formatTime(h.at)}
                         {h.db && <> · {h.db}</>}
                         {h.ms !== undefined && <> · {h.ms} ms</>}
@@ -191,51 +193,46 @@ export function QueryEditor({ inst }: { inst: DbInstance }) {
           </Popover>
         }
       >
-        <div className="flex flex-col gap-3">
-          <Textarea
-            ref={ref}
-            value={text}
-            onChange={(e) => setText(e.target.value)}
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
-                e.preventDefault()
-                run()
-              }
-            }}
-            rows={8}
-            spellCheck={false}
-            placeholder={mongo ? "db.getCollectionNames()" : "SELECT * FROM my_table LIMIT 100;"}
-            className="min-h-40 font-mono text-[13px] leading-relaxed"
-            aria-label={mongo ? "JavaScript" : "SQL"}
-          />
-          <div className="flex flex-wrap items-center gap-2">
-            <Button onClick={run} disabled={running || !available || !text.trim()} size="sm">
-              {running ? <Loader2 className="animate-spin" /> : <Play />}
-              Run
-            </Button>
-            <span className="text-muted-foreground hidden text-xs sm:inline">Ctrl/⌘ + Enter · runs the selection if any</span>
-            <div className="ml-auto flex items-center gap-2">
-              <Label htmlFor="q-db" className="text-muted-foreground text-xs font-normal whitespace-nowrap">
-                Database
-              </Label>
-              <Input id="q-db" value={database} onChange={(e) => setDatabase(e.target.value)} placeholder={inst.db_name} className="h-8 w-40 font-mono text-[13px]" />
-            </div>
-          </div>
+        <div className="flex flex-col gap-4">
+          <Field label={mongo ? "JavaScript" : "SQL"} htmlFor="q-text" help="Ctrl/⌘ + Enter runs the editor, or only the selected text if any.">
+            <Textarea
+              id="q-text"
+              ref={ref}
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                  e.preventDefault()
+                  run()
+                }
+              }}
+              rows={8}
+              spellCheck={false}
+              placeholder={mongo ? "db.getCollectionNames()" : "SELECT * FROM my_table LIMIT 100;"}
+              className="bg-muted/30 min-h-40 font-mono text-[13px] leading-relaxed"
+            />
+          </Field>
           {examples.length > 0 && (
             <div className="flex flex-wrap items-center gap-1.5">
               <span className="text-muted-foreground text-xs">Examples:</span>
               {examples.map((x) => (
-                <button
-                  key={x.label}
-                  type="button"
-                  onClick={() => setText(x.text)}
-                  className="bg-muted hover:bg-accent rounded border px-2 py-0.5 text-xs transition-colors"
-                >
-                  {x.label}
+                <button key={x.label} type="button" onClick={() => setText(x.text)}>
+                  <Tag mono={false} className="hover:bg-accent hover:text-foreground cursor-pointer transition-colors">
+                    {x.label}
+                  </Tag>
                 </button>
               ))}
             </div>
           )}
+          <div className="flex flex-wrap items-end gap-3">
+            <Field label="Database" htmlFor="q-db" optional className="w-full sm:w-56">
+              <Input id="q-db" value={database} onChange={(e) => setDatabase(e.target.value)} placeholder={inst.db_name} className="font-mono text-[13px]" />
+            </Field>
+            <Button onClick={run} disabled={running || !available || !text.trim()} className="sm:ml-auto">
+              {running ? <Loader2 className="animate-spin" /> : <Play />}
+              Run
+            </Button>
+          </div>
         </div>
       </Section>
 
@@ -261,16 +258,14 @@ export function QueryEditor({ inst }: { inst: DbInstance }) {
           flush={view.kind === "grid"}
         >
           {view.kind === "error" ? (
-            <pre className="border-destructive/30 bg-destructive/5 text-destructive max-h-80 overflow-auto rounded-md border p-3 font-mono text-[12.5px] whitespace-pre-wrap">
-              {view.text}
-            </pre>
+            <CodeBlock code={view.text} tone="danger" wrap maxHeight="20rem" noCopy />
           ) : view.kind === "message" ? (
             <p className="flex items-center gap-2 text-sm">
-              <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
+              <CheckCircle2 className="text-success size-4" />
               <span className="font-mono text-[13px]">{view.text}</span>
             </p>
           ) : view.kind === "raw" ? (
-            <pre className="bg-muted/50 max-h-[480px] overflow-auto rounded-md border p-3 font-mono text-[12.5px] whitespace-pre-wrap">{view.text}</pre>
+            <CodeBlock code={view.text} wrap maxHeight="30rem" noCopy />
           ) : (
             <ResultGrid columns={view.columns} rows={view.rows} nullText={inst.engine === "postgres" ? undefined : "NULL"} />
           )}

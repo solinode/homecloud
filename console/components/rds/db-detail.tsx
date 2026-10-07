@@ -3,13 +3,15 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, Eye, EyeOff, Info, KeyRound, Loader2, ShieldCheck } from "lucide-react"
+import { AlertCircle, ArrowLeft, Eye, EyeOff, Info, KeyRound, Loader2, Play, Settings2, ShieldCheck } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
+import { CellLink, cellLinkClass } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -17,6 +19,7 @@ import { DetailSkeleton } from "@/components/console/loading"
 import { CONTAINER_CHARTS, MetricsPanel } from "@/components/console/metrics-panel"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { StatusBadge, statusLabel } from "@/components/console/status-badge"
 import { TagList } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -24,6 +27,7 @@ import { ApiError, api, errorMessage, seg } from "@/lib/api"
 import { formatDate, formatMemoryMB } from "@/lib/format"
 import { useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { DbCredentials, DbInstance, SecretValue } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { CommandConsole } from "./command-console"
 import { useDbActions } from "./db-actions"
 import { DbConfiguration, ResetPasswordDialog } from "./db-config"
@@ -149,6 +153,15 @@ export function DbDetail({ family }: { family: Family }) {
               Refresh
             </Button>
             <ActionsMenu items={stateItems} />
+            {s === "stopped" ? (
+              <Button size="sm" onClick={() => actions.start([inst.id])} disabled={actions.busy}>
+                <Play /> Start
+              </Button>
+            ) : (
+              <Button size="sm" onClick={() => setParam("tab", "configuration")} disabled={s === "deleting"}>
+                <Settings2 /> Modify
+              </Button>
+            )}
           </>
         }
       />
@@ -163,7 +176,7 @@ export function DbDetail({ family }: { family: Family }) {
           </AlertDescription>
         </Alert>
       ) : inst.status_reason ? (
-        <Alert>
+        <Alert variant="info">
           <Info />
           <AlertTitle>Status reason</AlertTitle>
           <AlertDescription>
@@ -172,10 +185,39 @@ export function DbDetail({ family }: { family: Family }) {
         </Alert>
       ) : null}
       {isTransitional(s) && (
-        <p className="text-muted-foreground flex items-center gap-2 text-sm">
-          <Loader2 className="size-4 animate-spin" /> The {cfg.noun} is {statusLabel(s).toLowerCase()}. This page refreshes automatically.
-        </p>
+        <Alert variant="info">
+          <Loader2 className="animate-spin" />
+          <AlertDescription>
+            The {cfg.noun} is {statusLabel(s).toLowerCase()}. This page refreshes automatically.
+          </AlertDescription>
+        </Alert>
       )}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="vCPUs" value={inst.vcpus} caption={inst.class} />
+        <StatTile
+          label="Memory"
+          value={formatMemoryMB(inst.memory_mb).split(" ")[0]}
+          unit={formatMemoryMB(inst.memory_mb).split(" ")[1]}
+          caption={cfg.family === "rds" ? "Instance memory" : "Node memory"}
+        />
+        {inst.engine !== "memcached" ? (
+          <StatTile label="Storage" value={inst.storage_gb} unit="GiB" caption="Advisory size" />
+        ) : (
+          <StatTile label="Port" value={inst.endpoint.port || "-"} caption="Memcached text protocol" />
+        )}
+        {supportsSnapshots(inst.engine) ? (
+          <StatTile
+            label="Backup retention"
+            value={inst.backup_retention_days}
+            unit={inst.backup_retention_days === 1 ? "day" : "days"}
+            tone={inst.backup_retention_days > 0 ? "success" : "neutral"}
+            caption={inst.latest_backup ? <>Latest <TimeAgo value={inst.latest_backup} /></> : "No automated backup yet"}
+          />
+        ) : (
+          <StatTile label="Backups" value="-" caption="Not supported by Memcached" />
+        )}
+      </div>
 
       <Tabs value={tab} onValueChange={(v) => setParam("tab", v === "connectivity" ? null : v)}>
         <TabsList>
@@ -273,17 +315,17 @@ function ConnectivityTab({ cfg, inst }: { cfg: FamilyConfig; inst: DbInstance })
               {
                 label: "VPC",
                 value: (
-                  <Link href="/vpc/" className="text-primary font-mono text-[13px] hover:underline">
+                  <CellLink href="/vpc/" mono className="w-fit">
                     {inst.vpc_id}
-                  </Link>
+                  </CellLink>
                 ),
               },
               {
                 label: "Subnet",
                 value: (
-                  <Link href="/vpc/subnets/" className="text-primary font-mono text-[13px] hover:underline">
+                  <CellLink href="/vpc/subnets/" mono className="w-fit">
                     {inst.subnet_id}
-                  </Link>
+                  </CellLink>
                 ),
               },
               { label: "Availability zone", value: inst.availability_zone },
@@ -291,11 +333,11 @@ function ConnectivityTab({ cfg, inst }: { cfg: FamilyConfig; inst: DbInstance })
           />
           {inst.endpoint.connect_hint && (
             <div className="flex flex-col gap-1.5">
-              <span className="text-muted-foreground text-xs font-medium">Connect {pub ? "from this host or your network" : "from inside the VPC"}</span>
-              <div className="bg-muted/50 flex items-start gap-2 rounded-md border p-3">
-                <code className="min-w-0 flex-1 overflow-x-auto font-mono text-[12.5px] whitespace-pre">{inst.endpoint.connect_hint}</code>
-                <CopyButton value={inst.endpoint.connect_hint} label="Copy connection string" />
-              </div>
+              <CodeBlock
+                title={`Connect ${pub ? "from this host or your network" : "from inside the VPC"}`}
+                code={inst.endpoint.connect_hint}
+                copyLabel="Copy connection string"
+              />
               {inst.endpoint.connect_hint.includes("<password>") || inst.engine === "mysql" || inst.engine === "mariadb" ? (
                 <p className="text-muted-foreground text-xs">Use the master {inst.master_username ? "password" : "auth token"} below. Other resources in the VPC can use the endpoint name.</p>
               ) : null}
@@ -330,9 +372,9 @@ function ConnectivityTab({ cfg, inst }: { cfg: FamilyConfig; inst: DbInstance })
             {
               label: "Restored from",
               value: inst.restored_from ? (
-                <Link href={cfg.snapshotsPath} className="text-primary font-mono text-[13px] hover:underline">
+                <CellLink href={cfg.snapshotsPath} mono className="w-fit">
                   {inst.restored_from}
-                </Link>
+                </CellLink>
               ) : (
                 ""
               ),
@@ -359,7 +401,7 @@ function ConnectivityTab({ cfg, inst }: { cfg: FamilyConfig; inst: DbInstance })
               label: "Deletion protection",
               value: inst.deletion_protection ? (
                 <span className="inline-flex items-center gap-1">
-                  <ShieldCheck className="size-4 text-emerald-600 dark:text-emerald-400" /> Enabled
+                  <ShieldCheck className="text-success size-4" /> Enabled
                 </span>
               ) : (
                 "Disabled"
@@ -390,10 +432,12 @@ function CredentialsSection({ cfg, inst }: { cfg: FamilyConfig; inst: DbInstance
   if (!inst.secret_name) {
     return (
       <Section title="Security">
-        <p className="text-muted-foreground flex gap-1.5 text-sm">
-          <Info className="mt-0.5 size-4 shrink-0" />
-          This {cfg.noun} has no authentication. Anything that can reach the endpoint can use it; keep it private unless you trust your network.
-        </p>
+        <Alert variant="warning">
+          <Info />
+          <AlertDescription>
+            This {cfg.noun} has no authentication. Anything that can reach the endpoint can use it; keep it private unless you trust your network.
+          </AlertDescription>
+        </Alert>
       </Section>
     )
   }
@@ -413,7 +457,7 @@ function CredentialsSection({ cfg, inst }: { cfg: FamilyConfig; inst: DbInstance
   }
 
   const secretLink = (
-    <Link href={`/secrets/secret/?name=${encodeURIComponent(inst.secret_name)}`} className="text-primary font-mono hover:underline">
+    <Link href={`/secrets/secret/?name=${encodeURIComponent(inst.secret_name)}`} className={cn(cellLinkClass(), "font-mono")}>
       {inst.secret_name}
     </Link>
   )
@@ -436,7 +480,10 @@ function CredentialsSection({ cfg, inst }: { cfg: FamilyConfig; inst: DbInstance
       }
     >
       {err ? (
-        <p className="text-destructive text-sm">{err}</p>
+        <Alert variant="destructive">
+          <AlertCircle />
+          <AlertDescription>{err}</AlertDescription>
+        </Alert>
       ) : !creds ? (
         <p className="text-muted-foreground text-sm">
           Credentials are hidden. Reading them is recorded in CloudTrail as <span className="font-mono">secretsmanager:GetSecretValue</span>.
