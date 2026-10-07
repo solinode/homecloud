@@ -6,6 +6,7 @@
   <a href="https://homecloud.pages.dev/demo/"><b>Live demo console</b></a> ·
   <a href="#quick-start"><b>Quick start</b></a> ·
   <a href="docs/aws-compat.md"><b>AWS compatibility</b></a> ·
+  <a href="docs/compatibility.md"><b>Terraform modules</b></a> ·
   <a href="docs/integrations.md"><b>Testing &amp; CI</b></a> ·
   <a href="docs/comparison.md"><b>vs. LocalStack, moto, MinIO…</b></a> ·
   <a href="https://discord.gg/pemra9uaC9"><b>Discord</b></a>
@@ -89,7 +90,7 @@ Or use the ready-made pieces in **[docs/integrations.md](docs/integrations.md)**
 | --- | --- |
 | **AWS CLI v2** | Tested: the compatibility test suite drives the real `aws` CLI in CI |
 | **boto3** (Python SDK) | Tested: the compatibility test suite runs boto3 in CI, including Cognito SRP sign-in through pycognito |
-| **Terraform / OpenTofu** (`hashicorp/aws` provider) | Tested: opt-in Terraform tests in the suite (IAM, S3, Route 53, CloudFormation and more; `HC_TEST_TERRAFORM=1`), and [`examples/terraform/shop`](examples/terraform/shop/README.md) applies, re-plans clean and destroys on a fresh install |
+| **Terraform / OpenTofu** (`hashicorp/aws` provider) | Tested: opt-in Terraform tests in the suite (IAM, S3, Route 53, CloudFormation and more; `HC_TEST_TERRAFORM=1`), and [`examples/terraform/shop`](examples/terraform/shop/README.md) applies, re-plans clean and destroys on a fresh install. Nightly: 17 of 17 popular `terraform-aws-modules` scenarios apply, re-plan clean and destroy ([results](docs/compatibility.md)). |
 | **CloudFormation** (`aws cloudformation deploy`) | Tested: stacks, change sets and the boto3 waiters ([details](docs/aws-compat.md#cloudformation)) |
 | **AWS CDK** | Partly: CDK-synthesized templates deploy through CloudFormation change sets; `cdk bootstrap` / `cdk deploy` end to end is not yet verified |
 | **Other AWS SDKs** (JavaScript, Go, Java, …) and **Pulumi** | Expected to work (same protocols and SigV4), not yet covered by tests. Reports welcome |

@@ -394,7 +394,20 @@ func TestAWSS3API(t *testing.T) {
 	if lc := s3api("get-bucket-lifecycle-configuration", "--bucket", b); !strings.Contains(fmt.Sprint(lc), "expire") {
 		t.Fatalf("lifecycle: %v", lc)
 	}
+	// MinIO cannot run AbortIncompleteMultipartUpload; the rule is kept and
+	// returned as put (Terraform's s3-bucket module commonly sets one).
+	s3api("put-bucket-lifecycle-configuration", "--bucket", b, "--lifecycle-configuration",
+		`{"Rules":[{"ID":"abort","Status":"Enabled","Filter":{"Prefix":""},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":3}},`+
+			`{"ID":"both","Status":"Enabled","Filter":{"Prefix":"logs/"},"Expiration":{"Days":30},"AbortIncompleteMultipartUpload":{"DaysAfterInitiation":1}}]}`)
+	lc := s3api("get-bucket-lifecycle-configuration", "--bucket", b)
+	rules, _ := lc["Rules"].([]any)
+	if len(rules) != 2 || rules[1].(map[string]any)["AbortIncompleteMultipartUpload"] == nil || lc["TransitionDefaultMinimumObjectSize"] != "all_storage_classes_128K" {
+		t.Fatalf("lifecycle with abort rules: %v", lc)
+	}
+	s3apiErr("InvalidRequest", "put-bucket-lifecycle-configuration", "--bucket", b, "--lifecycle-configuration",
+		`{"Rules":[{"ID":"none","Status":"Enabled","Filter":{"Prefix":""}}]}`)
 	s3api("delete-bucket-lifecycle", "--bucket", b)
+	s3apiErr("NoSuchLifecycleConfiguration", "get-bucket-lifecycle-configuration", "--bucket", b)
 	s3apiErr("NoSuchCORSConfiguration", "get-bucket-cors", "--bucket", b)
 	s3api("put-bucket-cors", "--bucket", b, "--cors-configuration", `{"CORSRules":[{"AllowedMethods":["GET"],"AllowedOrigins":["*"]}]}`)
 	if c := s3api("get-bucket-cors", "--bucket", b); !strings.Contains(fmt.Sprint(c), "GET") {

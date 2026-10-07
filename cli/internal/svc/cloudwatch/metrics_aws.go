@@ -36,6 +36,7 @@ func (s *Service) registerMetricsAWS() {
 			"GetMetricData":            s.awsGetMetricData,
 			"ListMetrics":              s.awsListMetrics,
 			"PutMetricAlarm":           s.awsPutMetricAlarm,
+			"PutCompositeAlarm":        s.awsPutCompositeAlarm,
 			"DescribeAlarms":           s.awsDescribeAlarms,
 			"DescribeAlarmsForMetric":  s.awsDescribeAlarmsForMetric,
 			"DeleteAlarms":             s.awsDeleteAlarms,

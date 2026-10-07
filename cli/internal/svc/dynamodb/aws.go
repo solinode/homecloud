@@ -142,6 +142,9 @@ func (s *Service) describe(t *Table) map[string]any {
 		"TableClassSummary":         map[string]any{"TableClass": t.TableClass},
 		"DeletionProtectionEnabled": t.DeletionProtection,
 	}
+	// Terraform's provider waits for the warm throughput to be ACTIVE after every create and update.
+	w := t.warmThroughput()
+	d["WarmThroughput"] = map[string]any{"ReadUnitsPerSecond": w.ReadUnitsPerSecond, "WriteUnitsPerSecond": w.WriteUnitsPerSecond, "Status": "ACTIVE"}
 	if t.TableClass == "" {
 		d["TableClassSummary"] = map[string]any{"TableClass": "STANDARD"}
 	}
@@ -165,6 +168,7 @@ func (s *Service) describe(t *Table) map[string]any {
 				"KeySchema": keySchemaOut(ix.PartitionKey, ix.SortKey), "Projection": projectionOut(ix.projection()),
 				"IndexStatus": ix.Status, "ItemCount": n, "IndexSizeBytes": sz,
 				"ProvisionedThroughput": throughputOut(ix.ReadCapacity, ix.WriteCapacity),
+				"WarmThroughput":        map[string]any{"ReadUnitsPerSecond": w.ReadUnitsPerSecond, "WriteUnitsPerSecond": w.WriteUnitsPerSecond, "Status": "ACTIVE"},
 			}
 			if ix.Status == "" {
 				g["IndexStatus"] = "ACTIVE"
@@ -213,6 +217,15 @@ type tableIn struct {
 	Tags                      []tagIn
 	TableClass                string
 	DeletionProtectionEnabled *bool
+	WarmThroughput            *warmIn
+}
+
+type warmIn struct{ ReadUnitsPerSecond, WriteUnitsPerSecond int64 }
+
+func (w *warmIn) apply(t *Table) {
+	if w != nil {
+		t.Warm = &WarmThroughput{ReadUnitsPerSecond: w.ReadUnitsPerSecond, WriteUnitsPerSecond: w.WriteUnitsPerSecond}
+	}
 }
 
 type indexIn struct {
@@ -385,6 +398,7 @@ func (s *Service) awsCreateTable(q *awsapi.Req) (any, error) {
 	if in.DeletionProtectionEnabled != nil {
 		t.DeletionProtection = *in.DeletionProtectionEnabled
 	}
+	in.WarmThroughput.apply(t)
 	if len(in.Tags) > 0 {
 		t.Tags = core.Tags{}
 		for _, tg := range in.Tags {
@@ -496,6 +510,7 @@ func (s *Service) awsUpdateTable(q *awsapi.Req) (any, error) {
 		TableClass                string
 		DeletionProtectionEnabled *bool
 		ReplicaUpdates            []any
+		WarmThroughput            *warmIn
 	}
 	if err := q.Bind(&in); err != nil {
 		return nil, err
@@ -507,7 +522,7 @@ func (s *Service) awsUpdateTable(q *awsapi.Req) (any, error) {
 		return nil, validation("HomeCloud does not support global table replicas")
 	}
 	if in.BillingMode == "" && in.ProvisionedThroughput == nil && len(in.GlobalSecondaryIndexUpdates) == 0 && in.StreamSpecification == nil &&
-		in.SSESpecification == nil && in.TableClass == "" && in.DeletionProtectionEnabled == nil {
+		in.SSESpecification == nil && in.TableClass == "" && in.DeletionProtectionEnabled == nil && in.WarmThroughput == nil {
 		return nil, validation("At least one of ProvisionedThroughput, BillingMode, UpdateStreamEnabled, GlobalSecondaryIndexUpdates or SSESpecification or ReplicaUpdates is required")
 	}
 	if err := validStreamSpec(in.StreamSpecification); err != nil {
@@ -593,6 +608,7 @@ func (s *Service) awsUpdateTable(q *awsapi.Req) (any, error) {
 		if in.DeletionProtectionEnabled != nil {
 			t.DeletionProtection = *in.DeletionProtectionEnabled
 		}
+		in.WarmThroughput.apply(t)
 		return nil
 	})
 	if err != nil {

@@ -530,7 +530,11 @@ func (s *Service) putLifecycle(c *httpx.Ctx) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return nil, s3err(cl.SetBucketLifecycle(c.R.Context(), c.Param("bucket"), cfg))
+	if err := cl.SetBucketLifecycle(c.R.Context(), c.Param("bucket"), cfg); err != nil {
+		return nil, s3err(err)
+	}
+	s.forgetLifecycle(c.Param("bucket")) // the AWS API now reads MinIO's rules
+	return nil, nil
 }
 
 func (s *Service) listObjects(c *httpx.Ctx) (any, error) {

@@ -50,12 +50,16 @@ func (s *Service) awsDescribeAlarms(q *awsapi.Req) (any, error) {
 			return nil, cwErr(http.StatusBadRequest, "InvalidNextToken", "invalid NextToken")
 		}
 	}
+	// As in AWS, composite alarms are returned only when AlarmTypes asks for them.
 	wantMetric := len(in.AlarmTypes) == 0 || slices.Contains(in.AlarmTypes, "MetricAlarm")
 	out := struct {
 		MetricAlarms    []awsMetricAlarm
-		CompositeAlarms []struct{}
+		CompositeAlarms []awsCompositeAlarm
 		NextToken       string `json:",omitempty"`
-	}{MetricAlarms: []awsMetricAlarm{}, CompositeAlarms: []struct{}{}}
+	}{MetricAlarms: []awsMetricAlarm{}, CompositeAlarms: []awsCompositeAlarm{}}
+	if slices.Contains(in.AlarmTypes, "CompositeAlarm") {
+		out.CompositeAlarms = s.compositesFor(in.AlarmNames, in.AlarmNamePrefix, in.StateValue, in.ActionPrefix, "")
+	}
 	if !wantMetric {
 		return out, nil
 	}
@@ -129,12 +133,14 @@ func (s *Service) awsDeleteAlarms(q *awsapi.Req) (any, error) {
 		}
 	}
 	for _, n := range in.AlarmNames {
-		if !store.Has(s.env.Store, cAlarms, n) {
+		if !store.Has(s.env.Store, cAlarms, n) && !store.Has(s.env.Store, cComposite, n) {
 			return nil, alarmNotFound(n)
 		}
 	}
 	for _, n := range in.AlarmNames {
-		_ = s.DeleteAlarm(n)
+		if !s.deleteComposite(n) {
+			_ = s.DeleteAlarm(n)
+		}
 	}
 	return nil, nil
 }
@@ -162,6 +168,7 @@ func (s *Service) awsSetAlarmState(q *awsapi.Req) (any, error) {
 	}
 	if a.State != in.StateValue {
 		s.setAlarmState(a, in.StateValue, in.StateReason, in.StateReasonData)
+		s.evaluateComposites()
 	} else {
 		_, _ = store.Update(s.env.Store, cAlarms, a.Name, func(x *Alarm) error {
 			x.StateReason, x.StateReasonData = in.StateReason, in.StateReasonData
@@ -186,6 +193,7 @@ func (s *Service) setActions(q *awsapi.Req, action string, enabled bool) (any, e
 	}
 	for _, n := range in.AlarmNames {
 		_, _ = store.Update(s.env.Store, cAlarms, n, func(a *Alarm) error { a.ActionsEnabled = &enabled; return nil })
+		_, _ = store.Update(s.env.Store, cComposite, n, func(a *CompositeAlarm) error { a.ActionsEnabled = &enabled; return nil })
 	}
 	return nil, nil
 }
@@ -289,6 +297,9 @@ func (s *Service) taggable(arn string) (coll, key string, err error) {
 	default:
 		return "", "", cwErr(http.StatusBadRequest, "InvalidParameterValue", "ResourceARN must be an alarm or dashboard ARN in this account")
 	}
+	if coll == cAlarms && !store.Has(s.env.Store, cAlarms, key) && store.Has(s.env.Store, cComposite, key) {
+		coll = cComposite
+	}
 	if !store.Has(s.env.Store, coll, key) {
 		return "", "", cwErr(http.StatusNotFound, "ResourceNotFoundException", "%s does not exist", arn)
 	}
@@ -298,6 +309,14 @@ func (s *Service) taggable(arn string) (coll, key string, err error) {
 func (s *Service) updateTags(coll, key string, fn func(core.Tags)) error {
 	var err error
 	switch coll {
+	case cComposite:
+		_, err = store.Update(s.env.Store, cComposite, key, func(a *CompositeAlarm) error {
+			if a.Tags == nil {
+				a.Tags = core.Tags{}
+			}
+			fn(a.Tags)
+			return nil
+		})
 	case cAlarms:
 		_, err = store.Update(s.env.Store, cAlarms, key, func(a *Alarm) error {
 			if a.Tags == nil {
@@ -380,10 +399,14 @@ func (s *Service) awsCWListTags(q *awsapi.Req) (any, error) {
 		return nil, err
 	}
 	var tags core.Tags
-	if coll == cAlarms {
+	switch coll {
+	case cAlarms:
 		a, _ := store.Get[Alarm](s.env.Store, cAlarms, key)
 		tags = a.Tags
-	} else {
+	case cComposite:
+		c, _ := store.Get[CompositeAlarm](s.env.Store, cComposite, key)
+		tags = c.Tags
+	default:
 		d, _ := store.Get[Dashboard](s.env.Store, cDashboards, key)
 		tags = d.Tags
 	}

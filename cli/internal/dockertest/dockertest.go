@@ -24,7 +24,7 @@ import (
 )
 
 // Prefix starts every test account label.
-const Prefix = "hctest-"
+const Prefix = core.TestAccountPrefix
 
 // StaleAfter is how old a test-labelled object must be before a sweep removes it.
 const StaleAfter = time.Hour

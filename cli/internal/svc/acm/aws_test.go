@@ -355,3 +355,28 @@ func TestAWSIAM(t *testing.T) {
 		t.Fatalf("audit log %v", h.AuditLog())
 	}
 }
+
+// Terraform's acm module requests certificates with transparency logging
+// ENABLED and re-plans forever when DescribeCertificate reports another value.
+func TestAWSCertificateTransparencyOption(t *testing.T) {
+	h, _ := setup(t)
+	ct := func(arn string) string {
+		d := h.AWSJSON(t, "acm", "describe-certificate", "--certificate-arn", arn)["Certificate"].(map[string]any)
+		return str(d["Options"].(map[string]any), "CertificateTransparencyLoggingPreference")
+	}
+	arn := request(t, h, "--domain-name", "ct.example.com")
+	if got := ct(arn); got != "ENABLED" {
+		t.Fatalf("default preference %q, want ENABLED", got)
+	}
+	off := request(t, h, "--domain-name", "off.example.com", "--options", "CertificateTransparencyLoggingPreference=DISABLED")
+	if got := ct(off); got != "DISABLED" {
+		t.Fatalf("requested DISABLED, got %q", got)
+	}
+	h.AWS(t, "acm", "update-certificate-options", "--certificate-arn", off, "--options", "CertificateTransparencyLoggingPreference=ENABLED")
+	if got := ct(off); got != "ENABLED" {
+		t.Fatalf("after update %q, want ENABLED", got)
+	}
+	if _, err := h.AWSErr(t, "acm", "update-certificate-options", "--certificate-arn", off, "--options", "CertificateTransparencyLoggingPreference=MAYBE"); err == nil {
+		t.Fatal("invalid preference accepted")
+	}
+}

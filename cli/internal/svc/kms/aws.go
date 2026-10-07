@@ -738,10 +738,9 @@ func (s *Service) awsGetKeyRotationStatus(q *awsapi.Req) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	if !k.symmetric() {
-		return nil, awsapi.Errorf(http.StatusBadRequest, "UnsupportedOperationException", "%s does not support rotation", k.ARN)
-	}
-	out := map[string]any{"KeyId": k.ARN, "KeyRotationEnabled": k.RotationEnabled}
+	// Keys that cannot rotate (asymmetric, HMAC) report rotation off, as in AWS;
+	// Terraform reads the status of every key KMS made.
+	out := map[string]any{"KeyId": k.ARN, "KeyRotationEnabled": k.symmetric() && k.RotationEnabled}
 	if k.RotationEnabled {
 		out["RotationPeriodInDays"] = k.period()
 		if k.NextRotation != nil {

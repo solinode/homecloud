@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"net/http"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -251,9 +252,12 @@ func schemaAttrs(extra map[string]any) []map[string]any {
 		case "Number":
 			m["NumberAttributeConstraints"] = map[string]string{"MinValue": "0"}
 		}
-		if a.name == "sub" {
+		switch a.name {
+		case "sub":
 			m["Required"] = true
 			m["StringAttributeConstraints"] = map[string]string{"MinLength": "1", "MaxLength": "2048"}
+		case "birthdate": // YYYY-MM-DD, as AWS reports it
+			m["StringAttributeConstraints"] = map[string]string{"MinLength": "10", "MaxLength": "10"}
 		}
 		out = append(out, m)
 	}
@@ -263,6 +267,15 @@ func schemaAttrs(extra map[string]any) []map[string]any {
 				c := map[string]any{}
 				for k, v := range m {
 					c[k] = v
+				}
+				// A standard attribute in the schema (e.g. email required) changes that attribute.
+				if i := slices.IndexFunc(out[:len(standardAttrs)], func(s map[string]any) bool { return s["Name"] == str(c, "Name") }); i >= 0 {
+					for _, k := range []string{"Required", "Mutable", "StringAttributeConstraints", "NumberAttributeConstraints"} {
+						if v, ok := c[k]; ok {
+							out[i][k] = v
+						}
+					}
+					continue
 				}
 				if n := str(c, "Name"); n != "" && !strings.HasPrefix(n, "custom:") {
 					c["Name"] = "custom:" + n

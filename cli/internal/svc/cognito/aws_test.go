@@ -630,3 +630,26 @@ func TestAWSIAM(t *testing.T) {
 		t.Fatalf("no audit entry: %v", h.AuditLog())
 	}
 }
+
+// Terraform drops standard attributes from a pool's schema only when they are
+// reported exactly as AWS does (birthdate is 10 characters); a schema entry
+// for a standard attribute changes that attribute instead of adding custom:email.
+func TestAWSStandardSchemaAttributes(t *testing.T) {
+	h, _ := newCognito(t)
+	pool := sub(h.AWSJSON(t, "cognito-idp", "create-user-pool", "--pool-name", "schema",
+		"--schema", "Name=email,AttributeDataType=String,Required=true,Mutable=true", "Name=team,AttributeDataType=String,Mutable=true"), "UserPool")["Id"].(string)
+	attrs := map[string]map[string]any{}
+	for _, a := range sub(h.AWSJSON(t, "cognito-idp", "describe-user-pool", "--user-pool-id", pool), "UserPool")["SchemaAttributes"].([]any) {
+		m := a.(map[string]any)
+		attrs[m["Name"].(string)] = m
+	}
+	if c := sub(attrs["birthdate"], "StringAttributeConstraints"); c["MinLength"] != "10" || c["MaxLength"] != "10" {
+		t.Fatalf("birthdate constraints %v", c)
+	}
+	if attrs["email"]["Required"] != true || attrs["custom:email"] != nil {
+		t.Fatalf("email %v, custom:email %v", attrs["email"], attrs["custom:email"])
+	}
+	if attrs["custom:team"] == nil {
+		t.Fatalf("custom attribute missing: %v", attrs)
+	}
+}

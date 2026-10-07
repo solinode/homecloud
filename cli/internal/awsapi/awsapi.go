@@ -129,6 +129,8 @@ const (
 	JSON Protocol = iota
 	Query
 	REST
+	// CBOR is Smithy RPC v2 CBOR (see cbor.go); operations see an awsJson body.
+	CBOR
 )
 
 // Req is one AWS API request.
@@ -386,6 +388,14 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		q.Protocol, q.Op = JSON, op
+	case cborRequest(r):
+		shape, op, _ := cborOp(r)
+		if q.Svc.JSONPrefix == "" || shape != q.Svc.JSONPrefix {
+			q.Protocol = CBOR
+			q.fail(Errorf(http.StatusBadRequest, "UnknownOperationException", "HomeCloud does not serve %s over rpc-v2-cbor", shape))
+			return
+		}
+		q.Protocol, q.Op = CBOR, op
 	case q.Svc.REST != nil && !q.isQuery():
 		q.Protocol = REST
 	default:
@@ -462,6 +472,15 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		q.Form = form
 		q.Op = form.Get("Action")
 	}
+	if q.Protocol == CBOR {
+		// The signature covers the CBOR bytes (hashed above); operations read awsJson.
+		b, err := CBORToJSON(q.Body)
+		if err != nil {
+			q.fail(Errorf(http.StatusBadRequest, "SerializationException", "could not parse request body: %v", err))
+			return
+		}
+		q.Body = b
+	}
 
 	public := (q.Svc.PublicOps[q.Op] && q.Protocol != REST) || (q.Protocol == REST && q.Svc.Unsigned != nil)
 	if sig != nil {
@@ -498,9 +517,12 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		q.fail(err)
 		return
 	}
-	if q.Protocol == JSON {
+	switch q.Protocol {
+	case JSON:
 		q.writeJSON(http.StatusOK, out)
-	} else {
+	case CBOR:
+		q.writeCBOR(http.StatusOK, out)
+	default:
 		q.writeQuery(out)
 	}
 }
@@ -528,6 +550,8 @@ func (q *Req) fail(err error) {
 	switch q.Protocol {
 	case JSON:
 		q.writeJSONError(e)
+	case CBOR:
+		q.writeCBORError(e)
 	case Query:
 		q.writeQueryError(e)
 	default:

@@ -69,10 +69,14 @@ func (s *Service) RegisterAWS() {
 		"DescribeNetworkInterfaces":            s.awsDescribeNetworkInterfaces,
 		"AllocateAddress":                      s.awsAllocateAddress,
 		"DescribeAddresses":                    s.awsDescribeAddresses,
+		"DescribeAddressesAttribute":           s.awsDescribeAddressesAttribute,
 		"ReleaseAddress":                       s.awsReleaseAddress,
 		"AssociateAddress":                     s.awsAssociateAddress,
 		"DisassociateAddress":                  s.awsDisassociateAddress,
 		"ModifyNetworkInterfaceAttribute":      s.awsModifyNetworkInterfaceAttribute,
+		"CreateNatGateway":                     s.awsCreateNatGateway,
+		"DescribeNatGateways":                  s.awsDescribeNatGateways,
+		"DeleteNatGateway":                     s.awsDeleteNatGateway,
 	}
 	s.vpcOps(ops)
 	s.ltOps(ops)
@@ -1341,7 +1345,7 @@ func (s *Service) awsDeleteKeyPair(q *awsapi.Req) (any, error) {
 
 var resourceTypes = map[string]string{
 	"i": "instance", "vol": "volume", "vpc": "vpc", "subnet": "subnet", "sg": "security-group", "ami": "image",
-	"key": "key-pair", "snap": "snapshot", "igw": "internet-gateway", "rtb": "route-table", "lt": "launch-template", "eipalloc": "elastic-ip",
+	"key": "key-pair", "snap": "snapshot", "igw": "internet-gateway", "rtb": "route-table", "lt": "launch-template", "eipalloc": "elastic-ip", "nat": "natgateway", "sgr": "security-group-rule", "acl": "network-acl",
 }
 
 func resourceType(id string) string {
@@ -1388,6 +1392,28 @@ func (s *Service) setTags(id string, fn func(t core.Tags)) error {
 		_, err = store.Update(s.env.Store, cAddresses, id, func(x *Address) error { plain(&x.Tags); return nil })
 	case "launch-template":
 		_, err = store.Update(s.env.Store, cLaunchTemplates, id, func(x *LaunchTemplate) error { plain(&x.Tags); return nil })
+	case "natgateway":
+		_, err = store.Update(s.env.Store, cNatGateways, id, func(x *NatGateway) error { plain(&x.Tags); return nil })
+	case "network-acl":
+		err = s.setACLTags(id, plain)
+	case "security-group-rule":
+		err = store.ErrNotFound
+		for _, g := range s.vpc.SecurityGroups() {
+			if !slices.ContainsFunc(append(slices.Clone(g.Ingress), g.Egress...), func(r vpc.Rule) bool { return r.ID == id }) {
+				continue
+			}
+			_, err = s.vpc.UpdateSecurityGroup(g.ID, func(x *vpc.SecurityGroup) error {
+				for _, rs := range []*[]vpc.Rule{&x.Ingress, &x.Egress} {
+					for i := range *rs {
+						if (*rs)[i].ID == id {
+							plain(&(*rs)[i].Tags)
+						}
+					}
+				}
+				return nil
+			})
+			break
+		}
 	default:
 		return core.Errf(http.StatusBadRequest, "InvalidID", "The ID '%s' is not valid", id)
 	}
@@ -1492,6 +1518,12 @@ func (s *Service) allTagged() []tagRow {
 	}
 	for _, t := range store.List[LaunchTemplate](s.env.Store, cLaunchTemplates) {
 		out = append(out, tagRow{t.ID, t.Tags})
+	}
+	for _, g := range s.natGateways() {
+		out = append(out, tagRow{g.ID, g.Tags})
+	}
+	for _, a := range store.List[NetworkACL](s.env.Store, cNetworkACLs) {
+		out = append(out, tagRow{a.ID, a.Tags})
 	}
 	return out
 }

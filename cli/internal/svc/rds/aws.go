@@ -271,6 +271,11 @@ func settingsIn(q *awsapi.Req) map[string]string {
 			m[out] = q.Param(in)
 		}
 	}
+	// AWS reports maintenance windows in lower case ("mon:00:00-mon:03:00"),
+	// whatever case they were given in; Terraform compares with that.
+	if w, ok := m["PreferredMaintenanceWindow"]; ok {
+		m["PreferredMaintenanceWindow"] = strings.ToLower(w)
+	}
 	return m
 }
 
@@ -442,6 +447,11 @@ func (s *Service) awsCreateInstance(q *awsapi.Req) (any, error) {
 		return nil, err
 	}
 	in.Engine, in.Tags = engine, tags
+	// Inside the VPC a database listens on its engine's port: asking for that
+	// port (as Terraform's rds module does) is fine, any other is not.
+	if !in.PubliclyAccessible && in.Port == e.DefaultPort {
+		in.Port = 0
+	}
 	if in.Port != 0 && !in.PubliclyAccessible {
 		return nil, apiErr("InvalidParameterValue", "Port %d is not supported for a database that is not publicly accessible; use %d", in.Port, e.DefaultPort)
 	}
@@ -1168,6 +1178,9 @@ func (s *Service) awsRestore(q *awsapi.Req) (any, error) {
 	in, err := s.createInputFrom(q, id, pl)
 	if err != nil {
 		return nil, err
+	}
+	if e, ok := findEngine(sn.Engine); ok && !in.PubliclyAccessible && in.Port == e.DefaultPort {
+		in.Port = 0
 	}
 	if in.Port != 0 && !in.PubliclyAccessible {
 		return nil, apiErr("InvalidParameterValue", "Port %d is not supported for a database that is not publicly accessible", in.Port)

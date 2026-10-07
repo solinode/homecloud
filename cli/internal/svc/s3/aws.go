@@ -931,6 +931,12 @@ func (s *Service) forwardOp(a *s3req) error {
 		return s.putBucketPolicy(a)
 	case "GetBucketPolicy":
 		return s.getBucketPolicy(a)
+	case "PutBucketLifecycleConfiguration":
+		return s.awsPutLifecycle(a)
+	case "GetBucketLifecycleConfiguration":
+		if ok, err := s.awsGetLifecycle(a); ok {
+			return err
+		}
 	case "CreateMultipartUpload":
 		if r.Header.Get("X-Amz-Tagging") != "" {
 			if err := s.authorize(a, "s3:PutObjectTagging", a.objectARN()); err != nil {
@@ -957,6 +963,10 @@ func (s *Service) forwardOp(a *s3req) error {
 		s.forgetPolicy(a.bucket)
 		if resp.StatusCode/100 == 2 {
 			_ = s.updateMeta(a.bucket, func(m *bucketMeta) { m.setConfig("policy", ""); m.setConfig("policyNorm", "") })
+		}
+	case "DeleteBucketLifecycle":
+		if resp.StatusCode/100 == 2 {
+			s.forgetLifecycle(a.bucket)
 		}
 	case "PutBucketLifecycleConfiguration", "GetBucketLifecycleConfiguration":
 		// MinIO has no transition size setting; report what was set (AWS's

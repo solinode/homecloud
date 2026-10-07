@@ -57,6 +57,9 @@ type Certificate struct {
 	ValidationMethod string    `json:"validation_method,omitempty"`
 	IdempotencyToken string    `json:"idempotency_token,omitempty"`
 	IssuedAt         time.Time `json:"issued_at,omitempty"`
+	// CTLogging is the CertificateTransparencyLoggingPreference (recorded:
+	// the private CA logs nothing); empty means ENABLED, AWS's default.
+	CTLogging string `json:"ct_logging,omitempty"`
 }
 
 func (c Certificate) view() Certificate {
@@ -223,6 +226,7 @@ type requestInput struct {
 	Tags             core.Tags `json:"tags"`
 	ValidationMethod string    `json:"validation_method"`
 	IdempotencyToken string    `json:"idempotency_token"`
+	CTLogging        string    `json:"-"`
 }
 
 func (s *Service) request(c *httpx.Ctx) (any, error) {
@@ -263,6 +267,7 @@ func (s *Service) requestCert(in requestInput) (Certificate, error) {
 		return Certificate{}, err
 	}
 	cert.Tags, cert.ValidationMethod, cert.IdempotencyToken, cert.IssuedAt = in.Tags, in.ValidationMethod, in.IdempotencyToken, cert.CreatedAt
+	cert.CTLogging = in.CTLogging
 	return cert, store.Put(s.env.Store, cCerts, cert.ID, cert)
 }
 

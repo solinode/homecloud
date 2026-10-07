@@ -24,6 +24,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/acm"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/appautoscaling"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/autoscaling"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cfn"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cloudwatch"
@@ -104,7 +105,8 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	runtime.Account = account
 	if cs, err := dk.ManagedContainers(); err == nil {
 		for _, c := range cs {
-			if other := c.Labels[core.LabelAccount]; other != "" && other != account {
+			// Objects of a running Go test (dockertest) are not another installation.
+			if other := c.Labels[core.LabelAccount]; other != "" && other != account && !strings.HasPrefix(other, core.TestAccountPrefix) {
 				return fmt.Errorf("this Docker host already runs HomeCloud account %s (container %s); "+
 					"start HomeCloud with that installation's --data-dir, or remove its containers first", other, strings.TrimPrefix(c.Names[0], "/"))
 			}
@@ -308,6 +310,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	secSvc.RegisterAWS()
 	kmsSvc.RegisterAWS()
 	ssmSvc.RegisterAWS()
+	appautoscaling.New(env).RegisterAWS()
 	ddb.RegisterAWS()
 	wireLambda(lambdaSvc, iamSvc, tg, eventsSvc, s3Svc, ecrSvc)
 	lambdaSvc.Streams = ddbStreams{ddb}
