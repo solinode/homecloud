@@ -1087,7 +1087,15 @@ func (s *Service) ChangeType(id, typ string) (Instance, error) {
 		}); err != nil {
 			return i, err
 		}
-		if err := s.recreateVM(i.ID); err != nil {
+		if err := recreateVM(s, i.ID); err != nil {
+			// The old container is back unless the rebuild got as far as replacing it:
+			// then the record must describe it again.
+			_, _ = store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error {
+				if x.ContainerID == i.ContainerID {
+					x.InstanceType, x.VCPUs, x.MemoryMB = i.InstanceType, i.VCPUs, i.MemoryMB
+				}
+				return nil
+			})
 			return i, fmt.Errorf("resize virtual machine: %w", err)
 		}
 		return s.get(i.ID)

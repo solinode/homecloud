@@ -51,7 +51,7 @@ if [ -d /hc/seed ]; then
     mkdir /tmp/seed/qga
     cp "/images/$HC_VM_AGENT"/*.deb /tmp/seed/qga/
   fi
-  genisoimage -quiet -output /vm/seed.iso -volid cidata -joliet -rock /tmp/seed >/dev/null 2>&1
+  genisoimage -quiet -output /vm/seed.iso -volid cidata -joliet -rock /tmp/seed >/dev/null # errors stay in the log
   rm -rf /tmp/seed
 fi
 

@@ -473,7 +473,7 @@ func (s *Service) launchVM(inst Instance, network string) {
 	netMode := "passt"
 	if os.Getenv("HC_VM_NET") == "user" || inst.VMNetwork == "user" {
 		netMode = "user"
-	} else if why := s.vmPasstFailure(cid); why != "" {
+	} else if why := s.vmPasstFailure(cid, time.Time{}); why != "" {
 		netMode = "user"
 		log.Printf("ec2: %s: passt could not start, so the guest uses user-mode networking behind NAT (no private address of its own; only ports allowed at launch are forwarded): %s", inst.ID, why)
 	}
@@ -546,33 +546,70 @@ func (s *Service) vmWatchPasst(i Instance) {
 	}()
 }
 
-// vmPasstFailure returns why passt did not start in the VM container (what the
-// entrypoint printed before falling back to user-mode networking), or "".
-func (s *Service) vmPasstFailure(cid string) string {
-	out, err := s.env.Docker.Logs(cid, 0, time.Time{})
+// vmPasstFailure returns why passt did not start in the VM container since
+// the given time (what the entrypoint printed before falling back to
+// user-mode networking), or "".
+func (s *Service) vmPasstFailure(cid string, since time.Time) string {
+	out, err := s.env.Docker.Logs(cid, 0, since)
 	if err != nil {
 		return ""
 	}
+	return passtFailure(out)
+}
+
+// passtFailure extracts the entrypoint's report of a passt that did not start
+// from the VM container's log, as one line, or "".
+func passtFailure(out string) string {
 	const marker = "[homecloud] passt did not start"
-	i := strings.Index(out, marker)
+	i := strings.LastIndex(out, marker)
 	if i < 0 {
 		return ""
 	}
 	out = out[i:]
 	if j := strings.Index(out, "[homecloud] starting"); j > 0 {
-		out = out[:j]
+		out = out[:strings.LastIndexByte(out[:j], '\n')+1] // up to that line, with its timestamp
 	}
 	var lines []string
 	for _, l := range strings.Split(out, "\n") {
 		if l = strings.TrimSpace(l); l != "" {
 			// drop the docker log timestamp
-			if _, rest, ok := strings.Cut(l, " "); ok && strings.HasSuffix(l[:strings.IndexByte(l, ' ')], "Z") {
-				l = rest
+			if sp := strings.IndexByte(l, ' '); sp > 0 && strings.HasSuffix(l[:sp], "Z") {
+				l = strings.TrimSpace(l[sp+1:])
 			}
 			lines = append(lines, l)
 		}
 	}
 	return strings.Join(lines, "; ")
+}
+
+// vmSettleNetwork waits (up to a minute) for a just-started VM container's
+// entrypoint to choose the guest's network, and records a fallback to
+// user-mode networking: with it, the forwarded ports are fixed when the
+// container is created, so security group changes must rebuild it
+// (vmFwdMatches). The fallback is kept for later rebuilds of the instance.
+func (s *Service) vmSettleNetwork(id, cid string, since time.Time) {
+	deadline := time.Now().Add(time.Minute)
+	for {
+		out, _ := s.env.Docker.Logs(cid, 0, since)
+		if strings.Contains(out, "[homecloud] starting the virtual machine") {
+			if why := passtFailure(out); why != "" {
+				changed := false
+				_, _ = store.Update(s.env.Store, cInstances, id, func(x *Instance) error {
+					changed = x.VMNetwork != "user"
+					x.VMNetwork = "user"
+					return nil
+				})
+				if changed {
+					log.Printf("ec2: %s: passt could not start, so the guest uses user-mode networking behind NAT: %s", id, why)
+				}
+			}
+			return
+		}
+		if time.Now().After(deadline) || s.env.Docker.State(cid) != "running" {
+			return
+		}
+		time.Sleep(500 * time.Millisecond)
+	}
 }
 
 func head(s string, n int) string {
@@ -699,6 +736,7 @@ func (s *Service) vmStart(inst Instance) error {
 	defer cancel()
 	s.metadataRoute(ctx, inst.ContainerID, inst.VpcID)
 	s.vpc.ProtectNow(ctx, s.member(inst, inst.ContainerID))
+	s.vmSettleNetwork(inst.ID, inst.ContainerID, since)
 	return s.vmWaitReady(inst, since)
 }
 
@@ -713,8 +751,8 @@ func (s *Service) vmReboot(inst Instance) error {
 }
 
 // recreateVM rebuilds the VM container of an instance from its current
-// settings (instance type, ports).
-func (s *Service) recreateVM(id string) error { return s.recreate(id) }
+// settings (instance type, ports). A variable so tests can make it fail.
+var recreateVM = func(s *Service, id string) error { return s.recreate(id) }
 
 // rebuildVM replaces an instance's VM container with one built from the
 // instance's current settings. Nothing is snapshotted: the disk lives in the
@@ -756,19 +794,27 @@ func (s *Service) rebuildVM(i Instance) error {
 		return undo(fmt.Errorf("write cloud-init seed: %w", err))
 	}
 	_ = s.env.Docker.Remove(i.ContainerID)
-	if running {
-		if err := s.env.Docker.Start(cid); err != nil {
-			log.Printf("ec2: start recreated %s: %v", i.ID, err)
-		} else {
-			s.metadataRoute(ctx, cid, i.VpcID)
-			s.vpc.ProtectNow(ctx, s.member(i, cid))
-		}
+	// Record the replacement before starting it: whatever happens next, the
+	// instance points at the container that holds its disk.
+	if _, err := store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error { x.ContainerID = cid; return nil }); err != nil {
+		return err
 	}
+	if !running {
+		return nil
+	}
+	since := time.Now().Add(-2 * time.Second)
+	if err := s.env.Docker.Start(cid); err != nil {
+		_, _ = store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error {
+			x.State, x.StateReason, x.PublicPorts = "stopped", "Server.InternalError: the rebuilt virtual machine did not start: "+err.Error(), map[string]int{}
+			return nil
+		})
+		return fmt.Errorf("start the rebuilt virtual machine: %w", err)
+	}
+	s.metadataRoute(ctx, cid, i.VpcID)
+	s.vpc.ProtectNow(ctx, s.member(i, cid))
+	s.vmSettleNetwork(i.ID, cid, since)
 	_, err = store.Update(s.env.Store, cInstances, i.ID, func(x *Instance) error {
-		x.ContainerID = cid
-		if running {
-			x.PublicPorts = s.env.Docker.PublishedPorts(cid)
-		}
+		x.PublicPorts = s.env.Docker.PublishedPorts(cid)
 		return nil
 	})
 	return err

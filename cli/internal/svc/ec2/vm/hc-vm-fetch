@@ -1,18 +1,28 @@
 #!/bin/sh
 # Downloads a cloud image into the image cache and verifies its checksum.
 #   hc-vm-fetch <url> <file> <sha256|sha512 hex>
-# The file appears in /images only once it is complete and verified.
+# The file appears in the cache only once it is complete and verified. A cached
+# file is verified again before it is used, and downloaded again when it no
+# longer matches. HC_VM_IMAGES overrides the cache directory (tests).
 set -eu
 url=$1; file=$2; sum=$3
-dest=/images/$file
-[ -f "$dest" ] && exit 0
+dir=${HC_VM_IMAGES:-/images}
+dest=$dir/$file
+digest() {
+  case ${#sum} in
+    64) sha256sum "$1" | cut -d' ' -f1 ;;
+    128) sha512sum "$1" | cut -d' ' -f1 ;;
+    *) echo "unsupported checksum length" >&2; return 2 ;;
+  esac
+}
+if [ -f "$dest" ]; then
+  [ "$(digest "$dest")" = "$sum" ] && exit 0
+  echo "cached $file does not match its checksum; downloading it again" >&2
+  rm -f "$dest"
+fi
 tmp=$dest.part
 curl -fSL --retry 3 --retry-delay 5 --connect-timeout 30 -o "$tmp" "$url"
-case ${#sum} in
-  64) got=$(sha256sum "$tmp" | cut -d' ' -f1) ;;
-  128) got=$(sha512sum "$tmp" | cut -d' ' -f1) ;;
-  *) echo "unsupported checksum length" >&2; rm -f "$tmp"; exit 2 ;;
-esac
+got=$(digest "$tmp") || { rm -f "$tmp"; exit 2; }
 if [ "$got" != "$sum" ]; then
   echo "checksum mismatch for $url: expected $sum, got $got" >&2
   rm -f "$tmp"
