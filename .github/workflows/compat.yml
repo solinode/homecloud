@@ -1,0 +1,50 @@
+name: Terraform compatibility
+# Applies, re-plans and destroys popular terraform-aws-modules against a fresh
+# HomeCloud (compat/run.sh). Nightly and on demand only: it takes a while and
+# pulls many images, so it does not run on pull requests.
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      scenarios:
+        description: "Scenarios to run (space separated; empty runs all)"
+        required: false
+        default: ""
+
+concurrency:
+  group: compat
+  cancel-in-progress: false
+
+jobs:
+  terraform-modules:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: cli/go.mod
+      - uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_wrapper: false
+      - name: Run the suite
+        env:
+          TF_PLUGIN_CACHE_DIR: ${{ runner.temp }}/tf-plugins
+          SCENARIOS: ${{ github.event.inputs.scenarios }}
+        run: |
+          mkdir -p "$TF_PLUGIN_CACHE_DIR"
+          # Unquoted on purpose: a space-separated list of scenario names.
+          ./compat/run.sh $SCENARIOS
+      - name: Results
+        if: always()
+        run: cat compat/results.md >> "$GITHUB_STEP_SUMMARY" || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: compat-results
+          path: |
+            compat/results.json
+            compat/results.md
+            compat/logs/
+          retention-days: 30
