@@ -52,9 +52,17 @@ aws s3 mb s3://demo && echo hi | aws s3 cp - s3://demo/hello.txt
 aws sqs create-queue --queue-name jobs
 ```
 
-<!-- TODO(maintainer): when the container image is published, replace this note with the exact
-     `docker run ... ghcr.io/solinode/homecloud` command (Docker socket mount, ports, data volume). -->
-> **Docker image:** a `ghcr.io/solinode/homecloud` image, so HomeCloud can start with a single `docker run`, is being worked on. Until it is released, use the install script above.
+**Or with Docker only**, nothing to install:
+
+```bash
+docker run -d --name homecloud -p 127.0.0.1:8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock -v homecloud-data:/data \
+  ghcr.io/solinode/homecloud
+docker logs homecloud                                # the root console password (once)
+eval "$(docker exec homecloud homecloud aws-env)"   # point the AWS CLI at it
+```
+
+HomeCloud starts its services as containers next to its own on the same Docker host; mounting the socket gives it control of that host, as running the binary does. See [Docker](docs/install-server.md#docker) in the server guide for exposing it, TLS and upgrades.
 
 Other ways to install: build from source with Go 1.25+ and Node.js 22+ (`make`, binary in `bin/homecloud`), or follow **[Install on a server](docs/install-server.md)** for a VPS or home server (system service, TLS, firewall, backups).
 

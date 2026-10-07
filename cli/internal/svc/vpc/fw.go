@@ -209,6 +209,9 @@ func (s *Service) fwJobs(members, extra []Member, verify bool) ([]fwJob, map[str
 			v, err := store.Get[VPC](s.env.Store, cVPCs, m.VpcID)
 			if err == nil {
 				f = newFWView(v, s.DefaultSecurityGroup(v.ID), sgs, members)
+				if s.env.Docker.Self() != "" {
+					f.api = APIAddress(v.CIDR)
+				}
 			}
 			views[m.VpcID] = f
 		}

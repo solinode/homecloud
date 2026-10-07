@@ -390,6 +390,7 @@ func (e *ECS) launch(ctx context.Context, ls launchSpec) (Task, error) {
 		Labels:   runtime.Labels("ecs", id, map[string]string{"homecloud.ecs.service": service, "homecloud.ecs.taskdef": t.TaskDefinition, "homecloud.ecs.cluster": cluster}),
 		NanoCPUs: int64(min(td.CPU, e.hostCPU) * 1e9), MemoryMB: td.MemoryMB,
 		Network: pl.Network, IP: pl.IP, Aliases: aliases, Ports: ports, Start: true,
+		ExtraHosts: []string{runtime.HostAlias}, // AWS_ENDPOINT_URL names host.docker.internal
 	})
 	if err != nil {
 		return stop("CannotStartContainerError: " + err.Error())

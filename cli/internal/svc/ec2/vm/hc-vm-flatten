@@ -5,9 +5,13 @@
 # /images so the backing file resolves); it is converted into a single image
 # that needs no backing file. Any other volume is copied as it is. -U reads the
 # image even though a running guest has it open (the copy is crash-consistent).
+# A root volume can have been attached to a container instance after its VM
+# was terminated, so its qcow2 is checked first: qemu-img would follow a
+# backing or data file wherever it points (hc-vm-checkdisk).
 set -eu
 src=$1; dst=$2
-if [ -f "$src/disk.qcow2" ]; then
+if [ -f "$src/disk.qcow2" ] || [ -L "$src/disk.qcow2" ]; then
+  hc-vm-checkdisk qcow2 "$src/disk.qcow2" /images
   qemu-img convert -U -f qcow2 -O qcow2 "$src/disk.qcow2" "$dst/disk.qcow2"
 else
   cp -a "$src/." "$dst/"

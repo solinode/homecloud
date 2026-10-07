@@ -53,6 +53,14 @@ Restore with "homecloud restore FILE" (with the server stopped).`,
 				return err
 			}
 			defer resp.Body.Close()
+			if output == "-" { // to stdout, e.g. docker exec homecloud homecloud backup -o - > backup.tar.gz
+				n, err := io.Copy(os.Stdout, resp.Body)
+				if err != nil {
+					return fmt.Errorf("backup failed after %d bytes: %w (see the server log)", n, err)
+				}
+				fmt.Fprintf(os.Stderr, "wrote %.1f MB\n", float64(n)/(1<<20))
+				return nil
+			}
 			tmp := output + ".partial"
 			f, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0o600)
 			if err != nil {
@@ -73,15 +81,16 @@ Restore with "homecloud restore FILE" (with the server stopped).`,
 			return nil
 		},
 	}
-	backupCmd.Flags().StringVarP(&output, "output", "o", "", "file to write (default homecloud-backup-<time>.tar.gz)")
+	backupCmd.Flags().StringVarP(&output, "output", "o", "", "file to write, or - for stdout (default homecloud-backup-<time>.tar.gz)")
 	backupCmd.Flags().BoolVar(&noVolumes, "no-volumes", false, "only the data directory, without Docker volumes")
 	RootCmd.AddCommand(backupCmd)
 
 	var dataDir string
 	var force, skipVolumes bool
 	restoreCmd := &cobra.Command{
-		Use:   "restore FILE",
-		Short: "Restore a backup into a data directory (the server must be stopped)",
+		Use:     "restore FILE",
+		Example: "  homecloud restore homecloud-backup-20260101-120000.tar.gz\n  docker run -i --rm -v /var/run/docker.sock:/var/run/docker.sock -v homecloud-data:/data ghcr.io/solinode/homecloud restore - < backup.tar.gz",
+		Short:   "Restore a backup into a data directory (the server must be stopped)",
 		Long: `Unpacks a backup made with "homecloud backup" into the data directory and
 recreates its Docker volumes. Stop the server first; start it afterwards with
 "homecloud serve" and it picks up the restored state.
@@ -97,16 +106,20 @@ With --force, an existing data directory is moved aside to
 			if running(dir) {
 				return fmt.Errorf("a HomeCloud server is running for %s; stop it before restoring", dir)
 			}
-			f, err := os.Open(args[0])
-			if err != nil {
-				return err
+			var in io.Reader = os.Stdin // "-": e.g. docker run -i ... restore - < backup.tar.gz
+			if args[0] != "-" {
+				f, err := os.Open(args[0])
+				if err != nil {
+					return err
+				}
+				defer f.Close()
+				in = f
 			}
-			defer f.Close()
 			d, err := runtime.New()
 			if err != nil {
 				return err
 			}
-			m, err := system.Restore(context.Background(), d, f, system.RestoreOptions{DataDir: dir, Force: force, SkipVolumes: skipVolumes,
+			m, err := system.Restore(context.Background(), d, in, system.RestoreOptions{DataDir: dir, Force: force, SkipVolumes: skipVolumes,
 				Logf: func(format string, a ...any) { fmt.Printf(format+"\n", a...) }})
 			if err != nil {
 				return err

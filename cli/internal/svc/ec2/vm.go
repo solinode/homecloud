@@ -43,6 +43,10 @@ import (
 
 const defaultVMImageVolume = "hc-vm-images"
 
+// vmLogMaxBytes is how much of a VM container's output (the guest's serial
+// console and the entrypoint's messages) Docker keeps.
+const vmLogMaxBytes = 32 << 20
+
 type vmState struct {
 	runnerMu     sync.Mutex
 	runnerTag    string // built and ready
@@ -305,6 +309,9 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 		// 65536 open files some hosts allow by default.
 		SecurityOpt: vmSecurityOpts(),
 		NoFile:      1048576,
+		// The container's log is the guest's serial console, which the guest
+		// can fill without end; HomeCloud also reads it while the guest boots.
+		LogMaxBytes: vmLogMaxBytes,
 	}
 	if mach.KVM {
 		spec.Devices = []string{"/dev/kvm"}

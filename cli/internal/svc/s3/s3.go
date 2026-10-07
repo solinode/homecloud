@@ -146,7 +146,7 @@ func (s *Service) Start(ctx context.Context, vpcs []vpc.VPC) error {
 	for _, v := range vpcs {
 		s.ConnectNetwork(v)
 	}
-	dial := net.JoinHostPort(s.env.Cfg.ServiceDialHost(), strconv.Itoa(s.env.Cfg.S3Port))
+	dial := d.DialAddr(containerName, 9000, net.JoinHostPort(s.env.Cfg.ServiceDialHost(), strconv.Itoa(s.env.Cfg.S3Port)))
 	return s.connect(ctx, dial, dial)
 }
 

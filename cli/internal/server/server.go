@@ -113,6 +113,17 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		}
 	}
 	env := &svc.Env{Cfg: cfg, Store: st, Docker: dk, AccountID: account}
+	selfName := ""
+	if self := dk.Self(); self != "" {
+		selfName = self[:12]
+		if c, err := dk.Inspect(self); err == nil {
+			selfName = strings.TrimPrefix(c.Name, "/")
+		}
+		logf("running in container %s: managing its Docker host's containers; workloads reach the API at the container's own address", selfName)
+		if host, _, _ := net.SplitHostPort(cfg.APIAddr); host == "127.0.0.1" || host == "localhost" || host == "::1" {
+			logf("warning: the API listens on %s, which only this container reaches; serve with --addr 0.0.0.0:%s and publish the port", cfg.APIAddr, cfg.APIPort())
+		}
+	}
 	_, apiPort, _ := net.SplitHostPort(cfg.APIAddr)
 	scheme0 := "http"
 	if cfg.TLSCert != "" {
@@ -123,7 +134,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if cfg.TLS() {
 		// Workloads can't verify the API's certificate under host.docker.internal:
 		// give them a plain-HTTP endpoint only they can reach.
-		if addr, ok := workloadListenAddr(goruntime.GOOS, dk.BridgeGateway()); ok {
+		if addr, ok := workloadListenAddr(goruntime.GOOS, dk.BridgeGateway(), dk.Self() != ""); ok {
 			if ln, err := net.Listen("tcp", addr); err != nil {
 				logf("workload endpoint on %s: %v (workloads will call the HTTPS API)", addr, err)
 			} else {
@@ -160,6 +171,9 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		logf("first start: created account %s", boot.AccountID)
 		logf("  console sign-in   user: root   password: %s", boot.RootPassword)
 		logf("  CLI credentials written to %s", CredentialsPath(cfg.DataDir))
+		if selfName != "" {
+			logf("  AWS CLI on this machine: eval \"$(docker exec %s homecloud aws-env)\"", selfName)
+		}
 		logf("  (the password is shown only once; reset it with `homecloud serve --reset-root-password`, or choose one with `homecloud admin set-root-password` while the server is stopped)")
 	}
 	if opts.ResetRootPassword {
@@ -420,7 +434,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	}()
 	// On Linux, containers reach the host through the bridge gateway, which a
 	// loopback-only API address doesn't cover: listen there too.
-	if goruntime.GOOS == "linux" {
+	if goruntime.GOOS == "linux" && dk.Self() == "" {
 		if host, _, _ := net.SplitHostPort(cfg.APIAddr); host == "127.0.0.1" || host == "localhost" {
 			if gw := dk.BridgeGateway(); gw != "" {
 				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: root, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 256 << 10}

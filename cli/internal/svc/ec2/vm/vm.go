@@ -64,14 +64,18 @@ var ctlScript string
 //go:embed hc-vm-flatten
 var flattenScript string
 
+//go:embed hc-vm-checkdisk
+var checkDiskScript string
+
 // RunnerContext is the build context of the runner image.
 func RunnerContext() map[string][]byte {
 	return map[string][]byte{
-		"Dockerfile":    []byte(runnerDockerfile),
-		"hc-vm-run":     []byte(runScript),
-		"hc-vm-fetch":   []byte(fetchScript),
-		"hc-vm-ctl":     []byte(ctlScript),
-		"hc-vm-flatten": []byte(flattenScript),
+		"Dockerfile":      []byte(runnerDockerfile),
+		"hc-vm-run":       []byte(runScript),
+		"hc-vm-fetch":     []byte(fetchScript),
+		"hc-vm-ctl":       []byte(ctlScript),
+		"hc-vm-flatten":   []byte(flattenScript),
+		"hc-vm-checkdisk": []byte(checkDiskScript),
 	}
 }
 

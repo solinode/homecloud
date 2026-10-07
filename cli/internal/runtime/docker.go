@@ -12,6 +12,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -20,6 +21,9 @@ import (
 
 type Docker struct {
 	C *docker.Client
+
+	self   string     // the container HomeCloud runs in (self.go), "" on the host
+	selfMu sync.Mutex // serializes attaching it to networks
 }
 
 func New() (*Docker, error) {
@@ -30,7 +34,7 @@ func New() (*Docker, error) {
 	if err := c.Ping(); err != nil {
 		return nil, fmt.Errorf("docker is not reachable (is it running?): %w", err)
 	}
-	return &Docker{C: c}, nil
+	return &Docker{C: c, self: detectSelf(c)}, nil
 }
 
 // Account is stamped on every managed object so two installations never share a Docker host by accident.
@@ -97,12 +101,18 @@ type RunSpec struct {
 	Devices     []string // host devices passed through (e.g. /dev/kvm)
 	SecurityOpt []string // e.g. seccomp=unconfined
 	NoFile      int64    // raise the open-file limit (soft and hard) to this; 0 keeps the default
+	// LogMaxBytes caps what Docker keeps of the container's output (json-file,
+	// rotated over two files); 0 keeps the daemon's logging configuration.
+	LogMaxBytes int64
 	Start       bool
 }
 
 // HostAlias makes the Docker host reachable from containers as host.docker.internal
 // (built in on Docker Desktop and OrbStack; mapped to the bridge gateway on Linux).
-const HostAlias = "host.docker.internal:host-gateway"
+const HostAlias = HostAliasName + ":host-gateway"
+
+// HostAliasName is the name workloads reach HomeCloud by.
+const HostAliasName = "host.docker.internal"
 
 // BridgeGateway returns the Docker host's address on the default bridge (Linux),
 // which containers reach through host.docker.internal.
@@ -152,7 +162,7 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 	}
 	hc := &docker.HostConfig{
 		DNS:          s.DNS,
-		ExtraHosts:   s.ExtraHosts,
+		ExtraHosts:   d.hostAlias(s.Network, s.ExtraHosts),
 		Memory:       s.MemoryMB * 1024 * 1024,
 		PortBindings: bindings,
 		Mounts:       mounts,
@@ -163,6 +173,10 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 	}
 	hc.CapAdd = s.CapAdd
 	hc.SecurityOpt = s.SecurityOpt
+	if s.LogMaxBytes > 0 {
+		hc.LogConfig = docker.LogConfig{Type: "json-file", Config: map[string]string{
+			"max-size": strconv.FormatInt(max(1, s.LogMaxBytes/2/1024), 10) + "k", "max-file": "2"}}
+	}
 	if s.NoFile > 0 {
 		hc.Ulimits = []docker.ULimit{{Name: "nofile", Soft: s.NoFile, Hard: s.NoFile}}
 	}

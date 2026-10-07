@@ -13,11 +13,12 @@
 set -eu
 
 disk=/vm/disk.qcow2
-if [ ! -f "$disk" ]; then
+if [ ! -f "$disk" ] && [ ! -L "$disk" ]; then
   if [ -n "${HC_VM_AMI:-}" ]; then
     # An image made from an instance: a standalone copy, so the instance does not
     # depend on the image staying registered.
     echo "[homecloud] creating disk ($HC_VM_DISK_GB GiB) from the image"
+    hc-vm-checkdisk qcow2 /ami/disk.qcow2
     qemu-img convert -f qcow2 -O qcow2 /ami/disk.qcow2 "$disk.tmp"
     qemu-img resize -q "$disk.tmp" "${HC_VM_DISK_GB}G"
   else
@@ -26,12 +27,20 @@ if [ ! -f "$disk" ]; then
   fi
   mv "$disk.tmp" "$disk"
 fi
+# The root disk is an overlay on a cached cloud image or a standalone qcow2:
+# QEMU must not follow it anywhere else (hc-vm-checkdisk).
+hc-vm-checkdisk qcow2 "$disk" /images
+hc-vm-checkdisk raw /vm/efivars.fd
 
 # Extra volumes are raw images, created sparse on first use and grown when the
 # volume was enlarged. HC_VM_DISKS is "<volume id>:<GiB> ..."; the QEMU command
-# line names the files (/disks/<id>/disk.img).
+# line names the files (/disks/<id>/disk.img). A volume may have been attached
+# to a container instance before, which could leave a symbolic link there:
+# QEMU would follow it to a file of this container (the root disk's qcow2
+# header, for one) and hand it to the guest.
 for d in ${HC_VM_DISKS:-}; do
   id=${d%%:*}; gb=${d##*:}; img=/disks/$id/disk.img
+  hc-vm-checkdisk raw "$img"
   want=$((gb * 1073741824))
   if [ ! -f "$img" ]; then
     truncate -s "$want" "$img"

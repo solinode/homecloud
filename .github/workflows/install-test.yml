@@ -1,0 +1,149 @@
+name: Install test
+# Installs HomeCloud the way users do (the install script from this repository,
+# which downloads a published release; and the container image) and checks
+# that it serves. Not run on pull requests, to save CI minutes: on demand,
+# weekly, and for every release tag.
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release to install (e.g. v0.4.0); empty for the latest"
+        required: false
+        default: ""
+  schedule:
+    - cron: "17 5 * * 1" # Mondays 05:17 UTC
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: install-test-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # A tag run installs that release (published by the Release workflow, which
+  # runs at the same time); otherwise the version asked for, or the latest.
+  HOMECLOUD_VERSION: ${{ github.ref_type == 'tag' && github.ref_name || inputs.version }}
+
+jobs:
+  install:
+    name: install (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: ubuntu
+            os: ubuntu-latest
+            serve: true
+            smoke: true
+          - name: debian
+            os: ubuntu-latest
+            image: debian:12
+            serve: true
+            smoke: false
+          - name: macos
+            os: macos-latest
+            serve: false # no Docker on the macOS runners: the binary only
+            smoke: false
+    runs-on: ${{ matrix.os }}
+    # Debian runs in a container that drives the runner's Docker through its
+    # socket (the runner mounts it into job containers): HomeCloud then runs
+    # containerized, as in the official image. An empty value runs the job on
+    # the runner itself.
+    container: ${{ matrix.image }}
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Debian packages
+        if: matrix.image
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends ca-certificates curl python3 awscli >/dev/null
+      - name: Wait for the release assets
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/download/${HOMECLOUD_VERSION}/checksums.txt"
+          for i in $(seq 1 60); do
+            curl -fsSLI -o /dev/null "$url" && exit 0
+            echo "waiting for ${HOMECLOUD_VERSION} to be published ($i/60)"; sleep 30
+          done
+          echo "::error::release ${HOMECLOUD_VERSION} was not published within 30 minutes"; exit 1
+      - name: Install with scripts/install.sh
+        shell: bash
+        run: |
+          sh scripts/install.sh
+          command -v homecloud
+      - name: homecloud version
+        run: homecloud version
+      - name: Start HomeCloud
+        if: matrix.serve
+        shell: bash
+        run: |
+          nohup homecloud serve > serve.log 2>&1 &
+          for i in $(seq 1 60); do curl -fsS localhost:8080/api/v1/health && break; sleep 2; done
+          curl -fsS localhost:8080/api/v1/health >/dev/null || { cat serve.log; exit 1; }
+          # Background components pull their images on first start.
+          for i in $(seq 1 90); do grep -q "s3: MinIO ready" serve.log && break; sleep 2; done
+          grep -q "s3: MinIO ready" serve.log || { cat serve.log; echo "::error::S3 (MinIO) not ready after 3 minutes"; exit 1; }
+      - name: Smoke test
+        if: matrix.smoke
+        run: ./scripts/smoke.sh
+      - name: AWS CLI
+        if: matrix.serve
+        shell: bash
+        run: |
+          eval "$(homecloud aws-env)"
+          # Debian's AWS CLI predates AWS_ENDPOINT_URL: pass the endpoint explicitly.
+          aws() { command aws --endpoint-url "$AWS_ENDPOINT_URL" "$@"; }
+          aws sts get-caller-identity
+          aws s3 mb s3://install-test
+          echo hello > hello.txt
+          aws s3 cp hello.txt s3://install-test/hello.txt
+          [ "$(aws s3 cp s3://install-test/hello.txt -)" = hello ]
+          aws s3 rb s3://install-test --force
+      - name: Server log
+        if: always() && matrix.serve
+        run: cat serve.log || true
+
+  image:
+    # The container image, run as the README says, with the smoke test driven
+    # from the host by the binary copied out of it.
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build the image
+        run: docker build -t homecloud:test --build-arg VERSION="${HOMECLOUD_VERSION:-test}" --build-arg COMMIT="$(git rev-parse --short HEAD)" .
+      - name: Run it
+        run: |
+          docker run -d --name homecloud -p 8080:8080 \
+            -v /var/run/docker.sock:/var/run/docker.sock -v homecloud-data:/data homecloud:test
+          for i in $(seq 1 60); do curl -fsS localhost:8080/api/v1/health && break; sleep 2; done
+          curl -fsS localhost:8080/api/v1/health >/dev/null || { docker logs homecloud; exit 1; }
+          for i in $(seq 1 90); do docker logs homecloud 2>&1 | grep -q "s3: MinIO ready" && break; sleep 2; done
+          docker logs homecloud 2>&1 | grep -q "s3: MinIO ready" || { docker logs homecloud; echo "::error::S3 (MinIO) not ready"; exit 1; }
+          docker logs homecloud 2>&1 | grep -q "first start: created account"
+          docker exec homecloud homecloud version
+          docker exec homecloud homecloud whoami
+      - name: CLI on the host
+        run: |
+          sudo docker cp homecloud:/usr/local/bin/homecloud /usr/local/bin/homecloud
+          mkdir -p ~/.homecloud
+          docker exec homecloud cat /data/credentials > ~/.homecloud/credentials
+          chmod 600 ~/.homecloud/credentials
+          homecloud whoami
+      - name: Smoke test
+        run: ./scripts/smoke.sh
+      - name: AWS CLI
+        run: |
+          eval "$(docker exec homecloud homecloud aws-env)"
+          aws sts get-caller-identity
+          aws s3 mb s3://image-test
+          aws s3 ls | grep -q image-test
+          aws s3 rb s3://image-test
+      - name: Server log
+        if: always()
+        run: docker logs homecloud || true
