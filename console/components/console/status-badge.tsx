@@ -1,16 +1,25 @@
-import { CheckCircle2, CircleDashed, Loader2, MinusCircle, XCircle, AlertTriangle, Circle } from "lucide-react"
-
 import { cn } from "@/lib/utils"
 
-type Tone = "success" | "warning" | "neutral" | "danger" | "info"
+export type Tone = "success" | "warning" | "neutral" | "danger" | "info"
 
-const TONES: Record<Tone, string> = {
-  success: "text-emerald-700 bg-emerald-50 ring-emerald-600/20 dark:text-emerald-300 dark:bg-emerald-500/10 dark:ring-emerald-400/20",
-  warning: "text-amber-700 bg-amber-50 ring-amber-600/20 dark:text-amber-300 dark:bg-amber-500/10 dark:ring-amber-400/20",
-  neutral: "text-slate-600 bg-slate-100 ring-slate-500/20 dark:text-slate-300 dark:bg-slate-500/15 dark:ring-slate-400/20",
-  danger: "text-red-700 bg-red-50 ring-red-600/20 dark:text-red-300 dark:bg-red-500/10 dark:ring-red-400/20",
-  info: "text-blue-700 bg-blue-50 ring-blue-600/20 dark:text-blue-300 dark:bg-blue-500/10 dark:ring-blue-400/20",
+/** Badge fills and text per tone, from the semantic tokens in globals.css. */
+export const TONES: Record<Tone, string> = {
+  success: "text-success bg-success-soft border-success/20",
+  warning: "text-warning bg-warning-soft border-warning/25",
+  neutral: "text-muted-foreground bg-muted border-border-strong",
+  danger: "text-danger bg-danger-soft border-danger/25",
+  info: "text-info bg-info-soft border-info/20",
 }
+
+/** Dot colors per tone (for inline dots without the pill). */
+export const DOTS: Record<Tone, string> = {
+  success: "bg-success",
+  warning: "bg-warning",
+  neutral: "bg-faint",
+  danger: "bg-danger",
+  info: "bg-info",
+}
+
 
 const STATUS_TONE: Record<string, Tone> = {
   running: "success",
@@ -92,26 +101,20 @@ export function statusTone(status: string): Tone {
   return STATUS_TONE[status.toLowerCase()] ?? "neutral"
 }
 
-function StatusIcon({ tone, spinning }: { tone: Tone; spinning: boolean }) {
-  const cls = "size-3.5 shrink-0"
-  if (spinning) return <Loader2 className={cn(cls, "animate-spin")} />
-  switch (tone) {
-    case "success":
-      return <CheckCircle2 className={cls} />
-    case "danger":
-      return <XCircle className={cls} />
-    case "warning":
-      return <AlertTriangle className={cls} />
-    case "info":
-      return <Circle className={cn(cls, "fill-current")} />
-    default:
-      return tone === "neutral" ? <MinusCircle className={cls} /> : <CircleDashed className={cls} />
-  }
+
+/** StatusDot is the colored state dot; transitional states pulse. */
+export function StatusDot({ tone, pulse, className }: { tone: Tone; pulse?: boolean; className?: string }) {
+  return (
+    <span className={cn("relative inline-flex size-1.5 shrink-0", className)} aria-hidden>
+      {pulse && <span className={cn("absolute inset-0 animate-ping rounded-full opacity-60", DOTS[tone])} />}
+      <span className={cn("relative inline-flex size-1.5 rounded-full", DOTS[tone], tone !== "neutral" && "shadow-[0_0_6px_currentColor]")} />
+    </span>
+  )
 }
 
 /**
- * StatusBadge renders a colored state pill: running=green, pending/stopping=amber,
- * stopped=gray, terminated=red. `tone` overrides the automatic mapping.
+ * StatusBadge renders a state pill with a dot: running=green, pending/stopping=amber
+ * (pulsing), stopped=gray, terminated/failed=red. `tone` overrides the mapping.
  */
 export function StatusBadge({ status, label, tone, className }: { status: string; label?: string; tone?: Tone; className?: string }) {
   const t = tone ?? statusTone(status)
@@ -119,12 +122,12 @@ export function StatusBadge({ status, label, tone, className }: { status: string
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
+        "inline-flex h-[22px] items-center gap-1.5 rounded-full border px-2 text-xs font-medium whitespace-nowrap",
         TONES[t],
         className,
       )}
     >
-      <StatusIcon tone={t} spinning={TRANSITIONAL.has(status.toLowerCase())} />
+      <StatusDot tone={t} pulse={TRANSITIONAL.has(status.toLowerCase())} />
       <span>{text}</span>
     </span>
   )

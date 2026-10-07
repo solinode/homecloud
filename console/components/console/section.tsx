@@ -22,17 +22,17 @@ export function Section({
   flush?: boolean
 }) {
   return (
-    <section className={cn("bg-card text-card-foreground rounded-lg border shadow-xs", className)}>
+    <section className={cn("bg-card text-card-foreground rounded-xl border shadow-xs", className)}>
       {(title || actions) && (
-        <header className="flex flex-col gap-2 border-b px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <header className="flex flex-col gap-2 border-b px-5 py-3.5 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
-            {title && <h2 className="text-base font-semibold">{title}</h2>}
-            {description && <p className="text-muted-foreground mt-0.5 text-sm">{description}</p>}
+            {title && <h2 className="text-[15px] font-semibold tracking-[-0.015em]">{title}</h2>}
+            {description && <p className="text-muted-foreground mt-0.5 text-[13px]">{description}</p>}
           </div>
           {actions && <div className="flex shrink-0 flex-wrap items-center gap-2">{actions}</div>}
         </header>
       )}
-      <div className={cn(!flush && "p-4", bodyClassName)}>{children}</div>
+      <div className={cn(!flush && "p-5", bodyClassName)}>{children}</div>
     </section>
   )
 }

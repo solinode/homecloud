@@ -23,9 +23,9 @@ export function Field({
 }) {
   return (
     <div className={cn("flex flex-col gap-1.5", className)}>
-      <Label htmlFor={htmlFor} className="text-sm font-medium">
+      <Label htmlFor={htmlFor} className="text-[13px] font-medium">
         {label}
-        {optional && <span className="text-muted-foreground font-normal"> - optional</span>}
+        {optional && <span className="text-faint ml-1.5 text-xs font-normal">optional</span>}
       </Label>
       {children}
       {error ? <p className="text-destructive text-xs">{error}</p> : help ? <p className="text-muted-foreground text-xs">{help}</p> : null}

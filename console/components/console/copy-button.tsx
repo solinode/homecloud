@@ -56,7 +56,7 @@ export function CopyButton({
   if (size === "sm") {
     return (
       <Button type="button" variant="outline" size="sm" onClick={onClick} className={className}>
-        <Icon className={cn(done && "text-emerald-600")} />
+        <Icon className={cn(done && "text-success")} />
         {label ?? "Copy"}
       </Button>
     )
@@ -69,11 +69,11 @@ export function CopyButton({
           onClick={onClick}
           aria-label={label ?? "Copy"}
           className={cn(
-            "text-muted-foreground hover:text-foreground hover:bg-accent inline-flex size-6 shrink-0 items-center justify-center rounded transition-colors",
+            "text-faint hover:text-foreground hover:bg-accent inline-flex size-6 shrink-0 items-center justify-center rounded-md transition-colors",
             className,
           )}
         >
-          <Icon className={cn("size-3.5", done && "text-emerald-600")} />
+          <Icon className={cn("size-3.5", done && "text-success")} />
         </button>
       </TooltipTrigger>
       <TooltipContent>{done ? "Copied" : (label ?? "Copy")}</TooltipContent>
