@@ -218,7 +218,7 @@ func TestAWSInstanceLifecycle(t *testing.T) {
 	// Creation returns immediately in the creating state, with no endpoint yet.
 	// The engine's own port is accepted for a private database (Terraform's rds module sends it).
 	c := h.AWSJSON(t, "rds", "create-db-instance", "--db-instance-identifier", "Orders", "--db-instance-class", "db.t3.micro", "--engine", "postgres",
-		"--engine-version", "17", "--allocated-storage", "20", "--master-username", "app", "--manage-master-user-password", "--db-name", "shop", "--port", "5432",
+		"--engine-version", "17", "--allocated-storage", "20", "--master-username", "app", "--manage-master-user-password", "--db-name", "shop", "--port", "5432", "--preferred-maintenance-window", "Mon:00:00-Mon:03:00",
 		"--db-subnet-group-name", "apps", "--db-parameter-group-name", "pg17", "--vpc-security-group-ids", sg,
 		"--backup-retention-period", "0", "--tags", "Key=env,Value=qa")["DBInstance"].(map[string]any)
 	if c["DBInstanceIdentifier"] != "orders" || c["DBInstanceStatus"] != "creating" || c["Endpoint"] != nil || c["Engine"] != "postgres" {
@@ -251,6 +251,9 @@ func TestAWSInstanceLifecycle(t *testing.T) {
 
 	d := waitStatus(t, h, "orders", "available")
 	ep := d["Endpoint"].(map[string]any)
+	if d["PreferredMaintenanceWindow"] != "mon:00:00-mon:03:00" { // AWS lower-cases it
+		t.Fatalf("maintenance window %v", d["PreferredMaintenanceWindow"])
+	}
 	if ep["Port"].(float64) != 5432 || !strings.HasSuffix(str(ep, "Address"), ".internal") {
 		t.Fatalf("endpoint: %v", ep)
 	}

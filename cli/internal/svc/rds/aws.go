@@ -271,6 +271,11 @@ func settingsIn(q *awsapi.Req) map[string]string {
 			m[out] = q.Param(in)
 		}
 	}
+	// AWS reports maintenance windows in lower case ("mon:00:00-mon:03:00"),
+	// whatever case they were given in; Terraform compares with that.
+	if w, ok := m["PreferredMaintenanceWindow"]; ok {
+		m["PreferredMaintenanceWindow"] = strings.ToLower(w)
+	}
 	return m
 }
 
