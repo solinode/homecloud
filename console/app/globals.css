@@ -46,6 +46,7 @@
   --brand: #f06418;
   --brand-soft: rgba(240, 100, 24, 0.09);
   --brand-line: rgba(240, 100, 24, 0.3);
+  --brand-foreground: #160903;
   --primary: #b8400a;
   --primary-foreground: #ffffff;
 
@@ -69,6 +70,16 @@
   --code-bg: #0d0d10;
   --code-fg: #e4e4e7;
   --code-line: rgba(255, 255, 255, 0.08);
+  /* code/terminal palette: always on the dark code surface, in both themes */
+  --code-muted: #9a9aa4;
+  --code-comment: #7d8590;
+  --code-prompt: #ff9a5c;
+  --code-red: #ff7b72;
+  --code-green: #7ee787;
+  --code-yellow: #e3b341;
+  --code-blue: #79c0ff;
+  --code-violet: #d2a8ff;
+  --code-selection: #3f3f46;
 
   --glow: rgba(255, 120, 40, 0.16);
   --shadow-xs-v: 0 1px 2px rgba(10, 10, 20, 0.04);
@@ -163,6 +174,7 @@
   --color-brand: var(--brand);
   --color-brand-soft: var(--brand-soft);
   --color-brand-line: var(--brand-line);
+  --color-brand-foreground: var(--brand-foreground);
   --color-success: var(--success);
   --color-success-soft: var(--success-soft);
   --color-warning: var(--warning);
@@ -180,6 +192,15 @@
   --color-code: var(--code-bg);
   --color-code-foreground: var(--code-fg);
   --color-code-line: var(--code-line);
+  --color-code-muted: var(--code-muted);
+  --color-code-comment: var(--code-comment);
+  --color-code-prompt: var(--code-prompt);
+  --color-code-red: var(--code-red);
+  --color-code-green: var(--code-green);
+  --color-code-yellow: var(--code-yellow);
+  --color-code-blue: var(--code-blue);
+  --color-code-violet: var(--code-violet);
+  --color-violet: var(--chart-4);
 
   --radius-xs: calc(var(--radius) - 6px);
   --radius-sm: calc(var(--radius) - 4px);

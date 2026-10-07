@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
+import Link from "next/link"
 import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, RefreshCw, Rows2, Rows3, Search, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -446,4 +447,65 @@ function useDensity(): ["comfortable" | "compact", () => void] {
 /** cellLinkClass styles a resource link inside a table cell. */
 export function cellLinkClass() {
   return "text-primary font-medium underline-offset-2 hover:underline"
+}
+
+/**
+ * CellLink is the name/ID link of a table row: one line, truncated with the
+ * full value in a tooltip, mono for IDs/ARNs. Clicks don't toggle selection.
+ */
+export function CellLink({
+  href,
+  children,
+  title,
+  mono,
+  max = "22rem",
+  className,
+}: {
+  href: string
+  children: ReactNode
+  title?: string
+  mono?: boolean
+  /** max width before truncating (CSS length) */
+  max?: string
+  className?: string
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={(e) => e.stopPropagation()}
+      title={title ?? (typeof children === "string" ? children : undefined)}
+      style={{ maxWidth: max }}
+      className={cn(cellLinkClass(), "block truncate whitespace-nowrap", mono && "font-mono text-[13px]", className)}
+    >
+      {children}
+    </Link>
+  )
+}
+
+/** CellText is a one-line, truncated table value with the full text as a tooltip. */
+export function CellText({
+  children,
+  title,
+  mono,
+  muted,
+  max = "22rem",
+  className,
+}: {
+  children: ReactNode
+  title?: string
+  mono?: boolean
+  muted?: boolean
+  max?: string
+  className?: string
+}) {
+  if (children === null || children === undefined || children === "") return <span className="text-muted-foreground">-</span>
+  return (
+    <span
+      title={title ?? (typeof children === "string" ? children : undefined)}
+      style={{ maxWidth: max }}
+      className={cn("block truncate whitespace-nowrap", mono && "font-mono text-[13px]", muted && "text-muted-foreground", className)}
+    >
+      {children}
+    </span>
+  )
 }

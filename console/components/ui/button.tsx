@@ -17,7 +17,7 @@ const buttonVariants = cva(
         default:
           "bg-foreground text-background shadow-[inset_0_1px_0_rgb(255_255_255/0.18),0_1px_2px_rgb(0_0_0/0.2)] hover:bg-foreground/88",
         brand:
-          "bg-brand text-[#160903] shadow-[inset_0_1px_0_rgb(255_255_255/0.25),0_6px_16px_-6px_var(--glow)] hover:bg-brand/90",
+          "bg-brand text-brand-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.25),0_6px_16px_-6px_var(--glow)] hover:bg-brand/90",
         destructive:
           "bg-destructive text-white shadow-xs hover:bg-destructive/90 focus-visible:ring-destructive/40",
         outline:
