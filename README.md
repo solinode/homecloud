@@ -28,6 +28,10 @@ Built for **developers who want a real AWS-compatible target for local developme
 #### Support partners
 
 <p align="center">
+  <img src="https://upload.wikimedia.org/wikipedia/commons/6/66/Ministry_of_Commerce_and_Industry.svg" alt="Ministry of Commerce and Industry, Government of India" height="80"/>
+</p>
+
+<p align="center">
   <a href="https://tailscale.com/"><img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" alt="Tailscale" height="70"/></a>
 </p>
 
