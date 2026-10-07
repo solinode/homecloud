@@ -63,6 +63,31 @@ func vmDataDisks(i Instance) []VolumeAttachment {
 	return out
 }
 
+// vmExtraVolumes names and places the extra volumes of a VM launch: each is a
+// virtio disk known by its EBS device (/dev/sdf, /dev/sdg, ... when the caller
+// names none) and mounted in the VM container under /disks by volume ID. A
+// mount path given by the caller is replaced: one at /vm would be taken for
+// the root disk, whose qcow2 QEMU trusts.
+func vmExtraVolumes(vols []VolumeSpec) ([]VolumeSpec, error) {
+	out := make([]VolumeSpec, len(vols))
+	seen := map[string]bool{}
+	for n, v := range vols {
+		if v.Device == "" {
+			v.Device = fmt.Sprintf("/dev/sd%c", 'f'+n)
+		}
+		if !deviceRE.MatchString(v.Device) || v.Device == "/dev/xvda" || v.Device == "/dev/sda1" || v.Device == "/dev/sda" {
+			return nil, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "Value (%s) for parameter device is invalid for an extra volume of a VM instance.", v.Device)
+		}
+		if seen[v.Device] {
+			return nil, core.Errf(http.StatusBadRequest, "InvalidParameterValue", "Attachment point %s is listed twice", v.Device)
+		}
+		seen[v.Device] = true
+		v.MountPath = devicePath(v.Device)
+		out[n] = v
+	}
+	return out, nil
+}
+
 // vmFlatten copies the Docker volume src into the empty volume dst: a root
 // volume becomes a standalone qcow2, any other volume is copied as it is.
 func (s *Service) vmFlatten(ctx context.Context, src, dst string) error {
@@ -70,15 +95,24 @@ func (s *Service) vmFlatten(ctx context.Context, src, dst string) error {
 	if err != nil {
 		return err
 	}
-	_, err = s.env.Docker.RunOnce(ctx, runtime.RunSpec{
+	_, err = s.env.Docker.RunOnce(ctx, vmFlattenSpec(runner, src, s.vmImageVolume(), dst))
+	return err
+}
+
+// vmFlattenSpec is the helper container of vmFlatten. It reads disks that
+// someone other than HomeCloud may have written (hc-vm-checkdisk vets them),
+// so it gets no network: qemu-img must never be able to reach the host's
+// services or the provider's metadata service on anyone's behalf.
+func vmFlattenSpec(runner, src, images, dst string) runtime.RunSpec {
+	return runtime.RunSpec{
 		Image: runner, Entrypoint: []string{"/usr/local/bin/hc-vm-flatten"}, Cmd: []string{"/src", "/dst"},
+		Network: "none",
 		Mounts: []runtime.Mount{
 			{Volume: src, Target: "/src", ReadOnly: true},
-			{Volume: s.vmImageVolume(), Target: vm.ImagesDir, ReadOnly: true},
+			{Volume: images, Target: vm.ImagesDir, ReadOnly: true},
 			{Volume: dst, Target: "/dst"},
 		},
-	})
-	return err
+	}
 }
 
 // snapshotCopy fills a snapshot's volume from a volume.

@@ -97,6 +97,9 @@ type RunSpec struct {
 	Devices     []string // host devices passed through (e.g. /dev/kvm)
 	SecurityOpt []string // e.g. seccomp=unconfined
 	NoFile      int64    // raise the open-file limit (soft and hard) to this; 0 keeps the default
+	// LogMaxBytes caps what Docker keeps of the container's output (json-file,
+	// rotated over two files); 0 keeps the daemon's logging configuration.
+	LogMaxBytes int64
 	Start       bool
 }
 
@@ -163,6 +166,10 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 	}
 	hc.CapAdd = s.CapAdd
 	hc.SecurityOpt = s.SecurityOpt
+	if s.LogMaxBytes > 0 {
+		hc.LogConfig = docker.LogConfig{Type: "json-file", Config: map[string]string{
+			"max-size": strconv.FormatInt(max(1, s.LogMaxBytes/2/1024), 10) + "k", "max-file": "2"}}
+	}
 	if s.NoFile > 0 {
 		hc.Ulimits = []docker.ULimit{{Name: "nofile", Soft: s.NoFile, Hard: s.NoFile}}
 	}

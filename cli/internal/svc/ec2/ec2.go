@@ -502,6 +502,9 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 		if vmPlan, err = s.planVM(in, img); err != nil {
 			return nil, err
 		}
+		if in.Volumes, err = vmExtraVolumes(in.Volumes); err != nil {
+			return nil, err
+		}
 	}
 	var key KeyPair
 	if in.KeyName != "" {
@@ -605,11 +608,6 @@ func (s *Service) Launch(in RunInput) ([]Instance, error) {
 		vols := in.Volumes
 		if img.IsVM() {
 			inst.Virtualization, inst.VMBase, inst.VMUser, inst.VMDiskGB, inst.VMAMI = vmPlan.virtualization, img.VMBase, vmPlan.user, vmPlan.diskGB, vmPlan.ami
-			for n := range vols { // extra volumes: name their EBS device when the caller did not
-				if vols[n].Device == "" {
-					vols[n].Device = fmt.Sprintf("/dev/sd%c", 'f'+n)
-				}
-			}
 			inst.ImageRef = "" // a VM image has no Docker image
 			vols = append([]VolumeSpec{vmPlan.root}, vols...)
 		}

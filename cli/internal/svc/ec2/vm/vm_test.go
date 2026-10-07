@@ -36,6 +36,7 @@ func TestQEMUAArch64Emulated(t *testing.T) {
 		"-device virtserialport,bus=vser0.0,chardev=qga0,name=org.qemu.guest_agent.0",
 		"-qmp unix:/run/qmp.sock,server=on,wait=off",
 		"-nodefaults",
+		"-sandbox on,obsolete=deny,elevateprivileges=deny,spawn=deny,resourcecontrol=deny",
 	} {
 		if !strings.Contains(s, want) {
 			t.Errorf("command line lacks %q:\n%s", want, s)

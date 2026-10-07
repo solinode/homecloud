@@ -37,6 +37,33 @@ func qgaSlot(cid string) chan struct{} {
 
 var errGuestAgent = errors.New("qemu-guest-agent in the guest is not connected (it did not answer the handshake)")
 
+// qgaMaxReply bounds one line from the guest agent. The guest controls the
+// channel: whatever runs as root in it can stand in for the agent and send a
+// line that never ends, and the CloudWatch collector talks to every running
+// guest. qemu-guest-agent caps a command's captured output at 16 MiB per
+// stream; run-command output of more than about 12 MiB fails instead.
+const qgaMaxReply = 16 << 20
+
+var errQGAReplyTooLarge = fmt.Errorf("the guest agent's reply exceeded %d MiB (a command's output is limited to about 12 MiB)", qgaMaxReply>>20)
+
+// readLine reads up to and including the next '\n', failing with
+// errQGAReplyTooLarge rather than holding more than max bytes. A line cut
+// short by EOF is returned with the error.
+func readLine(br *bufio.Reader, max int) ([]byte, error) {
+	var line []byte
+	for {
+		chunk, err := br.ReadSlice('\n')
+		if len(line)+len(chunk) > max {
+			return nil, errQGAReplyTooLarge
+		}
+		line = append(line, chunk...)
+		if err == bufio.ErrBufferFull {
+			continue
+		}
+		return line, err
+	}
+}
+
 // qgaCall sends one command to the guest agent and returns its reply. ctx
 // bounds the whole call, including waiting for the agent and for other callers.
 func (s *Service) qgaCall(ctx context.Context, cid string, req []byte) (vm.QGAReply, error) {
@@ -74,11 +101,16 @@ func (s *Service) qgaCall(ctx context.Context, cid string, req []byte) (vm.QGARe
 		}
 	}()
 	lines := make(chan []byte, 16)
+	tooLong := make(chan struct{})
 	go func() {
 		defer close(lines)
 		br := bufio.NewReader(outR)
 		for {
-			l, err := br.ReadBytes('\n')
+			l, err := readLine(br, qgaMaxReply)
+			if errors.Is(err, errQGAReplyTooLarge) {
+				close(tooLong)
+				return
+			}
 			if len(l) > 0 {
 				select {
 				case lines <- l:
@@ -107,8 +139,15 @@ func (s *Service) qgaCall(ctx context.Context, cid string, req []byte) (vm.QGARe
 			if !synced {
 				write(vm.QGASync(syncID))
 			}
+		case <-tooLong:
+			return vm.QGAReply{}, errQGAReplyTooLarge
 		case l, ok := <-lines:
 			if !ok {
+				select {
+				case <-tooLong:
+					return vm.QGAReply{}, errQGAReplyTooLarge
+				default:
+				}
 				return vm.QGAReply{}, errors.New("the connection to the guest agent closed")
 			}
 			r, ok := vm.ParseQGAReply(l)
