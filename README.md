@@ -9,6 +9,7 @@
   <a href="https://homecloud.pages.dev/demo/"><b>Live demo</b></a> ·
   <a href="#-quick-start"><b>Quick start</b></a> ·
   <a href="docs/aws-compat.md"><b>AWS compatibility</b></a> ·
+  <a href="docs/compatibility.md"><b>Terraform modules</b></a> ·
   <a href="docs/architecture.md"><b>Architecture</b></a> ·
   <a href="https://discord.gg/pemra9uaC9"><b>Discord</b></a>
 </p>
@@ -186,7 +187,9 @@ aws s3 ls
 aws lambda invoke --function-name hello out.json
 ```
 
-See [docs/aws-compat.md](docs/aws-compat.md) for the supported services and operations.
+See [docs/aws-compat.md](docs/aws-compat.md) for the supported services and operations, and
+[docs/compatibility.md](docs/compatibility.md) for which popular community Terraform modules
+(`terraform-aws-modules`) apply, re-plan clean and destroy against HomeCloud, tested nightly.
 
 ### Run it as a service, back it up, upgrade it
 

@@ -1,0 +1,320 @@
+{
+  "generated": "2026-10-07T15:58:59Z",
+  "tool": "OpenTofu v1.12.6",
+  "passed": 17,
+  "total": 17,
+  "scenarios": [
+    {
+      "scenario": "acm",
+      "modules": [
+        "route53@6.5.1",
+        "acm@6.3.1"
+      ],
+      "services": [
+        "acm",
+        "route53"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 92,
+      "notes": ""
+    },
+    {
+      "scenario": "apigateway-v2",
+      "modules": [
+        "lambda@8.9.0",
+        "apigateway-v2@6.1.1"
+      ],
+      "services": [
+        "apigateway",
+        "lambda",
+        "cognito",
+        "logs"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 51,
+      "notes": ""
+    },
+    {
+      "scenario": "cloudwatch",
+      "modules": [
+        "cloudwatch/log-group@5.7.3",
+        "cloudwatch/log-stream@5.7.3",
+        "cloudwatch/log-metric-filter@5.7.3",
+        "cloudwatch/metric-alarm@5.7.3",
+        "cloudwatch/metric-alarms-by-multiple-dimensions@5.7.3",
+        "cloudwatch/composite-alarm@5.7.3",
+        "cloudwatch/query-definition@5.7.3"
+      ],
+      "services": [
+        "cloudwatch",
+        "logs",
+        "sns"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 38,
+      "notes": ""
+    },
+    {
+      "scenario": "dynamodb-table",
+      "modules": [
+        "dynamodb-table@5.5.2"
+      ],
+      "services": [
+        "dynamodb"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 39,
+      "notes": ""
+    },
+    {
+      "scenario": "ecs-alb",
+      "modules": [
+        "alb@10.5.1",
+        "ecs@7.6.1"
+      ],
+      "services": [
+        "ecs",
+        "elbv2",
+        "ec2",
+        "iam",
+        "logs"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 110,
+      "notes": ""
+    },
+    {
+      "scenario": "eventbridge",
+      "modules": [
+        "eventbridge@4.3.2"
+      ],
+      "services": [
+        "events",
+        "scheduler",
+        "sqs",
+        "iam"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 147,
+      "notes": ""
+    },
+    {
+      "scenario": "iam",
+      "modules": [
+        "iam/iam-policy@6.8.2",
+        "iam/iam-role@6.8.2",
+        "iam/iam-user@6.8.2",
+        "iam/iam-group@6.8.2"
+      ],
+      "services": [
+        "iam",
+        "sts"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 33,
+      "notes": ""
+    },
+    {
+      "scenario": "kms",
+      "modules": [
+        "kms@4.2.2"
+      ],
+      "services": [
+        "kms",
+        "iam"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 43,
+      "notes": ""
+    },
+    {
+      "scenario": "lambda",
+      "modules": [
+        "lambda@8.9.0",
+        "lambda/alias@8.9.0"
+      ],
+      "services": [
+        "lambda",
+        "iam",
+        "sqs",
+        "logs"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 111,
+      "notes": ""
+    },
+    {
+      "scenario": "rds",
+      "modules": [
+        "security-group/postgresql@6.0.0",
+        "rds@7.2.2"
+      ],
+      "services": [
+        "rds",
+        "ec2",
+        "secretsmanager"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 195,
+      "notes": ""
+    },
+    {
+      "scenario": "route53",
+      "modules": [
+        "route53@6.5.1"
+      ],
+      "services": [
+        "route53",
+        "ec2"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 93,
+      "notes": ""
+    },
+    {
+      "scenario": "s3-bucket",
+      "modules": [
+        "s3-bucket@5.16.1"
+      ],
+      "services": [
+        "s3"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 91,
+      "notes": ""
+    },
+    {
+      "scenario": "secrets-manager",
+      "modules": [
+        "secrets-manager@2.2.0"
+      ],
+      "services": [
+        "secretsmanager",
+        "kms"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 28,
+      "notes": ""
+    },
+    {
+      "scenario": "security-group",
+      "modules": [
+        "security-group/http-80@6.0.0",
+        "security-group@6.0.0"
+      ],
+      "services": [
+        "ec2"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 41,
+      "notes": ""
+    },
+    {
+      "scenario": "sqs-sns",
+      "modules": [
+        "sqs@5.2.2",
+        "sns@7.2.0"
+      ],
+      "services": [
+        "sqs",
+        "sns"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 146,
+      "notes": ""
+    },
+    {
+      "scenario": "ssm-parameter",
+      "modules": [
+        "ssm-parameter@2.1.2"
+      ],
+      "services": [
+        "ssm",
+        "kms"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 31,
+      "notes": ""
+    },
+    {
+      "scenario": "vpc",
+      "modules": [
+        "vpc@6.7.3"
+      ],
+      "services": [
+        "ec2"
+      ],
+      "apply": "pass",
+      "check": "pass",
+      "idempotent": "pass",
+      "destroy": "pass",
+      "pass": true,
+      "seconds": 51,
+      "notes": ""
+    }
+  ]
+}

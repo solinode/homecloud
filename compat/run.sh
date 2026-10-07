@@ -65,17 +65,27 @@ start_server() {
     (cd "$ROOT" && make build >/dev/null) || { echo "build failed" >&2; exit 2; }
   fi
   DATA=$WORK/data
-  mkdir -p "$DATA"
-  local api s3 s3c dns
-  api=$(free_port) s3=$(free_port) s3c=$(free_port) dns=$(free_port)
-  "$bin" serve --data-dir "$DATA" --addr "127.0.0.1:$api" --s3-port "$s3" --s3-console-port "$s3c" \
-    --dns-port "$dns" >"$WORK/serve.log" 2>&1 &
-  SERVER_PID=$!
-  for _ in $(seq 1 90); do
-    curl -fsS "http://127.0.0.1:$api/api/v1/health" >/dev/null 2>&1 && break
-    kill -0 "$SERVER_PID" 2>/dev/null || { cat "$WORK/serve.log"; echo "server exited" >&2; exit 2; }
-    sleep 1
+  local api s3 s3c dns attempt
+  # HomeCloud refuses to start while another installation's containers are on the Docker host;
+  # wait for a short-lived one (another test run) to go away.
+  for attempt in $(seq 1 30); do
+    rm -rf "$DATA" && mkdir -p "$DATA"
+    api=$(free_port) s3=$(free_port) s3c=$(free_port) dns=$(free_port)
+    "$bin" serve --data-dir "$DATA" --addr "127.0.0.1:$api" --s3-port "$s3" --s3-console-port "$s3c" \
+      --dns-port "$dns" >"$WORK/serve.log" 2>&1 &
+    SERVER_PID=$!
+    for _ in $(seq 1 90); do
+      curl -fsS "http://127.0.0.1:$api/api/v1/health" >/dev/null 2>&1 && break 2
+      kill -0 "$SERVER_PID" 2>/dev/null || break
+      sleep 1
+    done
+    wait "$SERVER_PID" 2>/dev/null
+    SERVER_PID=
+    grep -q "already runs HomeCloud account" "$WORK/serve.log" || { cat "$WORK/serve.log"; echo "server did not start" >&2; exit 2; }
+    echo "another HomeCloud is on this Docker host; retrying ($attempt)" >&2
+    sleep 10
   done
+  [ -n "$SERVER_PID" ] || { cat "$WORK/serve.log"; echo "server did not start" >&2; exit 2; }
   for _ in $(seq 1 180); do
     grep -q "s3: MinIO ready" "$WORK/serve.log" && break
     sleep 1

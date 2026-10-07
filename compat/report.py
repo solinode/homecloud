@@ -23,7 +23,8 @@ def meta(name):
     for f in sorted(glob.glob(os.path.join(suite, name, "*.tf"))):
         text = open(f).read()
         for m in re.finditer(r'source\s*=\s*"(terraform-aws-modules/[^"]+)"\s*\n\s*version\s*=\s*"([^"]+)"', text):
-            mod = f"{m.group(1).removeprefix('terraform-aws-modules/')}@{m.group(2)}"
+            short = m.group(1).removeprefix('terraform-aws-modules/').replace('/aws//modules/', '/').removesuffix('/aws')
+            mod = f"{short}@{m.group(2)}"
             if mod not in modules:
                 modules.append(mod)
         for m in re.finditer(r"^# services:\s*(.+)$", text, re.M):
@@ -36,6 +37,8 @@ try:
     prev = {r["scenario"]: r for r in json.load(open(path))["scenarios"]}
 except (OSError, ValueError, KeyError):
     prev = {}
+for r in prev.values():  # kept rows follow the scenario files as they are now
+    r["modules"], r["services"] = meta(r["scenario"])
 
 failed = False
 for line in open(tsv):
