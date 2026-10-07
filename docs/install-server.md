@@ -148,8 +148,16 @@ What to know:
 - **One installation per Docker host.** Like the binary, the container refuses to start when the host
   runs another installation's containers.
 - **Upgrade:** `docker pull ghcr.io/solinode/homecloud`, then recreate the container with the same
-  volume; data is migrated at start. `homecloud backup` works through `docker exec` (write the archive
-  under `/data` and `docker cp` it out).
+  volume; data is migrated at start.
+- **Backup and restore** ([section 10](#10-backups-and-restore)) stream through stdin and stdout. The
+  backup includes the Docker volumes (S3 objects, databases, registry):
+
+  ```bash
+  docker exec homecloud homecloud backup -o - > homecloud-backup.tar.gz
+  # restore into an empty data volume, with no HomeCloud running on the host:
+  docker run -i --rm -v /var/run/docker.sock:/var/run/docker.sock -v homecloud-data:/data \
+    ghcr.io/solinode/homecloud restore - < homecloud-backup.tar.gz
+  ```
 - The `homecloud service` and `homecloud upgrade` commands are for the binary; with the image, Docker's
   restart policy and image tags do their jobs.
 
