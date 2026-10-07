@@ -1,0 +1,45 @@
+name: Set up HomeCloud
+description: Run HomeCloud, a self-hosted AWS, in the job and point the AWS CLI, SDKs and Terraform at it.
+author: solinode
+branding:
+  icon: cloud
+  color: blue
+
+inputs:
+  version:
+    description: HomeCloud release to install, e.g. v0.3.0, or "latest".
+    required: false
+    default: latest
+  port:
+    description: Port the HomeCloud API listens on (127.0.0.1).
+    required: false
+    default: "8080"
+  services-wait:
+    description: >-
+      Services to wait for besides the API, comma or newline separated (s3, ecr, route53).
+      Services that run inside the HomeCloud process are ready as soon as the API is.
+    required: false
+    default: ""
+  wait-timeout:
+    description: Seconds to wait for the API and every service in services-wait.
+    required: false
+    default: "180"
+
+outputs:
+  endpoint:
+    description: The HomeCloud endpoint URL (also exported as AWS_ENDPOINT_URL).
+  access-key-id:
+    description: The root access key ID (also exported as AWS_ACCESS_KEY_ID).
+  region:
+    description: The region HomeCloud serves (also exported as AWS_REGION and AWS_DEFAULT_REGION).
+  log-file:
+    description: Path of the server log.
+
+# A JavaScript action rather than a composite one: only JavaScript (and Docker)
+# actions can declare a post step, which prints the server log when the job fails.
+# All the work happens in setup.sh; main.js and post.js only run it and print the log.
+runs:
+  using: node24
+  main: main.js
+  post: post.js
+  post-if: failure()
