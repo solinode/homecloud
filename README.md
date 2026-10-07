@@ -78,7 +78,7 @@ S3 starts in the background on first boot; if your tests use S3 right away, wait
 | --- | --- |
 | **AWS CLI v2** | Tested: the compatibility test suite drives the real `aws` CLI in CI |
 | **boto3** (Python SDK) | Tested: the compatibility test suite runs boto3 in CI, including Cognito SRP sign-in through pycognito |
-| **Terraform / OpenTofu** (`hashicorp/aws` provider) | Tested: Terraform tests in the suite (IAM, S3, Route 53, CloudFormation and more) run when `terraform` or `tofu` is installed, and [`examples/terraform/shop`](examples/terraform/shop/README.md) applies, re-plans clean and destroys on a fresh install |
+| **Terraform / OpenTofu** (`hashicorp/aws` provider) | Tested: opt-in Terraform tests in the suite (IAM, S3, Route 53, CloudFormation and more; `HC_TEST_TERRAFORM=1`), and [`examples/terraform/shop`](examples/terraform/shop/README.md) applies, re-plans clean and destroys on a fresh install |
 | **CloudFormation** (`aws cloudformation deploy`) | Tested: stacks, change sets and the boto3 waiters ([details](docs/aws-compat.md#cloudformation)) |
 | **AWS CDK** | Partly: CDK-synthesized templates deploy through CloudFormation change sets; `cdk bootstrap` / `cdk deploy` end to end is not yet verified |
 | **Other AWS SDKs** (JavaScript, Go, Java, …) and **Pulumi** | Expected to work (same protocols and SigV4), not yet covered by tests. Reports welcome |
