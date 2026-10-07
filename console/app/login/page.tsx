@@ -103,7 +103,7 @@ export default function LoginPage() {
             </p>
             <p>
               Forgot it? Run{" "}
-              <code className="bg-muted text-muted-foreground rounded border px-1.5 py-0.5 font-mono">homecloud serve --reset-root-password</code>
+              <code className="bg-muted text-muted-foreground inline-block rounded border px-1.5 py-0.5 font-mono text-[11px] whitespace-nowrap">homecloud serve --reset-root-password</code>
             </p>
           </div>
         </div>
