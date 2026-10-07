@@ -45,7 +45,9 @@ fi
 # A bind-mounted data directory may belong to someone else.
 data=${HOMECLOUD_DATA_DIR:-/data}
 mkdir -p "$data"
-if [ "$(stat -c %u "$data")" != "$(id -u "$user")" ]; then
+# Set HOMECLOUD_SKIP_CHOWN=1 to keep the owner of a bind-mounted host directory.
+if [ "${HOMECLOUD_SKIP_CHOWN:-}" != "1" ] && [ "$(stat -c %u "$data")" != "$(id -u "$user")" ]; then
+  echo "homecloud: giving $data to $user (uid $(id -u "$user")); set HOMECLOUD_SKIP_CHOWN=1 to skip" >&2
   chown -R "$user:$user" "$data"
 fi
 

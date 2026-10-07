@@ -154,9 +154,12 @@ What to know:
 
   ```bash
   docker exec homecloud homecloud backup -o - > homecloud-backup.tar.gz
-  # restore into an empty data volume, with no HomeCloud running on the host:
+  # restore with the HomeCloud container stopped; --force moves the existing
+  # data directory aside (to /data.before-restore-<time>) and replaces volumes:
+  docker stop homecloud
   docker run -i --rm -v /var/run/docker.sock:/var/run/docker.sock -v homecloud-data:/data \
-    ghcr.io/solinode/homecloud restore - < homecloud-backup.tar.gz
+    ghcr.io/solinode/homecloud restore --force - < homecloud-backup.tar.gz
+  docker start homecloud
   ```
 - The `homecloud service` and `homecloud upgrade` commands are for the binary; with the image, Docker's
   restart policy and image tags do their jobs.
