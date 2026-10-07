@@ -29,14 +29,17 @@ const (
 
 // Address is an Elastic IP allocation.
 type Address struct {
-	AllocationID  string    `json:"allocation_id"`
-	PublicIP      string    `json:"public_ip"`
-	Domain        string    `json:"domain"`
-	AssociationID string    `json:"association_id,omitempty"`
-	InstanceID    string    `json:"instance_id,omitempty"`
-	PrivateIP     string    `json:"private_ip,omitempty"`
-	CreatedAt     time.Time `json:"created_at"`
-	Tags          core.Tags `json:"tags,omitempty"`
+	AllocationID  string `json:"allocation_id"`
+	PublicIP      string `json:"public_ip"`
+	Domain        string `json:"domain"`
+	AssociationID string `json:"association_id,omitempty"`
+	InstanceID    string `json:"instance_id,omitempty"`
+	PrivateIP     string `json:"private_ip,omitempty"`
+	// NatGatewayID and ENI are set while a NAT gateway holds the address.
+	NatGatewayID string    `json:"nat_gateway_id,omitempty"`
+	ENI          string    `json:"eni,omitempty"`
+	CreatedAt    time.Time `json:"created_at"`
+	Tags         core.Tags `json:"tags,omitempty"`
 }
 
 var eipMu sync.Mutex
@@ -106,7 +109,7 @@ func (s *Service) ReleaseAddress(id string) error {
 		return err
 	}
 	if a.AssociationID != "" {
-		return core.Errf(http.StatusBadRequest, "InvalidIPAddress.InUse", "The address %s is associated with %s and cannot be released", a.PublicIP, a.InstanceID)
+		return core.Errf(http.StatusBadRequest, "InvalidIPAddress.InUse", "The address %s is associated with %s and cannot be released", a.PublicIP, a.InstanceID+a.NatGatewayID)
 	}
 	return store.Delete(s.env.Store, cAddresses, id)
 }
@@ -127,7 +130,7 @@ func (s *Service) AssociateAddress(id, instanceID string, reassociate bool) (Add
 	if a.InstanceID == i.ID {
 		return a, nil
 	}
-	if a.AssociationID != "" && !reassociate {
+	if a.AssociationID != "" && (!reassociate || a.NatGatewayID != "") {
 		return a, core.Errf(http.StatusBadRequest, "Resource.AlreadyAssociated", "resource %s is already associated with associate-id %s", id, a.AssociationID)
 	}
 	for _, o := range store.List[Address](s.env.Store, cAddresses) {
@@ -149,6 +152,9 @@ func (s *Service) DisassociateAddress(assocID string) (Address, error) {
 	a, ok := s.addressByAssociation(assocID)
 	if !ok {
 		return a, core.Errf(http.StatusBadRequest, "InvalidAssociationID.NotFound", "The association ID '%s' does not exist", assocID)
+	}
+	if a.NatGatewayID != "" {
+		return a, core.Errf(http.StatusBadRequest, "InvalidIPAddress.InUse", "The address %s is used by NAT gateway %s; delete the NAT gateway to free it", a.PublicIP, a.NatGatewayID)
 	}
 	a.AssociationID, a.InstanceID, a.PrivateIP = "", "", ""
 	return a, store.Put(s.env.Store, cAddresses, a.AllocationID, a)
@@ -186,6 +192,10 @@ func (s *Service) addressXML(a Address) map[string]any {
 	if a.InstanceID != "" {
 		m["instanceId"], m["associationId"] = a.InstanceID, a.AssociationID
 		m["networkInterfaceId"], m["networkInterfaceOwnerId"] = eniID(a.InstanceID), s.env.AccountID
+		m["privateIpAddress"] = a.PrivateIP
+	}
+	if a.NatGatewayID != "" {
+		m["associationId"], m["networkInterfaceId"], m["networkInterfaceOwnerId"] = a.AssociationID, a.ENI, s.env.AccountID
 		m["privateIpAddress"] = a.PrivateIP
 	}
 	return m
@@ -239,6 +249,9 @@ func (s *Service) awsDescribeAddresses(q *awsapi.Req) (any, error) {
 			set("private-ip-address", nonEmpty(a.PrivateIP)...).set("network-border-group", core.Region).tags(a.Tags)
 		if a.InstanceID != "" {
 			f.set("network-interface-id", eniID(a.InstanceID)).set("network-interface-owner-id", s.env.AccountID)
+		}
+		if a.NatGatewayID != "" {
+			f.set("network-interface-id", a.ENI).set("network-interface-owner-id", s.env.AccountID)
 		}
 		if match(fs, f) {
 			items = append(items, s.addressXML(a))

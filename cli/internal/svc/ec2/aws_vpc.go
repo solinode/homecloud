@@ -273,6 +273,9 @@ func (s *Service) awsDeleteSubnet(q *awsapi.Req) (any, error) {
 	if _, err := s.vpc.GetSubnet(id); err != nil {
 		return nil, subnetNotFound(id)
 	}
+	if nat := s.natGatewayIn(id); nat != "" {
+		return nil, core.Errf(http.StatusBadRequest, "DependencyViolation", "The subnet '%s' has dependencies and cannot be deleted (NAT gateway %s).", id, nat)
+	}
 	if err := s.vpc.DeleteSubnet(id); err != nil {
 		return nil, err
 	}

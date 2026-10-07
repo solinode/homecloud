@@ -73,6 +73,9 @@ func (s *Service) RegisterAWS() {
 		"AssociateAddress":                     s.awsAssociateAddress,
 		"DisassociateAddress":                  s.awsDisassociateAddress,
 		"ModifyNetworkInterfaceAttribute":      s.awsModifyNetworkInterfaceAttribute,
+		"CreateNatGateway":                     s.awsCreateNatGateway,
+		"DescribeNatGateways":                  s.awsDescribeNatGateways,
+		"DeleteNatGateway":                     s.awsDeleteNatGateway,
 	}
 	s.vpcOps(ops)
 	s.ltOps(ops)
@@ -1317,7 +1320,7 @@ func (s *Service) awsDeleteKeyPair(q *awsapi.Req) (any, error) {
 
 var resourceTypes = map[string]string{
 	"i": "instance", "vol": "volume", "vpc": "vpc", "subnet": "subnet", "sg": "security-group", "ami": "image",
-	"key": "key-pair", "snap": "snapshot", "igw": "internet-gateway", "rtb": "route-table", "lt": "launch-template", "eipalloc": "elastic-ip",
+	"key": "key-pair", "snap": "snapshot", "igw": "internet-gateway", "rtb": "route-table", "lt": "launch-template", "eipalloc": "elastic-ip", "nat": "natgateway",
 }
 
 func resourceType(id string) string {
@@ -1364,6 +1367,8 @@ func (s *Service) setTags(id string, fn func(t core.Tags)) error {
 		_, err = store.Update(s.env.Store, cAddresses, id, func(x *Address) error { plain(&x.Tags); return nil })
 	case "launch-template":
 		_, err = store.Update(s.env.Store, cLaunchTemplates, id, func(x *LaunchTemplate) error { plain(&x.Tags); return nil })
+	case "natgateway":
+		_, err = store.Update(s.env.Store, cNatGateways, id, func(x *NatGateway) error { plain(&x.Tags); return nil })
 	default:
 		return core.Errf(http.StatusBadRequest, "InvalidID", "The ID '%s' is not valid", id)
 	}
@@ -1468,6 +1473,9 @@ func (s *Service) allTagged() []tagRow {
 	}
 	for _, t := range store.List[LaunchTemplate](s.env.Store, cLaunchTemplates) {
 		out = append(out, tagRow{t.ID, t.Tags})
+	}
+	for _, g := range s.natGateways() {
+		out = append(out, tagRow{g.ID, g.Tags})
 	}
 	return out
 }
