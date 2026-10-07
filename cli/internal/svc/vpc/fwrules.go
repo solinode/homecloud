@@ -47,6 +47,7 @@ const (
 type fwView struct {
 	vpc       VPC
 	gateway   string
+	api       string // HomeCloud's own address when it runs in a container (APIAddress)
 	defaultSG string
 	sgs       map[string]SecurityGroup
 	ips       map[string][]string // group -> addresses of its members
@@ -124,6 +125,9 @@ func (f *fwView) ruleset(m Member) string {
 	add(chainIn, "-m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT")
 	for _, port := range m.ExternalTCP {
 		add(chainIn, fmt.Sprintf("-p tcp -m tcp --dport %d -s %s -j ACCEPT", port, f.gateway))
+		if f.api != "" { // HomeCloud dials it directly (a function's emulator)
+			add(chainIn, fmt.Sprintf("-p tcp -m tcp --dport %d -s %s -j ACCEPT", port, f.api))
+		}
 		add(chainIn, fmt.Sprintf("-p tcp -m tcp --dport %d ! -s %s -j ACCEPT", port, f.vpc.CIDR))
 	}
 	for _, id := range f.groups(m) {

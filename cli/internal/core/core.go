@@ -79,10 +79,19 @@ func DefaultDataDir() string {
 	return filepath.Join(home, ".homecloud")
 }
 
+// defaultAPIAddr is where the API listens unless configured: HOMECLOUD_ADDR
+// (the container image sets 0.0.0.0:8080), or loopback.
+func defaultAPIAddr() string {
+	if a := os.Getenv("HOMECLOUD_ADDR"); a != "" {
+		return a
+	}
+	return "127.0.0.1:8080"
+}
+
 func DefaultConfig() Config {
 	return Config{
 		DataDir:       DefaultDataDir(),
-		APIAddr:       "127.0.0.1:8080",
+		APIAddr:       defaultAPIAddr(),
 		PublicHost:    "localhost",
 		S3Port:        9500,
 		S3ConsolePort: 9501,

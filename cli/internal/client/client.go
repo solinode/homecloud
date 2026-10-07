@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -100,6 +101,7 @@ func New() (*Client, error) {
 	if err != nil {
 		return nil, err
 	}
+	p.Endpoint = containerEndpoint(p)
 	hc := &http.Client{Timeout: 10 * time.Minute}
 	if p.CAFile != "" {
 		pem, err := os.ReadFile(p.CAFile)
@@ -114,6 +116,29 @@ func New() (*Client, error) {
 		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{RootCAs: pool}}
 	}
 	return &Client{P: p, HTTP: hc}, nil
+}
+
+// containerEndpoint is the endpoint CLI commands call inside the HomeCloud
+// container image (`docker exec homecloud homecloud ...`): the server next to
+// them, on loopback, rather than the public URL the credentials file records
+// for other machines, which the container may not reach. HOMECLOUD_ENDPOINT
+// still wins, and an HTTPS endpoint is kept unless its certificate is the
+// generated self-signed one (which covers 127.0.0.1).
+func containerEndpoint(p Profile) string {
+	if os.Getenv("HOMECLOUD_IN_CONTAINER") != "1" || os.Getenv("HOMECLOUD_ENDPOINT") != "" {
+		return p.Endpoint
+	}
+	_, port, err := net.SplitHostPort(os.Getenv("HOMECLOUD_ADDR"))
+	if err != nil {
+		return p.Endpoint
+	}
+	switch {
+	case strings.HasPrefix(p.Endpoint, "http://"):
+		return "http://127.0.0.1:" + port
+	case strings.HasPrefix(p.Endpoint, "https://") && p.CAFile != "":
+		return "https://127.0.0.1:" + port
+	}
+	return p.Endpoint
 }
 
 // APIError mirrors the server's error body.

@@ -8,18 +8,23 @@ import (
 )
 
 func TestWorkloadListenAddr(t *testing.T) {
-	if a, ok := workloadListenAddr("linux", "172.17.0.1"); !ok || a != "172.17.0.1:0" {
+	if a, ok := workloadListenAddr("linux", "172.17.0.1", false); !ok || a != "172.17.0.1:0" {
 		t.Fatalf("linux: %q %v", a, ok)
 	}
 	// Without a bridge gateway there is no address that is safe to use on Linux;
 	// never fall back to a wildcard.
-	if a, ok := workloadListenAddr("linux", ""); ok {
+	if a, ok := workloadListenAddr("linux", "", false); ok {
 		t.Fatalf("linux without gateway: %q", a)
 	}
 	for _, goos := range []string{"darwin", "windows"} {
-		if a, ok := workloadListenAddr(goos, ""); !ok || a != "127.0.0.1:0" {
+		if a, ok := workloadListenAddr(goos, "", false); !ok || a != "127.0.0.1:0" {
 			t.Fatalf("%s: %q %v", goos, a, ok)
 		}
+	}
+	// In a container only the API port is published: listen on every address of
+	// the container, where the workloads' networks reach it.
+	if a, ok := workloadListenAddr("linux", "172.17.0.1", true); !ok || a != ":0" {
+		t.Fatalf("containerized: %q %v", a, ok)
 	}
 }
 

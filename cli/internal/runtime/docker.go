@@ -12,6 +12,7 @@ import (
 	"io"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	docker "github.com/fsouza/go-dockerclient"
@@ -20,6 +21,9 @@ import (
 
 type Docker struct {
 	C *docker.Client
+
+	self   string     // the container HomeCloud runs in (self.go), "" on the host
+	selfMu sync.Mutex // serializes attaching it to networks
 }
 
 func New() (*Docker, error) {
@@ -30,7 +34,7 @@ func New() (*Docker, error) {
 	if err := c.Ping(); err != nil {
 		return nil, fmt.Errorf("docker is not reachable (is it running?): %w", err)
 	}
-	return &Docker{C: c}, nil
+	return &Docker{C: c, self: detectSelf(c)}, nil
 }
 
 // Account is stamped on every managed object so two installations never share a Docker host by accident.
@@ -99,7 +103,10 @@ type RunSpec struct {
 
 // HostAlias makes the Docker host reachable from containers as host.docker.internal
 // (built in on Docker Desktop and OrbStack; mapped to the bridge gateway on Linux).
-const HostAlias = "host.docker.internal:host-gateway"
+const HostAlias = HostAliasName + ":host-gateway"
+
+// HostAliasName is the name workloads reach HomeCloud by.
+const HostAliasName = "host.docker.internal"
 
 // BridgeGateway returns the Docker host's address on the default bridge (Linux),
 // which containers reach through host.docker.internal.
@@ -149,7 +156,7 @@ func (d *Docker) Run(ctx context.Context, s RunSpec) (string, error) {
 	}
 	hc := &docker.HostConfig{
 		DNS:          s.DNS,
-		ExtraHosts:   s.ExtraHosts,
+		ExtraHosts:   d.hostAlias(s.Network, s.ExtraHosts),
 		Memory:       s.MemoryMB * 1024 * 1024,
 		PortBindings: bindings,
 		Mounts:       mounts,

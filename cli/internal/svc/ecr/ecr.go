@@ -59,7 +59,11 @@ func New(env *svc.Env) *Service {
 	return &Service{env: env, http: &http.Client{Timeout: 30 * time.Second}, status: "starting"}
 }
 
-func (s *Service) base() string { return fmt.Sprintf("http://127.0.0.1:%d/v2/", s.env.Cfg.ECRPort) }
+// base is the registry API as HomeCloud reaches it: the loopback port, or the
+// container itself when HomeCloud runs in a container.
+func (s *Service) base() string {
+	return "http://" + s.env.Docker.DialAddr(containerName, 5000, fmt.Sprintf("127.0.0.1:%d", s.env.Cfg.ECRPort)) + "/v2/"
+}
 
 // Host is the registry address images are tagged with.
 func (s *Service) Host() string { return fmt.Sprintf("localhost:%d", s.env.Cfg.ECRPort) }
