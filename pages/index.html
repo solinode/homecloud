@@ -1,21 +1,32 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>HomeCloud — your own AWS, on your hardware</title>
-<meta name="description" content="HomeCloud is an open-source, self-hosted cloud. One binary runs 30 AWS-style services on your hardware, and the AWS CLI, SDKs and Terraform work against it unchanged.">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HomeCloud: an AWS-compatible cloud you run yourself</title>
+<meta name="description" content="HomeCloud is an open-source, self-hosted cloud that speaks the AWS APIs. Point Terraform, the AWS CLI and the SDKs at it; Lambda, RDS, EC2 and about 30 other services run as real containers and VMs on your own machine.">
 <link rel="canonical" href="https://homecloud.pages.dev/">
 <meta property="og:type" content="website">
+<meta property="og:site_name" content="HomeCloud">
 <meta property="og:url" content="https://homecloud.pages.dev/">
-<meta property="og:title" content="HomeCloud: your own AWS, on your hardware">
-<meta property="og:description" content="30 AWS-style services from one binary. The AWS CLI, SDKs and Terraform work unchanged.">
-<meta name="twitter:card" content="summary">
-<meta name="theme-color" content="#030507">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23030507'/%3E%3Cpath d='M9 21a5 5 0 0 1 .6-10A7 7 0 0 1 23 12a4.5 4.5 0 0 1 0 9z' fill='%2300ffa3'/%3E%3C/svg%3E">
+<meta property="og:title" content="HomeCloud: an AWS-compatible cloud you run yourself">
+<meta property="og:description" content="Point Terraform, the AWS CLI and the SDKs at it. Lambda, RDS, EC2 and about 30 other services run as real containers and VMs on your machine. One binary, AGPL-3.0.">
+<meta property="og:image" content="https://homecloud.pages.dev/images/og.png">
+<meta property="og:image:width" content="2160">
+<meta property="og:image:height" content="1350">
+<meta property="og:image:alt" content="The HomeCloud web console home page, listing EC2, Lambda, S3, RDS and other services with their resource counts.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="HomeCloud: an AWS-compatible cloud you run yourself">
+<meta name="twitter:description" content="Point Terraform, the AWS CLI and the SDKs at it. Real containers and VMs on your own machine.">
+<meta name="twitter:image" content="https://homecloud.pages.dev/images/og.png">
+<meta name="theme-color" content="#fbfbf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#111113" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<script>try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/site.css">
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-SW07QRM18M"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -23,556 +34,336 @@
   gtag('js', new Date());
   gtag('config', 'G-SW07QRM18M');
 </script>
-<style>
-  :root {
-    --bg: #030507;
-    --panel: rgba(12, 18, 24, .72);
-    --line: rgba(0, 255, 163, .14);
-    --line-2: rgba(255, 255, 255, .07);
-    --text: #e9f5ef;
-    --muted: #7d8f88;
-    --a: #00ffa3;
-    --b: #00d1ff;
-    --c: #b36bff;
-    --mono: "JetBrains Mono", ui-monospace, Menlo, monospace;
-    --sans: "Space Grotesk", system-ui, -apple-system, Segoe UI, sans-serif;
-  }
-  * { box-sizing: border-box; }
-  html { scroll-behavior: smooth; }
-  body { margin: 0; background: var(--bg); color: var(--text); font: 16px/1.6 var(--sans); overflow-x: hidden; -webkit-font-smoothing: antialiased; }
-  ::selection { background: var(--a); color: #000; }
-  a { color: inherit; }
-  code, pre, .mono { font-family: var(--mono); }
-  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px; position: relative; }
-
-  #field { position: fixed; inset: 0; width: 100%; height: 100%; z-index: 0; pointer-events: none; }
-  .noise { position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: .05; mix-blend-mode: overlay;
-    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E"); }
-  .scan { position: fixed; inset: 0; z-index: 1; pointer-events: none; opacity: .5;
-    background: repeating-linear-gradient(to bottom, transparent 0 3px, rgba(0,0,0,.18) 3px 4px); }
-  #glow { position: fixed; z-index: 1; width: 520px; height: 520px; margin: -260px 0 0 -260px; border-radius: 50%; pointer-events: none;
-    background: radial-gradient(circle, rgba(0,255,163,.10), transparent 60%); left: 50%; top: 30%; }
-  main, nav, footer { position: relative; z-index: 2; }
-
-  nav { position: sticky; top: 0; z-index: 20; backdrop-filter: blur(14px) saturate(140%); background: rgba(3,5,7,.55); border-bottom: 1px solid var(--line-2); }
-  nav .wrap { display: flex; align-items: center; justify-content: space-between; height: 64px; }
-  .brand { display: flex; align-items: center; gap: 10px; font-weight: 700; text-decoration: none; letter-spacing: -.01em; font-size: 18px; }
-  .brand .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--a); box-shadow: 0 0 12px var(--a), 0 0 24px var(--a); animation: pulse 2s infinite; }
-  @keyframes pulse { 50% { opacity: .35; } }
-  .navlinks { display: flex; align-items: center; gap: 26px; font: 500 13px var(--mono); text-transform: uppercase; letter-spacing: .08em; }
-  .navlinks a { text-decoration: none; color: var(--muted); transition: color .2s; }
-  .navlinks a:hover { color: var(--a); }
-  .status { font: 500 12px var(--mono); color: var(--a); }
-
-  .btn { position: relative; display: inline-flex; align-items: center; gap: 10px; padding: 14px 22px; border-radius: 12px; font: 600 15px var(--sans); text-decoration: none; cursor: pointer; border: 1px solid var(--line); background: rgba(0,255,163,.04); color: var(--text); transition: transform .2s, border-color .2s, box-shadow .2s; will-change: transform; }
-  .btn:hover { border-color: var(--a); box-shadow: 0 0 0 1px var(--a) inset, 0 0 32px -6px var(--a); }
-  .btn.solid { background: linear-gradient(135deg, var(--a), var(--b)); color: #001a10; border: 0; box-shadow: 0 10px 40px -10px rgba(0,255,163,.6); }
-  .btn.solid:hover { box-shadow: 0 14px 50px -8px rgba(0,255,163,.85); }
-  .btn svg { width: 17px; height: 17px; }
-  .btn.demo { padding: 14px 26px; }
-  .btn.demo .live { width: 9px; height: 9px; border-radius: 50%; background: #001a10; box-shadow: 0 0 0 0 rgba(0,26,16,.55); animation: livepulse 1.8s infinite; }
-  @keyframes livepulse { 70% { box-shadow: 0 0 0 9px rgba(0,26,16,0); } 100% { box-shadow: 0 0 0 0 rgba(0,26,16,0); } }
-  .navlinks .btn { text-transform: none; letter-spacing: 0; color: var(--text); padding: 9px 14px; font-size: 13px; border-radius: 10px; }
-
-  .hero { min-height: calc(100vh - 64px); display: flex; align-items: center; padding: 60px 0 80px; }
-  .hero .wrap { display: grid; grid-template-columns: 1.1fr .9fr; gap: 56px; align-items: center; }
-  .hero .wrap > * { min-width: 0; }
-  .kicker { display: inline-flex; align-items: center; gap: 10px; font: 500 12px var(--mono); letter-spacing: .12em; text-transform: uppercase; color: var(--a); padding: 7px 12px; border: 1px solid var(--line); border-radius: 999px; background: rgba(0,255,163,.05); max-width: 100%; }
-  .kicker i { width: 6px; height: 6px; border-radius: 50%; background: var(--a); box-shadow: 0 0 10px var(--a); flex: none; }
-  h1 { font-size: clamp(46px, 8vw, 104px); line-height: .92; letter-spacing: -.05em; margin: 22px 0 22px; font-weight: 700; }
-  h1 .l2 { display: block; background: linear-gradient(92deg, var(--a) 0%, var(--b) 45%, var(--c) 100%); background-size: 200% 100%; -webkit-background-clip: text; background-clip: text; color: transparent; animation: shift 6s ease-in-out infinite alternate; }
-  @keyframes shift { to { background-position: 100% 0; } }
-  .glitch { position: relative; display: inline-block; }
-  .glitch::before, .glitch::after { content: attr(data-text); position: absolute; inset: 0; opacity: 0; }
-  .glitch.on::before { opacity: .8; color: var(--b); transform: translate(3px, -2px); clip-path: inset(10% 0 55% 0); animation: gl1 .35s steps(2) 2; }
-  .glitch.on::after { opacity: .8; color: var(--c); transform: translate(-3px, 2px); clip-path: inset(60% 0 8% 0); animation: gl2 .35s steps(2) 2; }
-  @keyframes gl1 { 50% { clip-path: inset(40% 0 30% 0); transform: translate(-4px, 1px); } }
-  @keyframes gl2 { 50% { clip-path: inset(15% 0 70% 0); transform: translate(4px, -1px); } }
-  .lead { font-size: clamp(17px, 1.6vw, 20px); color: var(--muted); max-width: 560px; margin: 0 0 30px; }
-  .lead b { color: var(--text); font-weight: 500; }
-  .install { display: flex; align-items: center; gap: 12px; background: rgba(0,0,0,.55); border: 1px solid var(--line); border-radius: 14px; padding: 8px 8px 8px 18px; max-width: 600px; box-shadow: 0 20px 60px -30px rgba(0,255,163,.5); }
-  .install code { flex: 1; min-width: 0; font-size: 14px; white-space: nowrap; overflow-x: auto; scrollbar-width: none; padding: 8px 0; }
-  .install code::-webkit-scrollbar { display: none; }
-  .install .p { color: var(--a); user-select: none; }
-  .copy { flex: none; border: 1px solid var(--line); background: rgba(0,255,163,.07); color: var(--a); border-radius: 10px; padding: 9px 14px; font: 600 12px var(--mono); cursor: pointer; letter-spacing: .05em; text-transform: uppercase; }
-  .copy:hover { background: var(--a); color: #001a10; }
-  .os { font: 12px var(--mono); color: var(--muted); margin-top: 12px; }
-  .os button, .os a { background: none; border: 0; color: var(--b); cursor: pointer; font: inherit; padding: 0; text-decoration: underline; text-underline-offset: 3px; }
-  .cta { display: flex; gap: 14px; margin-top: 30px; flex-wrap: wrap; }
-
-  .term { position: relative; background: rgba(4,8,10,.82); border: 1px solid var(--line); border-radius: 18px; overflow: hidden; backdrop-filter: blur(10px);
-    box-shadow: 0 40px 120px -30px rgba(0,0,0,.9), 0 0 80px -30px rgba(0,255,163,.35); transform: perspective(1400px) rotateY(-6deg) rotateX(3deg); transition: transform .6s cubic-bezier(.2,.7,.2,1); }
-  .term:hover { transform: none; }
-  .tbar { display: flex; align-items: center; gap: 8px; padding: 13px 16px; border-bottom: 1px solid var(--line-2); font: 12px var(--mono); color: var(--muted); }
-  .tbar i { width: 11px; height: 11px; border-radius: 50%; background: #1f2a2d; }
-  .tbar i:nth-child(1) { background: #ff5f57; } .tbar i:nth-child(2) { background: #febc2e; } .tbar i:nth-child(3) { background: #28c840; }
-  .tbar span { margin-left: auto; }
-  .tbody { height: 380px; overflow-y: auto; padding: 16px 18px; font: 13px/1.75 var(--mono); scrollbar-width: thin; scrollbar-color: #1d2a2c transparent; }
-  .tbody .ln { white-space: pre-wrap; word-break: break-word; }
-  .tin { display: flex; gap: 8px; align-items: center; }
-  .tin input { flex: 1; min-width: 0; background: none; border: 0; outline: 0; color: var(--text); font: inherit; caret-color: var(--a); padding: 0; }
-  .ok { color: var(--a); } .info { color: var(--b); } .dim { color: #55665f; } .warn { color: #ffd166; } .vio { color: var(--c); }
-  .thint { font: 11px var(--mono); color: var(--muted); padding: 10px 18px; border-top: 1px solid var(--line-2); display: flex; justify-content: space-between; gap: 10px; }
-  .thint b { color: var(--a); font-weight: 500; }
-
-  .stats { display: grid; grid-template-columns: repeat(4, 1fr); border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); background: rgba(3,5,7,.6); backdrop-filter: blur(6px); }
-  .stat { padding: 34px 24px; border-right: 1px solid var(--line-2); }
-  .stat:last-child { border-right: 0; }
-  .stat .n { font: 700 clamp(38px, 5vw, 60px)/1 var(--sans); letter-spacing: -.04em; background: linear-gradient(180deg, #fff, #9fb8ad); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .stat .k { font: 12px var(--mono); color: var(--muted); text-transform: uppercase; letter-spacing: .12em; margin-top: 10px; }
-
-  .marquee { overflow: hidden; border-bottom: 1px solid var(--line-2); background: rgba(0,0,0,.4); -webkit-mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); mask-image: linear-gradient(90deg, transparent, #000 10%, #000 90%, transparent); }
-  .track { display: flex; gap: 40px; width: max-content; padding: 16px 0; animation: scroll 40s linear infinite; font: 13px var(--mono); color: var(--muted); }
-  .track span b { color: var(--a); font-weight: 500; }
-  @keyframes scroll { to { transform: translateX(-50%); } }
-
-  section { padding: 120px 0; }
-  .eyebrow { font: 500 12px var(--mono); color: var(--a); letter-spacing: .16em; text-transform: uppercase; display: flex; align-items: center; gap: 12px; }
-  .eyebrow::before { content: ""; width: 28px; height: 1px; background: var(--a); box-shadow: 0 0 8px var(--a); }
-  h2 { font-size: clamp(34px, 5vw, 64px); line-height: 1; letter-spacing: -.04em; margin: 18px 0 18px; font-weight: 700; max-width: 900px; }
-  h2 em { font-style: normal; background: linear-gradient(90deg, var(--a), var(--b)); -webkit-background-clip: text; background-clip: text; color: transparent; }
-  .sub { color: var(--muted); max-width: 640px; font-size: 18px; margin: 0 0 56px; }
-
-  .cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .cards > * { min-width: 0; }
-  .card { position: relative; background: var(--panel); border: 1px solid var(--line-2); border-radius: 18px; padding: 28px; overflow: hidden; transition: transform .25s, border-color .25s; backdrop-filter: blur(8px); }
-  .card::before { content: ""; position: absolute; inset: 0; pointer-events: none; opacity: 0; transition: opacity .3s;
-    background: radial-gradient(420px circle at var(--mx, 50%) var(--my, 50%), rgba(0,255,163,.14), transparent 45%); }
-  .card:hover { border-color: var(--line); }
-  .card:hover::before { opacity: 1; }
-  .card .ix { font: 12px var(--mono); color: var(--a); letter-spacing: .1em; }
-  .card h3 { font-size: 22px; letter-spacing: -.02em; margin: 18px 0 10px; }
-  .card p { margin: 0; color: var(--muted); font-size: 15.5px; }
-  .card code { color: var(--text); font-size: 13px; }
-  .card.big { grid-column: span 2; }
-  .card .mini { margin-top: 20px; font: 12.5px/1.7 var(--mono); background: rgba(0,0,0,.45); border: 1px solid var(--line-2); border-radius: 12px; padding: 14px 16px; overflow-x: auto; white-space: pre; color: var(--muted); }
-
-  .svc-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .svc-grid > * { min-width: 0; }
-  .svc { background: var(--panel); border: 1px solid var(--line-2); border-radius: 16px; padding: 22px; backdrop-filter: blur(8px); }
-  .svc h4 { margin: 0 0 14px; font: 500 12px var(--mono); color: var(--muted); letter-spacing: .14em; text-transform: uppercase; }
-  .chips { display: flex; flex-wrap: wrap; gap: 8px; }
-  .chip { font: 500 13px var(--mono); padding: 6px 10px; border-radius: 8px; background: rgba(255,255,255,.03); border: 1px solid var(--line-2); color: #b9c7c1; }
-  .chip.aws { color: var(--a); border-color: rgba(0,255,163,.35); background: rgba(0,255,163,.06); box-shadow: 0 0 18px -8px var(--a); }
-  .legend { margin-top: 22px; font: 12px var(--mono); color: var(--muted); display: flex; align-items: center; gap: 10px; }
-
-  .split { display: grid; grid-template-columns: .9fr 1.1fr; gap: 56px; align-items: center; }
-  .split > * { min-width: 0; }
-  .diff { background: rgba(4,8,10,.85); border: 1px solid var(--line-2); border-radius: 18px; overflow: hidden; }
-  .diff pre { margin: 0; padding: 18px 0; font: 13px/1.8 var(--mono); overflow-x: auto; }
-  .diff .r { display: block; padding: 0 20px; white-space: pre; }
-  .diff .add { background: rgba(0,255,163,.09); color: var(--a); box-shadow: inset 3px 0 var(--a); }
-  .diff .s { color: #ffd166; } .diff .k { color: var(--c); }
-  .bullets { list-style: none; padding: 0; margin: 0; display: grid; gap: 18px; }
-  .bullets li { display: grid; grid-template-columns: 28px 1fr; gap: 12px; color: var(--muted); font-size: 16.5px; }
-  .bullets li span:first-child { font: 12px var(--mono); color: var(--a); padding-top: 4px; }
-  .bullets b { color: var(--text); font-weight: 600; }
-
-  .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 18px; }
-  .steps > * { min-width: 0; }
-  .steps pre { margin: 18px 0 0; font: 13px var(--mono); background: rgba(0,0,0,.5); border: 1px solid var(--line-2); border-radius: 12px; padding: 14px 16px; overflow-x: auto; color: var(--a); }
-
-  .final { text-align: center; padding: 160px 0; }
-  .final h2 { margin: 0 auto 24px; font-size: clamp(44px, 9vw, 128px); }
-  .final .sub { margin: 0 auto 40px; }
-  .final .cta { justify-content: center; }
-  .partners { margin-top: 70px; display: flex; flex-direction: column; align-items: center; gap: 18px; }
-  .partners small { font: 11px var(--mono); color: var(--muted); letter-spacing: .16em; text-transform: uppercase; }
-  .partners div { display: flex; gap: 44px; align-items: center; flex-wrap: wrap; justify-content: center; }
-  .partners img { filter: grayscale(1) brightness(1.8); opacity: .75; transition: .25s; }
-  .partners a:hover img { filter: none; opacity: 1; }
-
-  footer { border-top: 1px solid var(--line-2); padding: 30px 0 44px; font: 12px var(--mono); color: var(--muted); background: rgba(3,5,7,.7); }
-  footer .wrap { display: flex; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
-  footer a { color: var(--muted); text-decoration: none; margin-left: 20px; }
-  footer a:hover { color: var(--a); }
-
-  .reveal { opacity: 0; transform: translateY(26px); transition: opacity .8s cubic-bezier(.2,.7,.2,1), transform .8s cubic-bezier(.2,.7,.2,1); }
-  .reveal.in { opacity: 1; transform: none; }
-
-  @media (max-width: 960px) {
-    .hero .wrap, .split { grid-template-columns: 1fr; }
-    .cards, .steps { grid-template-columns: 1fr; }
-    .card.big { grid-column: auto; }
-    .svc-grid { grid-template-columns: 1fr 1fr; }
-    .stats { grid-template-columns: 1fr 1fr; }
-    .stat:nth-child(2) { border-right: 0; }
-    .stat:nth-child(-n+2) { border-bottom: 1px solid var(--line-2); }
-    .term { transform: none; }
-    .navlinks a.hide { display: none; }
-    section { padding: 88px 0; }
-  }
-  @media (max-width: 560px) {
-    .svc-grid { grid-template-columns: 1fr; }
-    .tbody { height: 320px; font-size: 12px; }
-    .navlinks { gap: 14px; }
-    .status { display: none; }
-    footer a { margin: 0 16px 0 0; }
-    .final { padding: 110px 0; }
-  }
-  @media (prefers-reduced-motion: reduce) {
-    *, *::before, *::after { animation: none !important; transition: none !important; }
-    .reveal { opacity: 1; transform: none; }
-    #glow { display: none; }
-  }
-</style>
 </head>
 <body>
-<canvas id="field" aria-hidden="true"></canvas>
-<div class="noise"></div>
-<div class="scan"></div>
-<div id="glow"></div>
+<a class="skip" href="#main">Skip to content</a>
 
-<nav>
+<header class="site-header">
   <div class="wrap">
-    <a class="brand" href="#"><span class="dot"></span>homecloud</a>
-    <div class="navlinks">
-      <span class="status">● all systems local</span>
-      <a class="hide" href="#why">Why</a>
-      <a class="hide" href="#services">Services</a>
-      <a class="hide" href="#start">Start</a>
-      <a class="btn" href="https://github.com/solinode/homecloud" target="_blank" rel="noopener">
-        <svg viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M8 0C3.58 0 0 3.58 0 8a8 8 0 0 0 5.47 7.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.22 1.87.87 2.33.66.07-.52.28-.87.5-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 16 8c0-4.42-3.58-8-8-8z"/></svg>
-        Star
-      </a>
-    </div>
-  </div>
-</nav>
-
-<main>
-<header class="hero">
-  <div class="wrap">
-    <div>
-      <span class="kicker"><i></i>aws cli · sdks · terraform — unchanged</span>
-      <h1><span class="glitch" id="h1a" data-text="Your own AWS.">Your own AWS.</span><span class="l2" id="h1b">On your hardware.</span></h1>
-      <p class="lead">One binary. <b>Thirty cloud services.</b> EC2, S3, Lambda, DynamoDB, SQS, IAM and friends, running on your homelab with the <b>exact APIs</b> your tools already speak. No account. No region. <b>No bill.</b></p>
-      <div class="install">
-        <code><span class="p">$ </span><span id="cmd">curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh</span></code>
-        <button class="copy" data-copy="cmd">Copy</button>
-      </div>
-      <div class="os">macOS · Linux — <button id="os-toggle" type="button">windows instead</button> — needs docker — <a href="https://github.com/solinode/homecloud/blob/main/docs/install-server.md" target="_blank" rel="noopener">install on a server</a></div>
-      <div class="cta">
-        <a class="btn solid demo magnetic" href="/demo/"><span class="live" aria-hidden="true"></span>Try the live demo console →</a>
-        <a class="btn magnetic" href="#start">Boot your cloud</a>
-        <a class="btn magnetic" href="https://github.com/solinode/homecloud/blob/main/docs/aws-compat.md" target="_blank" rel="noopener">AWS API coverage</a>
-      </div>
-    </div>
-    <div class="term" id="term">
-      <div class="tbar"><i></i><i></i><i></i><span>root@homelab: ~</span></div>
-      <div class="tbody" id="tbody" aria-live="polite"></div>
-      <div class="thint"><span>interactive — try <b>help</b></span><span id="tclock">--:--:--</span></div>
-    </div>
+    <a class="brand" href="/" aria-label="HomeCloud home">
+      <svg viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="var(--accent)"/><path d="M8 16.5 16 9l8 7.5" fill="none" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/><path d="M11 22.5h10" stroke="var(--bg)" stroke-width="2.6" stroke-linecap="round"/></svg>
+      HomeCloud
+    </a>
+    <nav class="site-nav" aria-label="Main">
+      <a class="opt" href="#services">Services</a>
+      <a class="opt" href="#ci">Tests &amp; CI</a>
+      <a class="opt" href="#self-hosting">Self-hosting</a>
+      <a class="opt2" href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
+      <a href="https://github.com/solinode/homecloud">GitHub</a>
+      <button class="theme-btn" id="theme" type="button" aria-label="Toggle color theme">
+        <svg class="moon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z" stroke-linejoin="round"/></svg>
+        <svg class="sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg>
+      </button>
+    </nav>
   </div>
 </header>
 
-<div class="stats" id="stats">
-  <div class="stat"><div class="n" data-to="30">0</div><div class="k">cloud services</div></div>
-  <div class="stat"><div class="n" data-to="15">0</div><div class="k">aws apis, native</div></div>
-  <div class="stat"><div class="n" data-to="1">0</div><div class="k">binary to install</div></div>
-  <div class="stat"><div class="n" data-prefix="$" data-to="0">$0</div><div class="k">per month, forever</div></div>
-</div>
+<main id="main">
 
-<div class="marquee" aria-hidden="true"><div class="track" id="track"></div></div>
-
-<section id="why">
+<section class="hero">
   <div class="wrap">
-    <div class="eyebrow reveal">why homecloud</div>
-    <h2 class="reveal">The cloud you already know. <em>Minus the cloud.</em></h2>
-    <p class="sub reveal">Same APIs, same tools, same mental model as AWS, compiled into one binary that runs on the machine under your desk.</p>
-    <div class="cards">
-      <div class="card big reveal tilt">
-        <div class="ix">01 / protocol-level compatible</div>
-        <h3>It speaks AWS. Not "AWS-like". AWS.</h3>
-        <p>SigV4 signatures, awsJson, awsQuery and REST protocols, real error codes, <code>arn:aws:</code> ARNs. Point <code>AWS_ENDPOINT_URL</code> at HomeCloud and the CLI, boto3, the JS/Go/Java SDKs and Terraform just work.</p>
-        <div class="mini"><span class="ok">$</span> terraform apply
-<span class="info">aws_vpc.main:</span> Creation complete after 1s
-<span class="info">aws_instance.web:</span> Creation complete after 4s
-<span class="ok">Apply complete!</span> Resources: 9 added, 0 changed, 0 destroyed.</div>
+    <a class="release" href="https://github.com/solinode/homecloud/releases/tag/v0.4.0"><strong>v0.4.0</strong> &nbsp;VM instances, a container image, a GitHub Action and testcontainers <span aria-hidden="true">&rarr;</span></a>
+
+    <h1>An AWS-compatible cloud you run yourself.</h1>
+    <p class="lead">Point your Terraform, AWS CLI and SDK code at HomeCloud and it works as it does against AWS. The difference is where it runs: <strong>Lambda functions, databases, load balancers and EC2 instances are real containers and VMs on your own machine.</strong> One binary, about 30 services, open source.</p>
+
+    <div class="install">
+      <div class="tabs" role="tablist" aria-label="Install method">
+        <button class="tab" role="tab" id="t-unix" aria-controls="p-unix" aria-selected="true">macOS / Linux</button>
+        <button class="tab" role="tab" id="t-win" aria-controls="p-win" aria-selected="false" tabindex="-1">Windows</button>
+        <button class="tab" role="tab" id="t-docker" aria-controls="p-docker" aria-selected="false" tabindex="-1">Docker</button>
       </div>
-      <div class="card reveal tilt">
-        <div class="ix">02 / zero trust, local</div>
-        <h3>IAM on every request</h3>
-        <p>Users, roles, policies with conditions, temporary credentials. Functions and instances get role credentials automatically, just like the real thing.</p>
+      <div class="panel" role="tabpanel" id="p-unix" aria-labelledby="t-unix">
+        <div class="cmd">
+          <pre><span class="p" aria-hidden="true">$ </span><code id="cmd-unix" data-script="sh">curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh</code></pre>
+          <button class="btn btn-primary" type="button" data-copy="cmd-unix">Copy</button>
+        </div>
+        <p class="install-note">Then run <code>homecloud serve</code> and open <code>http://127.0.0.1:8080</code>. Needs Docker (Engine, Docker Desktop or OrbStack).</p>
       </div>
-      <div class="card reveal tilt">
-        <div class="ix">03 / one file</div>
-        <h3>A single binary</h3>
-        <p>API, web console and thirty services in one <code>homecloud</code> executable. Linux, macOS, Windows. amd64 and arm64.</p>
+      <div class="panel" role="tabpanel" id="p-win" aria-labelledby="t-win" hidden>
+        <div class="cmd">
+          <pre><span class="p" aria-hidden="true">&gt; </span><code id="cmd-win" data-script="ps1">irm https://homecloud.pages.dev/scripts/install.ps1 | iex</code></pre>
+          <button class="btn btn-primary" type="button" data-copy="cmd-win">Copy</button>
+        </div>
+        <p class="install-note">In PowerShell. Then run <code>homecloud serve</code> and open <code>http://127.0.0.1:8080</code>. Needs Docker Desktop.</p>
       </div>
-      <div class="card reveal tilt">
-        <div class="ix">04 / serverless, for real</div>
-        <h3>Lambda on AWS's own runtimes</h3>
-        <p>Warm environments, Python, Node, Java, Ruby, .NET, Go. Versions, aliases, layers, async retries, DynamoDB stream triggers.</p>
+      <div class="panel" role="tabpanel" id="p-docker" aria-labelledby="t-docker" hidden>
+        <div class="cmd">
+          <pre><code id="cmd-docker">docker run -d --name homecloud -p 127.0.0.1:8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v homecloud-data:/data ghcr.io/solinode/homecloud</code></pre>
+          <button class="btn btn-primary" type="button" data-copy="cmd-docker">Copy</button>
+        </div>
+        <p class="install-note"><code>docker logs homecloud</code> shows the root console password once. Images for amd64 and arm64.</p>
       </div>
-      <div class="card reveal tilt">
-        <div class="ix">05 / yours</div>
-        <h3>Open source, offline-first</h3>
-        <p>AGPL-3.0. Runs on your LAN or over Tailscale. Back it up with one command, upgrade in place with verified releases.</p>
+    </div>
+
+    <div class="hero-actions">
+      <a class="btn btn-secondary" href="/demo/">Try the demo console <span aria-hidden="true">&rarr;</span></a>
+      <span class="aside">Runs in your browser with sample data. Nothing to install.</span>
+    </div>
+
+    <figure class="shot hero-shot">
+      <img src="/images/console-home.webp" width="1600" height="1000" alt="The HomeCloud console home page: a grid of services (EC2, Lambda, S3, RDS, DynamoDB, SQS, SNS, EventBridge, ECS and more) with counts of running resources in each.">
+    </figure>
+
+    <dl class="facts">
+      <div><dt>17 of 17</dt><dd>terraform-aws-modules scenarios apply, re-plan clean and destroy, nightly</dd></div>
+      <div><dt>~30</dt><dd>AWS services behind one endpoint, with IAM enforced on every call</dd></div>
+      <div><dt>1 binary</dt><dd>API, console and CLI. Docker runs everything else</dd></div>
+      <div><dt>AGPL-3.0</dt><dd>Every feature is in the open code. There is no paid tier</dd></div>
+    </dl>
+  </div>
+</section>
+
+<section class="section" id="unchanged" aria-labelledby="unchanged-h">
+  <div class="wrap">
+    <div class="section-head">
+      <h2 id="unchanged-h">Your AWS code, unchanged</h2>
+      <p>HomeCloud speaks the AWS wire protocols (SigV4, awsJson, awsQuery, REST), so the tools you already use only need a different endpoint. <code>homecloud aws-env</code> prints it, with the access keys it created on first start.</p>
+    </div>
+    <div class="pair">
+      <div class="code">
+        <div class="code-title"><span>shell</span><span>AWS CLI</span></div>
+<pre><code><span class="c"># AWS_ENDPOINT_URL, keys and region</span>
+eval "$(homecloud aws-env)"
+
+aws sts get-caller-identity
+aws s3 mb s3://demo
+echo hi | aws s3 cp - s3://demo/hello.txt
+aws sqs create-queue --queue-name jobs</code></pre>
       </div>
+      <div class="code">
+        <div class="code-title"><span>main.tf</span><span>Terraform / OpenTofu</span></div>
+<pre><code>provider "aws" {
+  region            = <span class="s">"us-east-1"</span>
+  <span class="c"># buckets by path, not by host name</span>
+  s3_use_path_style = true
+}
+
+resource "aws_sqs_queue" "jobs" {
+  name = <span class="s">"jobs"</span>
+}
+<span class="c"># the provider reads AWS_ENDPOINT_URL too</span></code></pre>
+      </div>
+    </div>
+
+    <ul class="works">
+      <li><strong>AWS CLI v2</strong>Tested: the compatibility suite drives the real <code>aws</code> CLI in CI.</li>
+      <li><strong>boto3</strong>Tested in CI, including Cognito SRP sign-in through pycognito.</li>
+      <li><strong>Terraform and OpenTofu</strong>Tested with the stock <code>hashicorp/aws</code> provider, plus the nightly modules suite.</li>
+      <li><strong>CloudFormation</strong>Tested: stacks, change sets, updates with rollback, the boto3 waiters.</li>
+      <li><strong>AWS CDK</strong>Partly: synthesized templates deploy through change sets; <code>cdk deploy</code> end to end is not verified yet.</li>
+      <li><strong>Other SDKs and Pulumi</strong>Same protocols and SigV4, so expected to work, but not covered by tests. Reports welcome.</li>
+    </ul>
+  </div>
+</section>
+
+<section class="section" id="services" aria-labelledby="services-h">
+  <div class="wrap">
+    <div class="section-head">
+      <h2 id="services-h">What runs</h2>
+      <p>Each service is something real underneath, so an integration test hits the same kind of thing production does. Everything here is managed through the AWS CLI, SDKs and Terraform, and also appears in the console.</p>
+    </div>
+    <table class="svc">
+      <thead><tr><th scope="col">Area</th><th scope="col">Services</th><th scope="col">What does the work</th></tr></thead>
+      <tbody>
+        <tr><th scope="row">Compute</th><td>EC2, EBS, AMIs, Auto Scaling, ECS (Fargate), ECR</td><td>Instances are containers you can shell into. Two images, Ubuntu 24.04 and Debian 12, boot real VMs under QEMU, with KVM when the host has it.</td></tr>
+        <tr><th scope="row">Storage</th><td>S3, EFS</td><td>MinIO, with versioning, lifecycle, presigned URLs and bucket policies. EFS is Docker volumes.</td></tr>
+        <tr><th scope="row">Databases</th><td>RDS, ElastiCache, DynamoDB</td><td>Real PostgreSQL, MySQL and MariaDB; Redis, Valkey and Memcached. DynamoDB with GSIs, transactions, PartiQL, TTL and streams.</td></tr>
+        <tr><th scope="row">Serverless</th><td>Lambda, API Gateway (HTTP APIs), Step Functions</td><td>AWS's own Lambda runtime images. Versions, aliases, layers, function URLs, SQS and stream triggers.</td></tr>
+        <tr><th scope="row">Messaging</th><td>SQS, SNS, EventBridge, Scheduler</td><td>Standard and FIFO queues with DLQs; SNS to SQS, Lambda and HTTP with filter policies.</td></tr>
+        <tr><th scope="row">Networking</th><td>VPC, security groups, ELB v2, Route 53, ACM</td><td>Security groups are iptables rules. Load balancers are nginx, DNS is CoreDNS, certificates come from a private CA.</td></tr>
+        <tr><th scope="row">Identity &amp; security</th><td>IAM, STS, Cognito, KMS, Secrets Manager, SSM Parameter Store</td><td>One policy evaluator for every service, with conditions, roles, permissions boundaries and <code>iam:PassRole</code>.</td></tr>
+        <tr><th scope="row">Observability</th><td>CloudWatch, CloudWatch Logs, CloudTrail</td><td>Metrics and logs for every resource, alarms, Logs Insights, and a record of every API call.</td></tr>
+        <tr><th scope="row">Infrastructure as code</th><td>CloudFormation</td><td>Change sets and updates with rollback. No nested stacks or custom resources yet.</td></tr>
+      </tbody>
+    </table>
+    <p class="limits"><strong>Limits, up front:</strong> HomeCloud runs on one Docker host and serves one region (<code>us-east-1</code>) and one account. Some things are recorded rather than enforced, like network ACLs and NAT gateways. The <a href="https://github.com/solinode/homecloud/blob/main/docs/aws-compat.md">compatibility reference</a> lists supported operations and differences per service.</p>
+  </div>
+</section>
+
+<section class="section" id="ci" aria-labelledby="ci-h">
+  <div class="wrap">
+    <div class="section-head">
+      <h2 id="ci-h">For tests and CI</h2>
+      <p>Use it as a drop-in AWS for integration tests: no cloud credentials in CI, no bill, nothing left behind. HomeCloud's own end-to-end job runs on a stock GitHub Actions runner.</p>
+    </div>
+    <div class="ci">
+      <div class="ci-tabs" role="tablist" aria-label="Integration">
+        <button class="tab" role="tab" id="t-gha" aria-controls="p-gha" aria-selected="true">GitHub Action<small>Install, start, export AWS_*</small></button>
+        <button class="tab" role="tab" id="t-py" aria-controls="p-py" aria-selected="false" tabindex="-1"><span class="hide-sm">testcontainers-</span>python<small>A pytest fixture</small></button>
+        <button class="tab" role="tab" id="t-go" aria-controls="p-go" aria-selected="false" tabindex="-1"><span class="hide-sm">testcontainers-</span>go<small>From a Go test</small></button>
+        <button class="tab" role="tab" id="t-sh" aria-controls="p-sh" aria-selected="false" tabindex="-1">Any CI<small>The binary and a health check</small></button>
+      </div>
+      <div>
+        <div class="panel" role="tabpanel" id="p-gha" aria-labelledby="t-gha">
+          <div class="code">
+            <div class="code-title"><span>.github/workflows/test.yml</span></div>
+<pre><code>steps:
+  - uses: actions/checkout@v4
+  - uses: solinode/homecloud/integrations/github-action@main
+    with:
+      services-wait: s3    <span class="c"># wait for MinIO too</span>
+  - run: |
+      aws s3 mb s3://artifacts
+      pytest               <span class="c"># boto3 reads AWS_ENDPOINT_URL</span></code></pre>
+          </div>
+          <p>Downloads a checksum-verified release, starts the server, and exports the endpoint and credentials. A post step prints the server log and removes every container it started.</p>
+        </div>
+        <div class="panel" role="tabpanel" id="p-py" aria-labelledby="t-py" hidden>
+          <div class="code">
+            <div class="code-title"><span>conftest.py</span></div>
+<pre><code>from testcontainers_homecloud import HomeCloudContainer
+
+@pytest.fixture(scope=<span class="s">"session"</span>)
+def homecloud():
+    with HomeCloudContainer() as hc:
+        yield hc
+
+def test_upload(homecloud):
+    s3 = homecloud.get_client(<span class="s">"s3"</span>)
+    s3.create_bucket(Bucket=<span class="s">"test"</span>)</code></pre>
+          </div>
+          <p>Starts the <code>ghcr.io/solinode/homecloud</code> image, waits for the API and S3, and cleans up on exit.</p>
+        </div>
+        <div class="panel" role="tabpanel" id="p-go" aria-labelledby="t-go" hidden>
+          <div class="code">
+            <div class="code-title"><span>store_test.go</span></div>
+<pre><code>hc, err := homecloud.Run(ctx, homecloud.DefaultImage)
+testcontainers.CleanupContainer(t, hc)
+if err != nil {
+	t.Fatal(err)
+}
+s3c := s3.NewFromConfig(hc.AWSConfig(), func(o *s3.Options) {
+	o.UsePathStyle = true
+})</code></pre>
+          </div>
+          <p>Terminating the container also removes every container, network and volume HomeCloud created.</p>
+        </div>
+        <div class="panel" role="tabpanel" id="p-sh" aria-labelledby="t-sh" hidden>
+          <div class="code">
+            <div class="code-title"><span>ci.sh</span></div>
+<pre><code>curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh
+nohup homecloud serve &gt; homecloud.log 2&gt;&amp;1 &amp;
+until curl -fs localhost:8080/api/v1/health; do sleep 2; done
+eval "$(homecloud aws-env)"
+terraform apply -auto-approve   <span class="c"># or your test suite</span></code></pre>
+          </div>
+          <p>Works on any runner with Docker. Run one HomeCloud per Docker host at a time.</p>
+        </div>
+      </div>
+    </div>
+    <p class="more"><a href="https://github.com/solinode/homecloud/blob/main/docs/integrations.md">Testing and CI guide</a> &middot; <a href="https://github.com/solinode/homecloud/blob/main/docs/compatibility.md">Terraform modules results</a></p>
+  </div>
+</section>
+
+<section class="section" id="console" aria-labelledby="console-h">
+  <div class="wrap">
+    <div class="section-head">
+      <h2 id="console-h">A console in the box</h2>
+      <p>The web console is built into the binary and works offline. It is modeled on AWS's, so the layout will be familiar. These are from the <a href="/demo/">demo</a>.</p>
+    </div>
+    <div class="shots">
+      <figure>
+        <div class="shot"><img src="/images/ec2-instances.webp" width="1600" height="1000" loading="lazy" alt="EC2 instances list with names, instance IDs, running or stopped state, instance types, images and private IPs."></div>
+        <figcaption><strong>EC2.</strong> Instances in your VPCs, with a browser shell.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="/images/lambda-function.webp" width="1600" height="1000" loading="lazy" alt="A Lambda function page with its configuration and code editor."></div>
+        <figcaption><strong>Lambda.</strong> Functions, versions, aliases, an in-browser editor.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="/images/dynamodb-table.webp" width="1600" height="1000" loading="lazy" alt="A DynamoDB table page showing items and the query editor."></div>
+        <figcaption><strong>DynamoDB.</strong> Tables, queries, an item editor.</figcaption>
+      </figure>
+      <figure>
+        <div class="shot"><img src="/images/cloudwatch.webp" width="1600" height="1000" loading="lazy" alt="CloudWatch metrics graphs and alarms."></div>
+        <figcaption><strong>CloudWatch.</strong> Metrics, alarms and logs for every resource.</figcaption>
+      </figure>
     </div>
   </div>
 </section>
 
-<section id="services">
+<section class="section" id="compare" aria-labelledby="compare-h">
   <div class="wrap">
-    <div class="eyebrow reveal">the stack</div>
-    <h2 class="reveal">Thirty services. <em>One install.</em></h2>
-    <p class="sub reveal">Every service runs as containers you can see and control. Glowing ones already speak the native AWS API.</p>
-    <div class="svc-grid">
-      <div class="svc reveal"><h4>compute</h4><div class="chips"><span class="chip aws">EC2</span><span class="chip aws">EBS</span><span class="chip aws">IMDS</span><span class="chip">Auto Scaling</span><span class="chip">EFS</span></div></div>
-      <div class="svc reveal"><h4>serverless</h4><div class="chips"><span class="chip aws">Lambda</span><span class="chip aws">Step Functions</span><span class="chip">API Gateway</span></div></div>
-      <div class="svc reveal"><h4>storage</h4><div class="chips"><span class="chip aws">S3</span><span class="chip aws">DynamoDB</span></div></div>
-      <div class="svc reveal"><h4>databases</h4><div class="chips"><span class="chip">Postgres</span><span class="chip">MySQL</span><span class="chip">MariaDB</span><span class="chip">Redis</span><span class="chip">MongoDB</span></div></div>
-      <div class="svc reveal"><h4>messaging</h4><div class="chips"><span class="chip aws">SQS</span><span class="chip aws">SNS</span><span class="chip aws">EventBridge</span><span class="chip aws">Scheduler</span></div></div>
-      <div class="svc reveal"><h4>containers</h4><div class="chips"><span class="chip">ECS</span><span class="chip">ECR</span></div></div>
-      <div class="svc reveal"><h4>network</h4><div class="chips"><span class="chip aws">VPC</span><span class="chip">Load balancers</span><span class="chip">Route 53</span><span class="chip">ACM</span></div></div>
-      <div class="svc reveal"><h4>security</h4><div class="chips"><span class="chip aws">IAM</span><span class="chip aws">STS</span><span class="chip aws">KMS</span><span class="chip aws">Secrets Manager</span><span class="chip aws">SSM</span><span class="chip">Cognito</span></div></div>
-      <div class="svc reveal"><h4>operations</h4><div class="chips"><span class="chip aws">CloudWatch</span><span class="chip aws">Logs</span><span class="chip">CloudTrail</span><span class="chip">CloudFormation</span></div></div>
+    <div class="section-head">
+      <h2 id="compare-h">When to use something else</h2>
+      <p>HomeCloud is one of several ways to run AWS without AWS, and it is not always the right one.</p>
     </div>
-    <div class="legend reveal"><span class="chip aws">glow</span> works with the AWS CLI, SDKs and Terraform today</div>
+    <table class="compare">
+      <tbody>
+        <tr class="us"><th scope="row">HomeCloud</th><td>You want AWS APIs with real compute behind them, a console and IAM enforced, on your own machine or server, for free.</td></tr>
+        <tr><th scope="row">LocalStack</th><td>You need much wider service coverage (Kinesis, EKS, Athena, REST API Gateway&hellip;), several regions or accounts, or a lighter container for CI. Pro covers most of those.</td></tr>
+        <tr><th scope="row">moto</th><td>You want fast, in-process mocks for Python unit tests that reset between tests.</td></tr>
+        <tr><th scope="row">MinIO + k3s</th><td>You only need S3-compatible storage, plus Kubernetes for compute.</td></tr>
+        <tr><th scope="row">OpenStack</th><td>You need a multi-node private cloud with real VMs, and have people to run it.</td></tr>
+        <tr><th scope="row">AWS itself</th><td>You need exactly AWS's behavior. For final integration and staging tests, nothing replaces it.</td></tr>
+      </tbody>
+    </table>
+    <p class="more"><a href="https://github.com/solinode/homecloud/blob/main/docs/comparison.md">The full comparison</a>, with where each one is better than HomeCloud.</p>
   </div>
 </section>
 
-<section>
-  <div class="wrap split">
-    <div>
-      <div class="eyebrow reveal">the migration</div>
-      <h2 class="reveal">Change one line. <em>That's it.</em></h2>
-      <ul class="bullets">
-        <li class="reveal"><span>01</span><span><b>Same SDK calls.</b> Your boto3, JavaScript or Go code runs as-is.</span></li>
-        <li class="reveal"><span>02</span><span><b>Same infrastructure code.</b> Terraform applies, re-plans clean and destroys.</span></li>
-        <li class="reveal"><span>03</span><span><b>Same architectures.</b> DynamoDB streams trigger Lambda, which writes to SQS with its role's credentials.</span></li>
+<section class="section" id="self-hosting" aria-labelledby="self-h">
+  <div class="wrap">
+    <div class="section-head">
+      <h2 id="self-h">Running it</h2>
+      <p>HomeCloud is built to be left running for a team, a classroom or a homelab, not only started for a test run.</p>
+    </div>
+    <dl class="notes">
+      <div><dt>One binary, one host</dt><dd>A Go binary for Linux, macOS and Windows on amd64 and arm64. Every service it offers runs as a container on the same Docker Engine.</dd></div>
+      <div><dt>On a VPS or home server</dt><dd>2 vCPUs and 4 GB to try it; 4+ vCPUs and 8&ndash;16 GB to be comfortable. <code>homecloud service install</code> sets up systemd or launchd.</dd></div>
+      <div><dt>Reach it from elsewhere</dt><dd>It binds to <code>127.0.0.1</code> by default. Bind it to a LAN or Tailscale address, with built-in TLS or behind a reverse proxy.</dd></div>
+      <div><dt>Backups</dt><dd><code>homecloud backup</code> archives the state and every HomeCloud volume: databases, S3 objects, images, EBS volumes. <code>restore</code> works on the same or a new server.</dd></div>
+      <div><dt>Upgrades</dt><dd><code>homecloud upgrade</code> checks the release's SHA-256 before replacing the binary; data migrates on the next start. <code>homecloud doctor</code> checks the host.</dd></div>
+      <div><dt>Security</dt><dd>It needs the Docker socket, which is root on the host, so HomeCloud admins are host admins. Audits are <a href="https://github.com/solinode/homecloud/blob/main/docs/security-audit-2026-10.md">published</a>.</dd></div>
+    </dl>
+    <p class="more"><a href="https://github.com/solinode/homecloud/blob/main/docs/install-server.md">Install on a server</a>: Docker, TLS, firewall, DNS, backups and upgrades, step by step.</p>
+  </div>
+</section>
+
+<section class="section" id="open-source" aria-labelledby="oss-h">
+  <div class="wrap">
+    <div class="oss">
+      <div class="body">
+        <h2 id="oss-h">Open source</h2>
+        <p style="margin-top:14px">HomeCloud is licensed under the <strong>GNU AGPL-3.0</strong>. If you run a modified HomeCloud as a service for others, share your changes.</p>
+        <p>It is a young project: the first release was in September 2026. Expect rough edges and please report them. If your code needs an AWS operation that is missing, a compatibility gap issue is the most useful thing you can send.</p>
+      </div>
+      <ul class="linklist">
+        <li><a href="https://github.com/solinode/homecloud">Source on GitHub <span>solinode/homecloud</span></a></li>
+        <li><a href="https://github.com/solinode/homecloud/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22">Good first issues <span>GitHub</span></a></li>
+        <li><a href="https://github.com/solinode/homecloud/issues/new?template=compatibility_gap.yml">Report a compatibility gap <span>GitHub</span></a></li>
+        <li><a href="https://github.com/solinode/homecloud/blob/main/CONTRIBUTING.md">Contributing guide <span>GitHub</span></a></li>
+        <li><a href="https://discord.gg/pemra9uaC9">Chat with us <span>Discord</span></a></li>
       </ul>
     </div>
-    <div class="diff reveal">
-      <div class="tbar"><i></i><i></i><i></i><span>.env + app.py</span></div>
-<pre><span class="r"><span class="k">AWS_ACCESS_KEY_ID</span>=HCIA…</span><span class="r"><span class="k">AWS_SECRET_ACCESS_KEY</span>=…</span><span class="r"><span class="k">AWS_REGION</span>=us-east-1</span><span class="r add">+ <span class="k">AWS_ENDPOINT_URL</span>=<span class="s">http://homelab:8080</span></span><span class="r"> </span><span class="r dim"># app.py — unchanged</span><span class="r">table = boto3.resource(<span class="s">"dynamodb"</span>).Table(<span class="s">"orders"</span>)</span><span class="r">table.put_item(Item={<span class="s">"pk"</span>: <span class="s">"order-1"</span>, <span class="s">"total"</span>: 42})</span><span class="r">boto3.client(<span class="s">"s3"</span>).upload_file(<span class="s">"a.jpg"</span>, <span class="s">"photos"</span>, <span class="s">"a.jpg"</span>)</span></pre>
+    <div class="partners">
+      <p>Supported by</p>
+      <a class="ts" href="https://tailscale.com/"><img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" alt="Tailscale" width="108" height="60"></a>
+      <a class="cr" href="https://coderabbit.ai/"><img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png" alt="CodeRabbit" width="101" height="22"></a>
     </div>
   </div>
 </section>
 
-<section id="start">
-  <div class="wrap">
-    <div class="eyebrow reveal">boot sequence</div>
-    <h2 class="reveal">Three commands to <em>your own cloud.</em></h2>
-    <p class="sub reveal">You need Docker: Docker Engine on Linux, or Docker Desktop / OrbStack on macOS and Windows.</p>
-    <div class="steps">
-      <div class="card reveal tilt"><div class="ix">01 / install</div><h3>Download</h3><p>One binary for your platform.</p><pre id="step-install">curl -fsSL …/install.sh | sh</pre></div>
-      <div class="card reveal tilt"><div class="ix">02 / serve</div><h3>Boot</h3><p>Starts the API and console, prints your root password.</p><pre>homecloud serve</pre></div>
-      <div class="card reveal tilt"><div class="ix">03 / build</div><h3>Ship</h3><p>Console, CLI, or the AWS tools you already use.</p><pre>eval "$(homecloud aws-env)"
-aws s3 mb s3://photos</pre></div>
-    </div>
-  </div>
-</section>
-
-<section class="final">
-  <div class="wrap">
-    <h2 class="reveal">The cloud,<br><em>on your terms.</em></h2>
-    <p class="sub reveal">HomeCloud is a community project. Star it, run it on your homelab, and tell us what to build next.</p>
-    <div class="cta reveal">
-      <a class="btn solid magnetic" href="https://github.com/solinode/homecloud" target="_blank" rel="noopener">★ Star on GitHub</a>
-      <a class="btn magnetic" href="https://discord.gg/pemra9uaC9" target="_blank" rel="noopener">Join the Discord</a>
-    </div>
-    <div class="partners reveal">
-      <small>supported by</small>
-      <div>
-        <a href="https://tailscale.com/" target="_blank" rel="noopener"><img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" alt="Tailscale" height="40"></a>
-        <a href="https://coderabbit.ai/" target="_blank" rel="noopener"><img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png" alt="CodeRabbit" height="20"></a>
-      </div>
-    </div>
-  </div>
-</section>
 </main>
 
-<footer>
+<footer class="site-footer">
   <div class="wrap">
-    <span>© 2026 homecloudhq · agpl-3.0 · made for homelabs</span>
-    <span>
-      <a href="files/Project Concept_ _HomeCloud_.pdf">concept</a>
-      <a href="files/but, why_.pdf">but, why?</a>
-      <a href="https://www.linkedin.com/company/homecloudhq/" target="_blank" rel="noopener">linkedin</a>
-      <a href="https://github.com/solinode/homecloud" target="_blank" rel="noopener">github</a>
-    </span>
+    <span>HomeCloud &middot; AGPL-3.0 &middot; &copy; 2026</span>
+    <nav aria-label="Footer">
+      <a href="https://github.com/solinode/homecloud/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
+      <a href="/files/Project%20Concept_%20_HomeCloud_.pdf">Concept (PDF)</a>
+      <a href="/files/but,%20why_.pdf">But, why? (PDF)</a>
+      <a href="/files/funding.json">funding.json</a>
+      <a href="https://discord.gg/pemra9uaC9">Discord</a>
+      <a href="https://github.com/solinode/homecloud">GitHub</a>
+    </nav>
   </div>
 </footer>
 
-<script>
-(function () {
-  var reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
-
-  /* install command: this site's /scripts/ when hosted, else the public site */
-  var hosted = location.protocol.indexOf("http") === 0;
-  var base = hosted ? location.origin + "/scripts/" : "https://homecloud.pages.dev/scripts/";
-  var cmds = { unix: "curl -fsSL " + base + "install.sh | sh", win: "irm " + base + "install.ps1 | iex" };
-  var cmd = document.getElementById("cmd"), toggle = document.getElementById("os-toggle"), win = false;
-  cmd.textContent = cmds.unix;
-  document.getElementById("step-install").textContent = cmds.unix;
-  toggle.addEventListener("click", function () {
-    win = !win; cmd.textContent = win ? cmds.win : cmds.unix;
-    toggle.textContent = win ? "macos / linux instead" : "windows instead";
-  });
-  document.querySelectorAll("[data-copy]").forEach(function (b) {
-    b.addEventListener("click", function () {
-      var t = document.getElementById(b.dataset.copy).textContent;
-      (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(function () {
-        b.textContent = "Copied ✓"; setTimeout(function () { b.textContent = "Copy"; }, 1600);
-      }, function () { b.textContent = "Select it"; });
-    });
-  });
-
-  /* wave field background */
-  var cv = document.getElementById("field"), ctx = cv.getContext("2d");
-  var W, H, dpr, mx = 0, my = 0, tmx = 0, tmy = 0, t0 = performance.now();
-  function size() { dpr = Math.min(devicePixelRatio || 1, 2); W = innerWidth; H = innerHeight; cv.width = W * dpr; cv.height = H * dpr; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); }
-  size(); addEventListener("resize", size);
-  addEventListener("pointermove", function (e) { tmx = e.clientX / W - .5; tmy = e.clientY / H - .5; });
-  var COLS = 64, ROWS = 34, SP = 44;
-  function frame(now) {
-    var t = (now - t0) / 1000;
-    mx += (tmx - mx) * .05; my += (tmy - my) * .05;
-    ctx.clearRect(0, 0, W, H);
-    var fov = 520, camY = 170 + my * 60, horizon = H * .42, scroll = (t * 26) % SP;
-    for (var r = 0; r < ROWS; r++) {
-      var z = 60 + r * SP - scroll;
-      if (z < 20) continue;
-      var s = fov / z, fade = Math.min(1, (1 - r / ROWS) * 1.4);
-      for (var c = 0; c < COLS; c++) {
-        var x = (c - COLS / 2) * SP + mx * 220, wz = z + t * 26;
-        var y = Math.sin(x * .012 + t * 1.1) * 26 + Math.cos(wz * .018 - t * .7) * 30 + Math.sin((x + wz) * .006) * 40;
-        var sx = W / 2 + x * s, sy = horizon + (camY - y) * s * .55;
-        if (sx < -10 || sx > W + 10 || sy < -10 || sy > H + 10) continue;
-        var h = (y + 90) / 180;
-        ctx.fillStyle = "rgba(" + Math.round(179 * Math.max(0, h - .6)) + "," + Math.round(255 - 46 * h) + "," + Math.round(163 + 92 * h) + "," + (fade * .75).toFixed(3) + ")";
-        var sz = Math.max(.6, s * 1.6);
-        ctx.fillRect(sx, sy, sz, sz);
-      }
-    }
-    if (!reduce) requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
-
-  /* cursor glow */
-  var glow = document.getElementById("glow");
-  if (matchMedia("(pointer: fine)").matches && !reduce) {
-    addEventListener("pointermove", function (e) { glow.style.left = e.clientX + "px"; glow.style.top = e.clientY + "px"; });
-  } else { glow.style.display = "none"; }
-
-  /* headline decode + glitch */
-  var glyphs = "!<>-_\\/[]{}—=+*^?#01アイウエオカキ";
-  function scramble(el, text, dur) {
-    if (reduce) { el.textContent = text; return; }
-    var start = performance.now();
-    (function tick(now) {
-      var p = Math.min(1, (now - start) / dur), out = "";
-      for (var i = 0; i < text.length; i++) out += (i / text.length < p || text[i] === " ") ? text[i] : glyphs[(Math.random() * glyphs.length) | 0];
-      el.textContent = out;
-      if (p < 1) requestAnimationFrame(tick); else el.textContent = text;
-    })(start);
-  }
-  var h1a = document.getElementById("h1a"), h1b = document.getElementById("h1b");
-  scramble(h1a, "Your own AWS.", 900);
-  setTimeout(function () { scramble(h1b, "On your hardware.", 1000); }, 250);
-  function glitch() { h1a.classList.remove("on"); void h1a.offsetWidth; h1a.classList.add("on"); }
-  if (!reduce) { setTimeout(glitch, 1300); setInterval(glitch, 5200); }
-
-  /* interactive terminal */
-  var tb = document.getElementById("tbody"), acct = "724253334608";
-  var promptHTML = '<span class="ok">root@homelab</span>:<span class="info">~</span>$ ';
-  var inWrap = document.createElement("div"); inWrap.className = "tin";
-  inWrap.innerHTML = '<span class="ok">root@homelab</span>:<span class="info">~</span>$';
-  var input = document.createElement("input"); input.setAttribute("aria-label", "terminal input"); input.autocomplete = "off"; input.spellcheck = false;
-  inWrap.appendChild(input); tb.appendChild(inWrap);
-  function line(html) { var d = document.createElement("div"); d.className = "ln"; d.innerHTML = html; tb.insertBefore(d, inWrap); tb.scrollTop = tb.scrollHeight; }
-  var esc = function (s) { return s.replace(/&/g, "&amp;").replace(/</g, "&lt;"); };
-  var R = {
-    help: function () { return ['<span class="info">commands</span>', '  homecloud serve              boot your cloud', '  aws sts get-caller-identity  who am i', '  aws s3 ls                    list buckets', '  aws lambda invoke            run a function', '  services                     what\'s inside', '  install                      get it', '  github · discord · clear'].join("\n"); },
-    "homecloud serve": function () { return ['<span class="dim">starting 30 services on docker…</span>', '<span class="ok">✓</span> iam · sts · kms · secrets · ssm', '<span class="ok">✓</span> vpc · ec2 · imds · ebs · efs · autoscaling', '<span class="ok">✓</span> s3 · dynamodb · rds', '<span class="ok">✓</span> lambda · sqs · sns · eventbridge · states', '<span class="ok">✓</span> cloudwatch · logs · cloudtrail · route53', '<span class="info">console</span>  http://127.0.0.1:8080', '<span class="info">aws api</span>  AWS_ENDPOINT_URL=http://127.0.0.1:8080'].join("\n"); },
-    "aws sts get-caller-identity": function () { return '{\n  <span class="warn">"UserId"</span>: "HCUA307A56E7230B226B",\n  <span class="warn">"Account"</span>: "' + acct + '",\n  <span class="warn">"Arn"</span>: "arn:aws:iam::' + acct + ':user/root"\n}'; },
-    "aws s3 ls": function () { return '2026-09-29 18:02:11 <span class="info">family-photos</span>\n2026-09-29 18:05:43 <span class="info">backups</span>\n2026-09-29 18:07:02 <span class="info">tf-state</span>'; },
-    "aws lambda invoke": function () { return '{\n  <span class="warn">"StatusCode"</span>: 200,\n  <span class="warn">"ExecutedVersion"</span>: "$LATEST"\n}\n<span class="dim">REPORT Duration: 5.91 ms  Billed Duration: 6 ms  Memory Size: 128 MB</span>'; },
-    services: function () { return 'compute    ec2 ebs imds autoscaling efs ecs ecr\nserverless lambda states apigateway\ndata       s3 dynamodb rds (postgres mysql mariadb redis mongo)\nmessaging  sqs sns eventbridge scheduler\nnetwork    vpc elb route53 acm\nsecurity   iam sts kms secretsmanager ssm cognito\nops        cloudwatch logs cloudtrail cloudformation'; },
-    install: function () { return '<span class="ok">$</span> ' + esc(cmds.unix); },
-    github: function () { open("https://github.com/solinode/homecloud", "_blank", "noopener"); return '<span class="dim">opening github…</span>'; },
-    discord: function () { open("https://discord.gg/pemra9uaC9", "_blank", "noopener"); return '<span class="dim">opening discord…</span>'; },
-    whoami: function () { return 'root. it\'s your hardware.'; },
-    ls: function () { return 'homecloud*  data/  README.md'; },
-    "sudo rm -rf /": function () { return '<span class="warn">nice try.</span> explicit Deny on iam:DeleteEverything.'; },
-    exit: function () { return '<span class="dim">there is no exit. only more cloud.</span>'; }
-  };
-  function run(raw) {
-    var c = raw.trim().replace(/\s+/g, " ");
-    line(promptHTML + esc(raw));
-    if (!c) return;
-    if (c === "clear") { tb.querySelectorAll(".ln").forEach(function (n) { n.remove(); }); return; }
-    var key = Object.keys(R).find(function (k) { return c === k || (k.indexOf(" ") > 0 && c.indexOf(k) === 0); });
-    if (key) line(R[key]());
-    else if (c.indexOf("aws ") === 0) line('<span class="dim">that one works too, on the real thing. install it and try.</span>');
-    else line('command not found: ' + esc(c.split(" ")[0]) + '. try <span class="ok">help</span>');
-  }
-  var hist = [], hi = 0, demoOn = true, timer;
-  function stopDemo() { demoOn = false; clearTimeout(timer); }
-  input.addEventListener("keydown", function (e) {
-    if (e.key === "Enter") { stopDemo(); hist.push(input.value); hi = hist.length; run(input.value); input.value = ""; }
-    else if (e.key === "ArrowUp" && hi > 0) { input.value = hist[--hi]; e.preventDefault(); }
-    else if (e.key === "ArrowDown" && hi < hist.length) { input.value = hist[++hi] || ""; }
-    else if (demoOn && e.key.length === 1) { stopDemo(); input.value = ""; }
-  });
-  document.getElementById("term").addEventListener("click", function () { if (!getSelection().toString()) input.focus({ preventScroll: true }); });
-  var demo = ["homecloud serve", "aws sts get-caller-identity", "aws s3 ls", "aws lambda invoke --function-name resize out.json"];
-  function typeDemo(i) {
-    if (!demoOn) return;
-    if (i >= demo.length) { line('<span class="dim">↳ your turn. type </span><span class="ok">help</span>'); demoOn = false; return; }
-    var s = demo[i], k = 0;
-    (function ch() {
-      if (!demoOn) return;
-      input.value = s.slice(0, ++k);
-      if (k < s.length) timer = setTimeout(ch, reduce ? 0 : 28 + Math.random() * 40);
-      else timer = setTimeout(function () { run(s); input.value = ""; timer = setTimeout(function () { typeDemo(i + 1); }, 900); }, 350);
-    })();
-  }
-  line('<span class="vio">homecloud</span> v0.1. your own aws. type <span class="ok">help</span>, or watch:');
-  timer = setTimeout(function () { typeDemo(0); }, 1200);
-  var clock = document.getElementById("tclock");
-  (function tickClock() { clock.textContent = new Date().toTimeString().slice(0, 8) + " local"; setTimeout(tickClock, 1000); })();
-
-  /* api marquee */
-  var ops = ["s3:PutObject", "lambda:Invoke", "dynamodb:TransactWriteItems", "sqs:ReceiveMessage", "sts:AssumeRole", "ec2:RunInstances", "kms:Encrypt", "sns:Publish", "states:StartExecution", "logs:FilterLogEvents", "iam:CreateRole", "secretsmanager:GetSecretValue", "events:PutEvents", "ssm:GetParametersByPath", "cloudwatch:GetMetricData", "s3:CompleteMultipartUpload", "lambda:PublishVersion", "dynamodb:Query"];
-  var html = "";
-  for (var n = 0; n < 2; n++) ops.forEach(function (o, i) { var p = o.split(":"); html += '<span><b>' + p[0] + '</b>:' + p[1] + ' <span class="dim">200 · ' + (3 + (i * 7) % 29) + 'ms</span></span>'; });
-  document.getElementById("track").innerHTML = html;
-
-  /* reveal + counters */
-  var io = new IntersectionObserver(function (es) {
-    es.forEach(function (e) { if (e.isIntersecting) { e.target.classList.add("in"); io.unobserve(e.target); } });
-  }, { threshold: .12 });
-  document.querySelectorAll(".reveal").forEach(function (el, i) { el.style.transitionDelay = (i % 4) * 70 + "ms"; io.observe(el); });
-  var so = new IntersectionObserver(function (es) {
-    if (!es.some(function (e) { return e.isIntersecting; })) return;
-    so.disconnect();
-    document.querySelectorAll(".stat .n").forEach(function (n) {
-      var to = +n.dataset.to, pre = n.dataset.prefix || "", st = performance.now();
-      if (to === 0) { scramble(n, pre + "0", 900); return; }
-      (function tick(now) { var p = Math.min(1, (now - st) / 1400); n.textContent = pre + Math.round(to * (1 - Math.pow(1 - p, 3))); if (p < 1) requestAnimationFrame(tick); })(st);
-    });
-  }, { threshold: .4 });
-  so.observe(document.getElementById("stats"));
-
-  /* card spotlight + tilt, magnetic buttons */
-  if (matchMedia("(pointer: fine)").matches && !reduce) {
-    document.querySelectorAll(".tilt").forEach(function (c) {
-      c.addEventListener("pointermove", function (e) {
-        var r = c.getBoundingClientRect(), x = e.clientX - r.left, y = e.clientY - r.top;
-        c.style.setProperty("--mx", x + "px"); c.style.setProperty("--my", y + "px");
-        c.style.transform = "perspective(900px) rotateX(" + ((y / r.height - .5) * -6) + "deg) rotateY(" + ((x / r.width - .5) * 6) + "deg) translateY(-3px)";
-      });
-      c.addEventListener("pointerleave", function () { c.style.transform = ""; });
-    });
-    document.querySelectorAll(".magnetic").forEach(function (b) {
-      b.addEventListener("pointermove", function (e) { var r = b.getBoundingClientRect(); b.style.transform = "translate(" + (e.clientX - r.left - r.width / 2) * .18 + "px," + (e.clientY - r.top - r.height / 2) * .28 + "px)"; });
-      b.addEventListener("pointerleave", function () { b.style.transform = ""; });
-    });
-  }
-})();
-</script>
+<script src="/site.js" defer></script>
 </body>
 </html>
