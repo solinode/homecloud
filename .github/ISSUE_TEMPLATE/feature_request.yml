@@ -1,0 +1,47 @@
+name: Feature request
+description: A new service, console feature, CLI command or improvement.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        For a missing AWS operation or option, the **AWS compatibility gap** form is quicker. Bigger ideas can start in [Discussions](https://github.com/solinode/homecloud/discussions).
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do, and what gets in the way today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposal
+      description: What you would like HomeCloud to do. If it mirrors an AWS feature, name it and link the AWS docs.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and workarounds
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - AWS API compatibility
+        - Console
+        - homecloud CLI
+        - Compute (EC2, ECS, Lambda)
+        - Networking (VPC, security groups, DNS, load balancers)
+        - Storage and databases
+        - Install, upgrade, operations
+        - Documentation
+        - Other
+      multiple: true
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contributing
+      options:
+        - label: I would like to work on this.
