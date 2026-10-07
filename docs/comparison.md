@@ -101,9 +101,8 @@ and operate. HomeCloud is one binary on one Docker host, with AWS's managed serv
 RDS, ...) that OpenStack does not offer in AWS form.
 
 **OpenStack is better** for real infrastructure: multi-node clusters, live migration, hardware-virtualized
-VMs with strong isolation, quotas and multi-tenancy at scale. HomeCloud instances are containers today
-(VM-backed instances are in progress, [#3](https://github.com/solinode/homecloud/issues/3)), and it runs on a
-single node.
+VMs with strong isolation, quotas and multi-tenancy at scale. HomeCloud instances are containers by default
+(two VM images boot real QEMU/KVM guests, without live migration), and it runs on a single node.
 
 ## The AWS free tier
 
@@ -123,7 +122,7 @@ ones); anything beyond that is billed.
 - **One region, one account.** Cross-region features (replication, multi-Region keys' replicas) are refused.
 - **Smaller service coverage** than LocalStack Pro, and a subset of operations within each service
   ([aws-compat.md](aws-compat.md)).
-- **Instances are containers**, sharing the host kernel, until VM-backed instances land.
+- **Instances are containers** sharing the host kernel, except the two VM images (Ubuntu 24.04, Debian 12), which run as QEMU guests.
 - **Young project.** The first release was in September 2026. Expect rough edges, and please
   [report them](https://github.com/solinode/homecloud/issues/new/choose).
 - **Docker socket access** is root-equivalent on the host, so HomeCloud administrators are host administrators.

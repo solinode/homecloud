@@ -14,16 +14,24 @@ import (
 
 // BuildImage builds tag from a single Dockerfile unless the image already exists.
 func (d *Docker) BuildImage(ctx context.Context, tag, dockerfile string) error {
+	return d.BuildImageFiles(ctx, tag, map[string][]byte{"Dockerfile": []byte(dockerfile)})
+}
+
+// BuildImageFiles builds tag from a build context (path -> content, including
+// the Dockerfile) unless the image already exists.
+func (d *Docker) BuildImageFiles(ctx context.Context, tag string, files map[string][]byte) error {
 	if _, err := d.C.InspectImage(tag); err == nil {
 		return nil
 	}
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
-	if err := tw.WriteHeader(&tar.Header{Name: "Dockerfile", Mode: 0o644, Size: int64(len(dockerfile)), ModTime: time.Now()}); err != nil {
-		return err
-	}
-	if _, err := tw.Write([]byte(dockerfile)); err != nil {
-		return err
+	for name, content := range files {
+		if err := tw.WriteHeader(&tar.Header{Name: name, Mode: 0o644, Size: int64(len(content)), ModTime: time.Now()}); err != nil {
+			return err
+		}
+		if _, err := tw.Write(content); err != nil {
+			return err
+		}
 	}
 	if err := tw.Close(); err != nil {
 		return err

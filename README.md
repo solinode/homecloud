@@ -6,12 +6,13 @@
   <a href="https://homecloud.pages.dev/demo/"><b>Live demo console</b></a> ·
   <a href="#quick-start"><b>Quick start</b></a> ·
   <a href="docs/aws-compat.md"><b>AWS compatibility</b></a> ·
+  <a href="docs/integrations.md"><b>Testing &amp; CI</b></a> ·
   <a href="docs/comparison.md"><b>vs. LocalStack, moto, MinIO…</b></a> ·
   <a href="https://discord.gg/pemra9uaC9"><b>Discord</b></a>
 </p>
 
 - **Your AWS code, unchanged.** HomeCloud speaks the AWS wire protocols (SigV4, awsJson, awsQuery, REST). Set `AWS_ENDPOINT_URL` and the AWS CLI, boto3 and the Terraform AWS provider work against it, with IAM policies enforced as on AWS.
-- **Real compute, not mocks.** Lambda runs on AWS's official runtime images, RDS is a real PostgreSQL/MySQL/MariaDB, S3 is MinIO, EC2 instances are containers you can shell into, load balancers are nginx, security groups are iptables rules. Your integration tests hit the same kind of thing production does.
+- **Real compute, not mocks.** Lambda runs on AWS's official runtime images, RDS is a real PostgreSQL/MySQL/MariaDB, S3 is MinIO, EC2 instances are containers you can shell into or full VMs under QEMU/KVM, load balancers are nginx, security groups are iptables rules. Your integration tests hit the same kind of thing production does.
 - **See what happened.** A web console modeled on AWS's, CloudWatch logs and metrics for every resource, and a CloudTrail record of every AWS API call, so a failed test run can be inspected instead of guessed at.
 
 Built for **developers who want a real AWS-compatible target for local development and CI**. It also suits **college labs** teaching AWS without accounts or bills, and **small teams and homelabs** that want AWS tooling on their own hardware.
@@ -78,6 +79,8 @@ eval "$(homecloud aws-env)"
 
 S3 starts in the background on first boot; if your tests use S3 right away, wait for `s3: MinIO ready` in the log (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
+Or use the ready-made pieces in **[docs/integrations.md](docs/integrations.md)**: a GitHub Action that does the above in one step, and testcontainers modules for Go and Python.
+
 ---
 
 ## Works with
@@ -101,7 +104,7 @@ Run `homecloud aws-env` to get the environment variables. For Terraform, point t
 
 | Service | AWS equivalent | Status | Notes |
 | --- | --- | --- | --- |
-| Compute | EC2, EBS, AMIs | AWS API | Instances are **containers**, not VMs (VM-backed instances are in progress, [#3](https://github.com/solinode/homecloud/issues/3)). Key pairs, user data, volumes, snapshots, launch templates, Elastic IPs (records only), IMDSv1/v2, browser shell |
+| Compute | EC2, EBS, AMIs | AWS API | Instances are **containers**; `ami-ubuntu-24-04-vm` and `ami-debian-12-vm` boot real **virtual machines** (QEMU, KVM when the host has `/dev/kvm`, emulated otherwise) on the same VPC networking, with extra volumes, snapshots, images, run-command and a serial console. Key pairs, user data, volumes, snapshots, launch templates, Elastic IPs (records only), IMDSv1/v2, browser shell |
 | Auto Scaling | EC2 Auto Scaling | AWS API | Target tracking on CPU; scheduled actions and lifecycle hooks are not implemented |
 | Networking | VPC, security groups | AWS API | Security groups enforced inside the VPC; network ACLs recorded, not enforced; no peering; IPv4 only |
 | Load balancing | ELB v2 | AWS API | Application load balancers (HTTP/HTTPS, path/host rules). No network load balancers |
@@ -192,7 +195,7 @@ HomeCloud needs the Docker socket, which is root-equivalent on the host: treat H
 
 ## Roadmap
 
-- **In progress:** VM-backed instances with QEMU/KVM ([#3](https://github.com/solinode/homecloud/issues/3)), a container image for one-command starts
+- **In progress:** a container image for one-command starts
 - **Planned:** multi-node clusters ([#55](https://github.com/solinode/homecloud/issues/55)), edge compute and hardware integrations ([#56](https://github.com/solinode/homecloud/issues/56))
 
 See the [open issues](https://github.com/solinode/homecloud/issues) for everything planned.

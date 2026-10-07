@@ -24,6 +24,7 @@ type filterEnv struct {
 	vpcID  string
 	subnet string
 	defSG  string
+	ec2    *ec2.Service
 }
 
 func newFilterEnv(t *testing.T) *filterEnv {
@@ -60,7 +61,7 @@ func newFilterEnv(t *testing.T) *filterEnv {
 	}
 	t.Cleanup(func() { _ = v.DeleteVPC(vpcID) })
 	sn := h.AWSJSON(t, "ec2", "create-subnet", "--vpc-id", vpcID, "--cidr-block", fmt.Sprintf("10.%d.1.0/24", second))["Subnet"].(map[string]any)["SubnetId"].(string)
-	return &filterEnv{t: t, h: h, vpc: v, vpcID: vpcID, subnet: sn, defSG: v.DefaultSecurityGroup(vpcID)}
+	return &filterEnv{t: t, h: h, vpc: v, ec2: e, vpcID: vpcID, subnet: sn, defSG: v.DefaultSecurityGroup(vpcID)}
 }
 
 func (f *filterEnv) group(t *testing.T, name string) string {
