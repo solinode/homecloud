@@ -3,6 +3,7 @@
 **A self-hosted, AWS-compatible cloud in one binary: point your real Terraform, AWS CLI and SDK code at it, and it runs on real containers and VMs on your machine.**
 
 <p align="center">
+  <a href="https://homecloud.pages.dev"><b>Website</b></a> ·
   <a href="https://homecloud.pages.dev/demo/"><b>Live demo console</b></a> ·
   <a href="#quick-start"><b>Quick start</b></a> ·
   <a href="docs/aws-compat.md"><b>AWS compatibility</b></a> ·
@@ -19,6 +20,16 @@
 - **See what happened.** A web console modeled on AWS's, CloudWatch logs and metrics for every resource, and a CloudTrail record of every AWS API call, so a failed test run can be inspected instead of guessed at.
 
 Built for **developers who want a real AWS-compatible target for local development and CI**. It also suits **college labs** teaching AWS without accounts or bills, and **small teams and homelabs** that want AWS tooling on their own hardware.
+
+#### Support partners
+
+<p align="center">
+  <a href="https://tailscale.com/"><img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" alt="Tailscale" height="70"/></a>
+</p>
+
+<p align="center">
+  <a href="https://coderabbit.ai/"><img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png" alt="CodeRabbit" height="40"/></a>
+</p>
 
 <p align="center">
   <img src="docs/images/console-home.png" alt="HomeCloud console home" width="100%">
@@ -209,14 +220,6 @@ See the [open issues](https://github.com/solinode/homecloud/issues) for everythi
 Start with **[CONTRIBUTING.md](CONTRIBUTING.md)**: how to build, run the tests and pick up a [good first issue](https://github.com/solinode/homecloud/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22). Missing an AWS operation your code needs? Open a [compatibility gap](https://github.com/solinode/homecloud/issues/new?template=compatibility_gap.yml) issue. By contributing you agree to the [Contributor License Agreement](CLA.md) and the [Code of Conduct](CODE_OF_CONDUCT.md).
 
 Chat with us on **[Discord](https://discord.gg/pemra9uaC9)**.
-
-### Support partners
-
-<p>
-  <a href="https://tailscale.com/"><img src="https://logovectorseek.com/wp-content/uploads/2023/04/tailscale-inc-logo-vector.png" alt="Tailscale" height="50"/></a>
-  &nbsp;&nbsp;
-  <a href="https://coderabbit.ai/"><img src="https://sindresorhus.com/assets/thanks/coderabbit-logo.png" alt="CodeRabbit" height="30"/></a>
-</p>
 
 ## License
 
