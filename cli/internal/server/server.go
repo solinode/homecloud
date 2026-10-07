@@ -24,6 +24,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/homecloudhq/homecloud/cli/internal/svc"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/acm"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/appautoscaling"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/autoscaling"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cfn"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cloudwatch"
@@ -294,6 +295,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	secSvc.RegisterAWS()
 	kmsSvc.RegisterAWS()
 	ssmSvc.RegisterAWS()
+	appautoscaling.New(env).RegisterAWS()
 	ddb.RegisterAWS()
 	wireLambda(lambdaSvc, iamSvc, tg, eventsSvc, s3Svc, ecrSvc)
 	lambdaSvc.Streams = ddbStreams{ddb}
