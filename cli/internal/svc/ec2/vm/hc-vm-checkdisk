@@ -1,0 +1,53 @@
+#!/bin/sh
+# Refuses a VM disk file that could make QEMU or qemu-img open anything but
+# the file itself. Volumes can hold files written by someone other than
+# HomeCloud (a container instance the volume was attached to before, a restored
+# backup), and QEMU follows symbolic links, qcow2 backing files and qcow2
+# external data files wherever they point.
+#
+#   hc-vm-checkdisk raw FILE          FILE, when it exists, is a regular file (no symlink)
+#   hc-vm-checkdisk qcow2 FILE [DIR]  FILE is a regular qcow2 file with no external data
+#                                     file, and no backing file, or one directly in DIR
+#
+# The qcow2 header is read here with od rather than qemu-img, which would
+# already open the external data file it names.
+set -eu
+mode=$1; f=$2; dir=${3:-}
+fail() { echo "[homecloud] refusing the disk $f: $*" >&2; exit 1; }
+[ ! -L "$f" ] || fail "it is a symbolic link"
+case $mode in
+  raw)
+    [ ! -e "$f" ] || [ -f "$f" ] || fail "it is not a regular file"
+    exit 0 ;;
+  qcow2) ;;
+  *) echo "usage: hc-vm-checkdisk raw|qcow2 FILE [DIR]" >&2; exit 2 ;;
+esac
+[ -f "$f" ] || fail "it is not a regular file"
+hex() { od -An -v -tx1 -j "$1" -N "$2" "$f" | tr -d ' \n'; }
+num() {
+  h=$(hex "$1" "$2")
+  [ ${#h} -eq $(($2 * 2)) ] || fail "its qcow2 header is truncated"
+  [ "${h#[89abcdef]}" = "$h" ] || fail "its qcow2 header is invalid"
+  echo $((0x$h))
+}
+[ "$(hex 0 4)" = 514649fb ] || fail "it is not a qcow2 image"
+version=$(num 4 4)
+off=$(num 8 8)
+size=$(num 16 4)
+if [ "$version" -ge 3 ]; then
+  incompat=$(num 72 8)
+  [ $((incompat & 4)) -eq 0 ] || fail "it has an external data file"
+fi
+[ "$off" -ne 0 ] || exit 0 # no backing file
+[ -n "$dir" ] || fail "it has a backing file"
+[ "$size" -ge 1 ] && [ "$size" -le 1023 ] || fail "its backing file name is invalid"
+# Only plain path characters: no json: or protocol (nbd:, ...) names.
+bad=$(dd if="$f" bs=1 skip="$off" count="$size" 2>/dev/null | tr -d 'A-Za-z0-9._/-' | wc -c | tr -d ' ')
+[ "$bad" -eq 0 ] || fail "its backing file name is not a plain path"
+backing=$(dd if="$f" bs=1 skip="$off" count="$size" 2>/dev/null)
+[ ${#backing} -eq "$size" ] || fail "its backing file name is truncated"
+name=${backing#"$dir"/}
+case $name in
+  "$backing" | "" | .* | */*) fail "its backing file $backing is not in $dir" ;;
+esac
+exit 0
