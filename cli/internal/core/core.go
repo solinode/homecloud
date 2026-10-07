@@ -25,7 +25,10 @@ const (
 	LabelService  = "homecloud.service"
 	LabelResource = "homecloud.resource"
 	LabelAccount  = "homecloud.account"
-	DefaultRegion = "us-east-1"
+	// TestAccountPrefix starts the account label of the disposable objects Go
+	// tests create (package dockertest); a real installation's is 12 digits.
+	TestAccountPrefix = "hctest-"
+	DefaultRegion     = "us-east-1"
 	// Partition is the ARN partition. HomeCloud uses AWS's so that SDKs and
 	// tools that validate ARNs (Terraform, CDK) accept HomeCloud's.
 	Partition = "aws"

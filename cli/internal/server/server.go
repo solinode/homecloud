@@ -104,7 +104,8 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	runtime.Account = account
 	if cs, err := dk.ManagedContainers(); err == nil {
 		for _, c := range cs {
-			if other := c.Labels[core.LabelAccount]; other != "" && other != account {
+			// Objects of a running Go test (dockertest) are not another installation.
+			if other := c.Labels[core.LabelAccount]; other != "" && other != account && !strings.HasPrefix(other, core.TestAccountPrefix) {
 				return fmt.Errorf("this Docker host already runs HomeCloud account %s (container %s); "+
 					"start HomeCloud with that installation's --data-dir, or remove its containers first", other, strings.TrimPrefix(c.Names[0], "/"))
 			}
