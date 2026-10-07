@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.4.0 (2026-10-07)
 
 - HomeCloud as a drop-in AWS for tests ([docs/integrations.md](docs/integrations.md)): a GitHub Action (`integrations/github-action`) that installs a checksum-verified release, starts the server and exports `AWS_ENDPOINT_URL` and credentials, and testcontainers modules for Go (`integrations/testcontainers-go`) and Python (`integrations/testcontainers-python`) that run the HomeCloud image and clean up every container it started.
 - Official container image `ghcr.io/solinode/homecloud` (linux/amd64 and linux/arm64, published by the release workflow as `:<version>` and `:latest`): `docker run -d --name homecloud -p 127.0.0.1:8080:8080 -v /var/run/docker.sock:/var/run/docker.sock -v homecloud-data:/data ghcr.io/solinode/homecloud`. Running in a container on the Docker host it manages, HomeCloud joins every VPC at a reserved address (the third-to-last of the range, never allocated) so workloads reach the API there through `host.docker.internal`, and reaches MinIO, the registry, DNS and function environments over Docker networks instead of loopback ports. ECS tasks now get `host.docker.internal` too. `homecloud` inside the container calls the local server, and the install script installs the CLI without Docker (with a note) instead of stopping. A new Install test workflow (manual, weekly and on release tags) checks the install script on Ubuntu, Debian and macOS and the image.
