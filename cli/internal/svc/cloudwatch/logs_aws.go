@@ -29,34 +29,49 @@ func (s *Service) registerLogsAWS() {
 			"AlreadyExists":    "ResourceAlreadyExistsException",
 		},
 		Ops: map[string]awsapi.Op{
-			"CreateLogGroup":              s.awsCreateLogGroup,
-			"DeleteLogGroup":              s.awsDeleteLogGroup,
-			"DescribeLogGroups":           s.awsDescribeLogGroups,
-			"PutRetentionPolicy":          s.awsPutRetentionPolicy,
-			"DeleteRetentionPolicy":       s.awsDeleteRetentionPolicy,
-			"CreateLogStream":             s.awsCreateLogStream,
-			"DeleteLogStream":             s.awsDeleteLogStream,
-			"DescribeLogStreams":          s.awsDescribeLogStreams,
-			"PutLogEvents":                s.awsPutLogEvents,
-			"GetLogEvents":                s.awsGetLogEvents,
-			"FilterLogEvents":             s.awsFilterLogEvents,
-			"TagLogGroup":                 s.awsTagLogGroup,
-			"UntagLogGroup":               s.awsUntagLogGroup,
-			"ListTagsLogGroup":            s.awsListTagsLogGroup,
-			"TagResource":                 s.awsTagResource,
-			"UntagResource":               s.awsUntagResource,
-			"ListTagsForResource":         s.awsListTagsForResource,
-			"StartQuery":                  s.awsStartQuery,
-			"GetQueryResults":             s.awsGetQueryResults,
-			"StopQuery":                   s.awsStopQuery,
-			"DescribeQueries":             s.awsDescribeQueries,
-			"PutMetricFilter":             s.awsPutMetricFilter,
-			"DescribeMetricFilters":       s.awsDescribeMetricFilters,
-			"DeleteMetricFilter":          s.awsDeleteMetricFilter,
-			"TestMetricFilter":            s.awsTestMetricFilter,
-			"PutSubscriptionFilter":       s.awsPutSubscriptionFilter,
-			"DescribeSubscriptionFilters": s.awsDescribeSubscriptionFilters,
-			"DeleteSubscriptionFilter":    s.awsDeleteSubscriptionFilter,
+			"CreateLogGroup":               s.awsCreateLogGroup,
+			"DeleteLogGroup":               s.awsDeleteLogGroup,
+			"DescribeLogGroups":            s.awsDescribeLogGroups,
+			"PutRetentionPolicy":           s.awsPutRetentionPolicy,
+			"DeleteRetentionPolicy":        s.awsDeleteRetentionPolicy,
+			"CreateLogStream":              s.awsCreateLogStream,
+			"DeleteLogStream":              s.awsDeleteLogStream,
+			"DescribeLogStreams":           s.awsDescribeLogStreams,
+			"PutLogEvents":                 s.awsPutLogEvents,
+			"GetLogEvents":                 s.awsGetLogEvents,
+			"FilterLogEvents":              s.awsFilterLogEvents,
+			"TagLogGroup":                  s.awsTagLogGroup,
+			"UntagLogGroup":                s.awsUntagLogGroup,
+			"ListTagsLogGroup":             s.awsListTagsLogGroup,
+			"TagResource":                  s.awsTagResource,
+			"UntagResource":                s.awsUntagResource,
+			"ListTagsForResource":          s.awsListTagsForResource,
+			"StartQuery":                   s.awsStartQuery,
+			"GetQueryResults":              s.awsGetQueryResults,
+			"StopQuery":                    s.awsStopQuery,
+			"DescribeQueries":              s.awsDescribeQueries,
+			"PutQueryDefinition":           s.awsPutQueryDefinition,
+			"DescribeQueryDefinitions":     s.awsDescribeQueryDefinitions,
+			"DeleteQueryDefinition":        s.awsDeleteQueryDefinition,
+			"PutDeliverySource":            s.awsPutDeliverySource,
+			"GetDeliverySource":            s.awsGetDeliverySource,
+			"DescribeDeliverySources":      s.awsDescribeDeliverySources,
+			"DeleteDeliverySource":         s.awsDeleteDeliverySource,
+			"PutDeliveryDestination":       s.awsPutDeliveryDestination,
+			"GetDeliveryDestination":       s.awsGetDeliveryDestination,
+			"DescribeDeliveryDestinations": s.awsDescribeDeliveryDestinations,
+			"DeleteDeliveryDestination":    s.awsDeleteDeliveryDestination,
+			"CreateDelivery":               s.awsCreateDelivery,
+			"GetDelivery":                  s.awsGetDelivery,
+			"DescribeDeliveries":           s.awsDescribeDeliveries,
+			"DeleteDelivery":               s.awsDeleteDelivery,
+			"PutMetricFilter":              s.awsPutMetricFilter,
+			"DescribeMetricFilters":        s.awsDescribeMetricFilters,
+			"DeleteMetricFilter":           s.awsDeleteMetricFilter,
+			"TestMetricFilter":             s.awsTestMetricFilter,
+			"PutSubscriptionFilter":        s.awsPutSubscriptionFilter,
+			"DescribeSubscriptionFilters":  s.awsDescribeSubscriptionFilters,
+			"DeleteSubscriptionFilter":     s.awsDeleteSubscriptionFilter,
 		},
 	})
 }
@@ -885,6 +900,9 @@ func (s *Service) awsTagResource(q *awsapi.Req) (any, error) {
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
+	if _, ok, err := s.deliveryTags(q, "logs:TagResource", in.ResourceArn, in.Tags, nil); ok {
+		return nil, err
+	}
 	name, err := s.resourceGroup(in.ResourceArn)
 	if err != nil {
 		return nil, err
@@ -906,6 +924,9 @@ func (s *Service) awsUntagResource(q *awsapi.Req) (any, error) {
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
+	if _, ok, err := s.deliveryTags(q, "logs:UntagResource", in.ResourceArn, nil, in.TagKeys); ok {
+		return nil, err
+	}
 	name, err := s.resourceGroup(in.ResourceArn)
 	if err != nil {
 		return nil, err
@@ -922,6 +943,12 @@ func (s *Service) awsListTagsForResource(q *awsapi.Req) (any, error) {
 	}
 	if err := q.Bind(&in); err != nil {
 		return nil, err
+	}
+	if tags, ok, err := s.deliveryTags(q, "logs:ListTagsForResource", in.ResourceArn, nil, nil); ok {
+		if err != nil {
+			return nil, err
+		}
+		return map[string]any{"tags": tags}, nil
 	}
 	name, err := s.resourceGroup(in.ResourceArn)
 	if err != nil {

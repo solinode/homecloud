@@ -3,6 +3,7 @@ package cloudwatch
 import (
 	"bytes"
 	"encoding/json"
+	"net/http"
 	"os"
 	"os/exec"
 	"strconv"
@@ -11,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/homecloudhq/homecloud/cli/internal/awsapi"
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
 )
 
@@ -154,6 +156,115 @@ func TestLogsAWSCLI(t *testing.T) {
 	h.AWS(t, "logs", "delete-log-group", "--log-group-name", "/app/web")
 	if out, err := h.AWSErr(t, "logs", "delete-log-group", "--log-group-name", "/app/web"); err == nil || !strings.Contains(out, "ResourceNotFoundException") {
 		t.Fatalf("delete missing group: %v %s", err, out)
+	}
+}
+
+// Current AWS SDKs (and so Terraform's provider) call CloudWatch over Smithy
+// RPC v2 CBOR.
+func TestCloudWatchRPCv2CBOR(t *testing.T) {
+	h, _ := newAWS(t)
+	call := func(op string, in map[string]any) (int, http.Header, map[string]any) {
+		t.Helper()
+		body, err := awsapi.CBORMarshal(in)
+		if err != nil {
+			t.Fatal(err)
+		}
+		hdr := http.Header{"Smithy-Protocol": {"rpc-v2-cbor"}, "Content-Type": {"application/cbor"}, "Accept": {"application/cbor"}}
+		st, rh, raw := h.Signed(t, "monitoring", "POST", "/service/GraniteServiceVersion20100801/operation/"+op, hdr, body)
+		out := map[string]any{}
+		if len(raw) > 0 {
+			j, err := awsapi.CBORToJSON(raw)
+			if err != nil {
+				t.Fatalf("%s: response is not CBOR: %v %x", op, err, raw)
+			}
+			_ = json.Unmarshal(j, &out)
+		}
+		return st, rh, out
+	}
+	st, rh, out := call("PutMetricAlarm", map[string]any{"AlarmName": "cpu", "Namespace": "App", "MetricName": "CPU", "Statistic": "Average",
+		"Period": 60, "EvaluationPeriods": 1, "Threshold": 80.5, "ComparisonOperator": "GreaterThanThreshold", "Tags": []map[string]string{{"Key": "team", "Value": "core"}}})
+	if st != 200 || rh.Get("Smithy-Protocol") != "rpc-v2-cbor" || rh.Get("Content-Type") != "application/cbor" {
+		t.Fatalf("put: %d %v %v", st, rh, out)
+	}
+	st, _, out = call("DescribeAlarms", map[string]any{"AlarmNames": []string{"cpu"}})
+	alarms, _ := out["MetricAlarms"].([]any)
+	if st != 200 || len(alarms) != 1 {
+		t.Fatalf("describe: %d %v", st, out)
+	}
+	a := alarms[0].(map[string]any)
+	if a["Threshold"] != 80.5 || a["EvaluationPeriods"] != float64(1) || a["StateValue"] != "INSUFFICIENT_DATA" {
+		t.Fatalf("alarm: %v", a)
+	}
+	// Timestamps go out as CBOR tag 1, which the SDKs require.
+	body, _ := awsapi.CBORMarshal(map[string]any{"AlarmNames": []string{"cpu"}})
+	_, _, raw := h.Signed(t, "monitoring", "POST", "/service/GraniteServiceVersion20100801/operation/DescribeAlarms",
+		http.Header{"Smithy-Protocol": {"rpc-v2-cbor"}}, body)
+	if !bytes.Contains(raw, []byte("StateUpdatedTimestamp\xc1")) {
+		t.Fatalf("StateUpdatedTimestamp is not a tagged time: %x", raw)
+	}
+	st, rh, out = call("GetDashboard", map[string]any{"DashboardName": "nope"})
+	if st != 404 || out["__type"] != "ResourceNotFound" || rh.Get("X-Amzn-Query-Error") != "ResourceNotFound;Sender" || !strings.Contains(rh.Get("Content-Type"), "cbor") {
+		t.Fatalf("error: %d %v %v", st, rh, out)
+	}
+	st, _, out = call("NoSuchOperation", map[string]any{})
+	if st != 400 || out["__type"] != "UnknownOperationException" {
+		t.Fatalf("unknown op: %d %v", st, out)
+	}
+}
+
+// Saved Logs Insights queries (aws_cloudwatch_query_definition).
+func TestLogsQueryDefinitions(t *testing.T) {
+	h, _ := newAWS(t)
+	id := h.AWSJSON(t, "logs", "put-query-definition", "--name", "app/errors", "--query-string", "fields @message | filter @message like /ERROR/",
+		"--log-group-names", "/app")["queryDefinitionId"].(string)
+	h.AWSJSON(t, "logs", "put-query-definition", "--name", "other", "--query-string", "fields @timestamp")
+	defs := h.AWSJSON(t, "logs", "describe-query-definitions", "--query-definition-name-prefix", "app/")["queryDefinitions"].([]any)
+	if len(defs) != 1 || defs[0].(map[string]any)["queryDefinitionId"] != id || defs[0].(map[string]any)["logGroupNames"].([]any)[0] != "/app" {
+		t.Fatalf("describe: %v", defs)
+	}
+	if again := h.AWSJSON(t, "logs", "put-query-definition", "--query-definition-id", id, "--name", "app/errors", "--query-string", "fields @message")["queryDefinitionId"]; again != id {
+		t.Fatalf("update returned %v", again)
+	}
+	if d := h.AWSJSON(t, "logs", "delete-query-definition", "--query-definition-id", id); d["success"] != true {
+		t.Fatalf("delete: %v", d)
+	}
+	if o, err := h.AWSErr(t, "logs", "delete-query-definition", "--query-definition-id", id); err == nil || !strings.Contains(o, "ResourceNotFoundException") {
+		t.Fatalf("delete twice: %v %s", err, o)
+	}
+}
+
+// Vended log delivery records, which the terraform-aws-modules EventBridge
+// module creates for every bus.
+func TestLogsDelivery(t *testing.T) {
+	h, _ := newAWS(t)
+	acct := h.Env.AccountID
+	bus := "arn:aws:events:us-east-1:" + acct + ":event-bus/orders"
+	src := h.AWSJSON(t, "logs", "put-delivery-source", "--name", "orders", "--resource-arn", bus, "--log-type", "ERROR_LOGS",
+		"--tags", "team=core")["deliverySource"].(map[string]any)
+	if src["service"] != "events" || src["arn"] != "arn:aws:logs:us-east-1:"+acct+":delivery-source:orders" {
+		t.Fatalf("source: %v", src)
+	}
+	if o, err := h.AWSErr(t, "logs", "put-delivery-source", "--name", "orders", "--resource-arn", bus+"x", "--log-type", "ERROR_LOGS"); err == nil || !strings.Contains(o, "ConflictException") {
+		t.Fatalf("source for another resource: %v %s", err, o)
+	}
+	tags := h.AWSJSON(t, "logs", "list-tags-for-resource", "--resource-arn", src["arn"].(string))["tags"].(map[string]any)
+	if tags["team"] != "core" {
+		t.Fatalf("tags: %v", tags)
+	}
+	dst := h.AWSJSON(t, "logs", "put-delivery-destination", "--name", "to-logs", "--delivery-destination-configuration",
+		"destinationResourceArn=arn:aws:logs:us-east-1:"+acct+":log-group:/bus")["deliveryDestination"].(map[string]any)
+	if dst["deliveryDestinationType"] != "CWL" {
+		t.Fatalf("destination: %v", dst)
+	}
+	dl := h.AWSJSON(t, "logs", "create-delivery", "--delivery-source-name", "orders", "--delivery-destination-arn", dst["arn"].(string))["delivery"].(map[string]any)
+	if o, err := h.AWSErr(t, "logs", "delete-delivery-source", "--name", "orders"); err == nil || !strings.Contains(o, "ConflictException") {
+		t.Fatalf("delete a source in use: %v %s", err, o)
+	}
+	h.AWS(t, "logs", "delete-delivery", "--id", dl["id"].(string))
+	h.AWS(t, "logs", "delete-delivery-destination", "--name", "to-logs")
+	h.AWS(t, "logs", "delete-delivery-source", "--name", "orders")
+	if o, err := h.AWSErr(t, "logs", "get-delivery-source", "--name", "orders"); err == nil || !strings.Contains(o, "ResourceNotFoundException") {
+		t.Fatalf("get deleted source: %v %s", err, o)
 	}
 }
 
