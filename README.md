@@ -100,6 +100,22 @@ Everything runs as containers on Docker, labelled so HomeCloud never touches con
 
 You need **Docker** (Docker Engine on Linux, or Docker Desktop / OrbStack on macOS and Windows).
 
+### Try it in one command
+
+```bash
+docker run -d --name homecloud -p 127.0.0.1:8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock -v homecloud-data:/data \
+  ghcr.io/solinode/homecloud
+docker logs homecloud          # prints the root console password (once)
+```
+
+Open **http://127.0.0.1:8080** and sign in as `root`. Point the AWS CLI at it with
+`eval "$(docker exec homecloud homecloud aws-env)"`, and use the bundled CLI with
+`docker exec homecloud homecloud ...`. HomeCloud runs its services as containers on the same Docker
+host, next to its own. Mounting the Docker socket gives the container control of that host, as the
+binary has when you run it directly. Publish on `127.0.0.1` as above unless other machines need it; for
+those, see [Docker](docs/install-server.md#docker) in the server guide (`--public-url`, TLS).
+
 ### Install
 
 **Linux / macOS**

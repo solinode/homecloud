@@ -86,7 +86,8 @@ homecloud version
 
 The script detects `linux` and `amd64`/`arm64`, downloads the latest release from GitHub, verifies its
 SHA-256 checksum, and installs `/usr/local/bin/homecloud` (using `sudo` when that directory is not
-writable). It stops with a message if Docker is missing. Two environment variables change its behavior:
+writable). Without Docker it still installs the CLI, and says that the server needs Docker. Two
+environment variables change its behavior:
 
 ```bash
 # pin a release, or install somewhere else
@@ -101,6 +102,56 @@ homecloud doctor
 
 At this point it reports the server as not running, which is expected; the Docker section should be
 green.
+
+### Docker
+
+Instead of the binary, you can run the official image, `ghcr.io/solinode/homecloud` (linux/amd64 and
+linux/arm64; tags `latest` and one per release, e.g. `0.4.0`). It runs `homecloud serve` and manages
+the host's Docker through the mounted socket, so the services it starts (MinIO, functions, instances,
+databases) are containers next to it on the same host:
+
+```bash
+docker run -d --name homecloud --restart unless-stopped \
+  -p 127.0.0.1:8080:8080 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  -v homecloud-data:/data \
+  ghcr.io/solinode/homecloud
+docker logs homecloud                     # first start: the root console password, shown once
+eval "$(docker exec homecloud homecloud aws-env)"   # AWS CLI and SDKs on this machine
+docker exec homecloud homecloud ec2 ls    # the homecloud CLI, inside the container
+```
+
+What to know:
+
+- **The socket is root on the host.** Whoever controls the container controls the Docker host, exactly
+  like the `homecloud` binary run by a member of the `docker` group. The entrypoint runs the server as
+  the unprivileged `homecloud` user (uid 10001), added to the group that owns the socket; set
+  `HOMECLOUD_RUN_AS_ROOT=1` to keep root.
+- **Data** lives in `/data` (the `homecloud-data` volume above, or a bind mount). It holds the state,
+  the credentials file and `config.json`; flags you pass after the image name (`... ghcr.io/solinode/homecloud
+  serve --public-url https://cloud.example.com`) are saved there as with the binary. The services' own data
+  is in Docker volumes on the host, as usual.
+- **Address.** Inside the container the API listens on `0.0.0.0:8080` (`HOMECLOUD_ADDR`), and the `-p`
+  flag decides who reaches it. Publish on `127.0.0.1` unless other machines need it; to expose it, put
+  a reverse proxy in front ([section 6](#6-expose-it-safely)) and set `--public-url`, or publish
+  `0.0.0.0:8080:8080` with `--tls-self-signed`. If you publish on another host port
+  (`-p 127.0.0.1:9090:8080`), pass `--public-url http://localhost:9090` so links HomeCloud generates
+  (API Gateway, function URLs, queue URLs) point at it.
+- **Workloads reach the API** at the HomeCloud container's own address: it joins every VPC network at a
+  reserved address (the third-to-last of the VPC range) and the default bridge, and functions, tasks and
+  instances get `host.docker.internal` mapped to it. Nothing extra needs publishing. HomeCloud reaches
+  MinIO, the registry, the DNS server and function environments directly over those networks.
+- **Published ports** of instances, load balancers, MinIO (`127.0.0.1:9500`), the registry
+  (`localhost:5500`) and DNS (`127.0.0.1:8053`) are on the host, as with the binary.
+- **Host networking** (`--network host`) also works: HomeCloud then behaves exactly like the binary on the
+  host. Pass `serve --addr 127.0.0.1:8080` there unless you want the API on every host address.
+- **One installation per Docker host.** Like the binary, the container refuses to start when the host
+  runs another installation's containers.
+- **Upgrade:** `docker pull ghcr.io/solinode/homecloud`, then recreate the container with the same
+  volume; data is migrated at start. `homecloud backup` works through `docker exec` (write the archive
+  under `/data` and `docker cp` it out).
+- The `homecloud service` and `homecloud upgrade` commands are for the binary; with the image, Docker's
+  restart policy and image tags do their jobs.
 
 ## 4. First start
 
