@@ -17,7 +17,8 @@ inputs:
   services-wait:
     description: >-
       Services to wait for besides the API, comma or newline separated (s3, ecr, route53).
-      Services that run inside the HomeCloud process are ready as soon as the API is.
+      Services that run inside the HomeCloud process (sqs, dynamodb, lambda, ...) are
+      ready as soon as the API is; unknown names fail the step.
     required: false
     default: ""
   wait-timeout:
@@ -36,10 +37,12 @@ outputs:
     description: Path of the server log.
 
 # A JavaScript action rather than a composite one: only JavaScript (and Docker)
-# actions can declare a post step, which prints the server log when the job fails.
-# All the work happens in setup.sh; main.js and post.js only run it and print the log.
+# actions can declare a post step. It runs after every job: it prints the server
+# log (collapsed), stops HomeCloud and removes its Docker resources, so
+# self-hosted runners are left clean. The work is in setup.sh and post.sh;
+# main.js and post.js only run them.
 runs:
   using: node24
   main: main.js
   post: post.js
-  post-if: failure()
+  post-if: always()

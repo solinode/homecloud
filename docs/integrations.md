@@ -40,8 +40,9 @@ jobs:
 The action downloads the release, checks it against `checksums.txt`, runs `homecloud
 serve` in the background (data and log under `$RUNNER_TEMP`), waits for
 `/api/v1/health`, and exports `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`,
-`AWS_SECRET_ACCESS_KEY` (masked), `AWS_REGION` and `AWS_DEFAULT_REGION`. If the job fails,
-a post step prints the server log. Inputs, outputs and boto3/Terraform examples:
+`AWS_SECRET_ACCESS_KEY` (masked), `AWS_REGION` and `AWS_DEFAULT_REGION`. After the job,
+a post step prints the server log (collapsed), stops HomeCloud and removes its Docker
+resources. Inputs, outputs and boto3/Terraform examples:
 [integrations/github-action/README.md](../integrations/github-action/README.md).
 
 ## testcontainers-go
@@ -111,22 +112,26 @@ eval "$(homecloud aws-env)"      # AWS_ENDPOINT_URL, keys, region
 aws s3 ls
 ```
 
-With Docker only, run the image the same way the testcontainers modules do:
+With Docker only, run the image the same way the testcontainers modules do. Until
+`ghcr.io/solinode/homecloud` is published, use the image built above (`homecloud:test`);
+afterwards, replace it with `ghcr.io/solinode/homecloud`:
 
 ```sh
+docker build -f integrations/testdata/Dockerfile -t homecloud:test cli
 docker run -d --name homecloud --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
-  ghcr.io/solinode/homecloud serve --data-dir /data --addr 127.0.0.1:18080
+  homecloud:test serve --data-dir /data --addr 127.0.0.1:18080
 until curl -fs http://127.0.0.1:18080/api/v1/health; do sleep 1; done
 docker exec homecloud homecloud aws-env      # credentials; the endpoint is http://127.0.0.1:18080
 ```
 
-To clean up afterwards, remove the HomeCloud container, then everything labelled with its
-account (`docker logs homecloud | grep "created account"` shows it):
+To clean up afterwards, remove the HomeCloud container with its data volume (`-v`), then
+everything labelled with its account (`docker logs homecloud | grep "created account"`
+shows it):
 
 ```sh
-docker rm -f homecloud
-docker rm -f $(docker ps -aq --filter label=homecloud.account=ACCOUNT)
+docker rm -fv homecloud
+docker rm -fv $(docker ps -aq --filter label=homecloud.account=ACCOUNT)
 docker network rm $(docker network ls -q --filter label=homecloud.account=ACCOUNT)
 docker volume rm $(docker volume ls -q --filter label=homecloud.account=ACCOUNT)
 ```

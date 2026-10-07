@@ -26,6 +26,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+      - name: Input validation
+        run: bash integrations/github-action/test/inputs.sh
       - id: homecloud
         uses: ./integrations/github-action
         with:

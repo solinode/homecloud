@@ -70,6 +70,9 @@ class HomeCloudContainer(DockerContainer):
         startup_timeout: float = 180,
         **kwargs: Any,
     ) -> None:
+        # Host networking is required (see the module docstring); every other
+        # Docker option the caller passes (platform, mem_limit, ...) is kept.
+        kwargs["network_mode"] = "host"
         super().__init__(image, **kwargs)
         self.port = port
         self.wait_for_services = [s.lower() for s in wait_for_services]
@@ -79,7 +82,6 @@ class HomeCloudContainer(DockerContainer):
         self.with_command(["serve", "--data-dir", _DATA_DIR, "--addr", f"127.0.0.1:{port}"])
         self.with_env("HOMECLOUD_DATA_DIR", _DATA_DIR)
         self.with_volume_mapping(docker_socket, "/var/run/docker.sock", "rw")
-        self.with_kwargs(network_mode="host")
 
     # Lifecycle
 

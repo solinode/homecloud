@@ -128,15 +128,19 @@ func Run(ctx context.Context, img string, opts ...testcontainers.ContainerCustom
 		testcontainers.WithWaitStrategyAndDeadline(3*time.Minute, wait.ForAll(strategies...)),
 	}
 	ctr, err := testcontainers.Run(ctx, img, append(base, opts...)...)
-	var c *Container
-	if ctr != nil {
-		c = &Container{Container: ctr}
+	if ctr == nil {
+		return nil, fmt.Errorf("run homecloud: %w", err)
 	}
+	c := &Container{Container: ctr}
+	// The account comes first, even when the start failed: HomeCloud may already
+	// have created helper containers, and Terminate finds them by account.
+	account, accErr := c.readAccount()
+	c.account = account
 	if err != nil {
 		return c, fmt.Errorf("run homecloud: %w", err)
 	}
-	if c.account, err = c.readAccount(ctx); err != nil {
-		return c, err
+	if accErr != nil {
+		return c, accErr
 	}
 	host, err := ctr.Host(ctx)
 	if err != nil {
@@ -246,16 +250,24 @@ func RemoveResources(ctx context.Context, account string) error {
 
 var accountRE = regexp.MustCompile(`first start: created account (\d+)`)
 
-func (c *Container) readAccount(ctx context.Context) (string, error) {
+// readAccount finds the account in the first-start log. It uses its own
+// context, so it still works when the caller's expired during a failed start.
+func (c *Container) readAccount() (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
 	rc, err := c.Logs(ctx)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("homecloud: read log: %w", err)
 	}
 	defer rc.Close()
 	b, err := io.ReadAll(rc)
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("homecloud: read log: %w", err)
 	}
+	return accountFromLog(b)
+}
+
+func accountFromLog(b []byte) (string, error) {
 	m := accountRE.FindSubmatch(b)
 	if m == nil {
 		return "", errors.New("homecloud: no account in the first-start log")

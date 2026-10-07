@@ -10,7 +10,7 @@ The action:
 2. starts `homecloud serve` in the background (data in `$RUNNER_TEMP/homecloud-data`, log in `$RUNNER_TEMP/homecloud.log`),
 3. waits for `/api/v1/health` and for any services listed in `services-wait`,
 4. exports `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (masked), `AWS_REGION`, `AWS_DEFAULT_REGION` and `HOMECLOUD_DATA_DIR` for the following steps, and puts `homecloud` on `PATH`,
-5. prints the server log in a post step when the job fails.
+5. in a post step after every job, prints the server log (collapsed), stops HomeCloud and removes the containers, networks and volumes it created (so self-hosted runners stay clean).
 
 HomeCloud runs every service on Docker, so use a runner with Docker: `ubuntu-latest` works
 as is. macOS and Windows hosted runners have no Docker.
@@ -35,7 +35,7 @@ jobs:
 | --- | --- | --- |
 | `version` | `latest` | Release to install, e.g. `v0.3.0` (the `v` is optional). |
 | `port` | `8080` | Port the API listens on, on `127.0.0.1`. |
-| `services-wait` | (none) | Comma or newline separated services to wait for. `s3`, `ecr` and `route53` start containers in the background; everything else runs inside the HomeCloud process and is ready with the API. |
+| `services-wait` | (none) | Comma or newline separated services to wait for. `s3`, `ecr` and `route53` start containers in the background; in-process services (`sqs`, `dynamodb`, `lambda`, ...) are ready with the API; an unknown name fails the step. |
 | `wait-timeout` | `180` | Seconds to wait for the API and the services. |
 
 ### Outputs
@@ -123,4 +123,4 @@ provider "aws" {
   must be free on the runner.
 - The root console password from the first-start log is masked as well.
 - This is a JavaScript action (`node24`) only because composite actions cannot declare a
-  post step; all the work is in `setup.sh`, and it has no dependencies to install.
+  post step; all the work is in `setup.sh` and `post.sh`, and it has no dependencies to install.

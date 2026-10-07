@@ -6,6 +6,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/service/dynamodb"
@@ -16,6 +17,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/moby/moby/client"
 	"github.com/testcontainers/testcontainers-go"
+	"github.com/testcontainers/testcontainers-go/wait"
 
 	homecloud "github.com/solinode/homecloud/integrations/testcontainers-go"
 )
@@ -111,21 +113,68 @@ func TestHomeCloud(t *testing.T) {
 	}
 }
 
+// TestRunFailureStillCleansUp makes Run fail after HomeCloud has started (and
+// created its helper containers): the returned container must still know its
+// account, so that Terminate removes them.
+func TestRunFailureStillCleansUp(t *testing.T) {
+	testcontainers.SkipIfProviderIsNotHealthy(t)
+	ctx := context.Background()
+
+	hc, err := homecloud.Run(ctx, image(), testcontainers.WithAdditionalWaitStrategyAndDeadline(
+		20*time.Second, wait.ForLog("s3: MinIO ready"), wait.ForLog("a line HomeCloud never logs")))
+	if err == nil {
+		t.Error("Run succeeded; want a wait-strategy failure")
+	}
+	if hc == nil {
+		t.Fatal("Run returned no container")
+	}
+	account := hc.AccountID()
+	if account == "" {
+		t.Error("no account after a failed start")
+	}
+	if n := countResources(t, account); n == 0 {
+		t.Error("HomeCloud created no helper resources before the failure; the test proves nothing")
+	}
+	if err := testcontainers.TerminateContainer(hc); err != nil {
+		t.Errorf("terminate: %v", err)
+	}
+	assertNoResources(t, account)
+}
+
 // assertNoResources checks that Terminate left nothing of the account behind.
 func assertNoResources(t *testing.T, account string) {
 	t.Helper()
+	if n := countResources(t, account); n > 0 {
+		t.Errorf("left behind: %d containers, networks and volumes of account %s", n, account)
+	}
+}
+
+// countResources counts the containers, networks and volumes of account.
+func countResources(t *testing.T, account string) int {
+	t.Helper()
+	if account == "" {
+		t.Error("no account to look up")
+		return -1
+	}
 	ctx := context.Background()
 	cli, err := testcontainers.NewDockerClientWithOpts(ctx)
 	if err != nil {
 		t.Error(err)
-		return
+		return -1
 	}
 	defer cli.Close()
 	f := client.Filters{}.Add("label", "homecloud.account="+account)
-	cs, _ := cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
-	ns, _ := cli.NetworkList(ctx, client.NetworkListOptions{Filters: f})
-	vs, _ := cli.VolumeList(ctx, client.VolumeListOptions{Filters: f})
-	if len(cs.Items)+len(ns.Items)+len(vs.Items) > 0 {
-		t.Errorf("left behind: %d containers, %d networks, %d volumes", len(cs.Items), len(ns.Items), len(vs.Items))
+	cs, err := cli.ContainerList(ctx, client.ContainerListOptions{All: true, Filters: f})
+	if err != nil {
+		t.Errorf("list containers: %v", err)
 	}
+	ns, err := cli.NetworkList(ctx, client.NetworkListOptions{Filters: f})
+	if err != nil {
+		t.Errorf("list networks: %v", err)
+	}
+	vs, err := cli.VolumeList(ctx, client.VolumeListOptions{Filters: f})
+	if err != nil {
+		t.Errorf("list volumes: %v", err)
+	}
+	return len(cs.Items) + len(ns.Items) + len(vs.Items)
 }

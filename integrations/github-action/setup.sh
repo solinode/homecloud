@@ -17,7 +17,27 @@ envf="${GITHUB_ENV:-/dev/null}"
 
 fail() { echo "::error::$*"; exit 1; }
 
+# Inputs are checked before anything starts, so a bad value never leaves a
+# half-started server (and its first-start log) behind.
 case "$port" in '' | *[!0-9]*) fail "port must be a number, got '$port'" ;; esac
+port=$((10#$port))
+[ "$port" -ge 1 ] && [ "$port" -le 65535 ] || fail "port must be between 1 and 65535, got '$HC_PORT'"
+case "$timeout" in '' | *[!0-9]*) fail "wait-timeout must be a whole number of seconds, got '$timeout'" ;; esac
+timeout=$((10#$timeout))
+[ "$timeout" -ge 1 ] || fail "wait-timeout must be at least 1 second"
+
+# Services that start containers in the background log a line when they are ready;
+# the others run inside the HomeCloud process and are ready with the API.
+in_process=" acm apigateway autoscaling cloudformation cloudtrail cloudwatch cognito-idp dynamodb ec2 ecs efs elb elbv2 elasticloadbalancing events eventbridge iam kms lambda logs rds secretsmanager sns sqs ssm states stepfunctions sts "
+waits=()
+for svc in $(echo "${HC_SERVICES_WAIT:-}" | tr ',\n' '  ' | tr '[:upper:]' '[:lower:]'); do
+  case "$svc" in
+    s3 | ecr | route53 | dns) waits+=("$svc") ;;
+    *) case "$in_process" in *" $svc "*) ;; *) fail "services-wait: unknown service '$svc' (background: s3, ecr, route53; in-process:$in_process)" ;; esac ;;
+  esac
+done
+[ "${HC_VALIDATE_ONLY:-}" = 1 ] && { echo "inputs OK: port=$port wait-timeout=$timeout waits=${waits[*]:-}"; exit 0; }
+
 command -v docker >/dev/null 2>&1 || fail "HomeCloud needs Docker on the runner (ubuntu-* runners have it)"
 docker info >/dev/null 2>&1 || fail "Docker is installed but not running"
 
@@ -62,37 +82,37 @@ export HOMECLOUD_DATA_DIR="$data_dir"
 nohup "$bin_dir/homecloud" serve --data-dir "$data_dir" --addr "127.0.0.1:$port" > "$log" 2>&1 &
 pid=$!
 echo "$pid" > "$tmp/homecloud.pid"
-[ -n "${GITHUB_STATE:-}" ] && { echo "log=$log" >> "$GITHUB_STATE"; echo "pid=$pid" >> "$GITHUB_STATE"; }
+if [ -n "${GITHUB_STATE:-}" ]; then
+  { echo "log=$log"; echo "pid=$pid"; echo "data=$data_dir"; } >> "$GITHUB_STATE"
+fi
 
-# The first-start log carries the root console password: mask it before anything prints the log.
+# The first-start log carries the root console password: mask it as soon as it
+# appears (post.sh masks it again before it prints the log).
+masked=
 mask_password() {
+  [ -n "$masked" ] && return 0
   local pw
   pw=$(sed -n 's/.*password: \([^ ]*\).*/\1/p' "$log" | head -n1)
-  [ -n "$pw" ] && echo "::add-mask::$pw"
+  if [ -n "$pw" ]; then echo "::add-mask::$pw"; masked=1; fi
   return 0
 }
 
 endpoint="http://127.0.0.1:$port"
 deadline=$((SECONDS + timeout))
-until curl -fsS "$endpoint/api/v1/health" >/dev/null 2>&1; do
-  if ! kill -0 "$pid" 2>/dev/null; then
-    mask_password
-    echo "::group::HomeCloud server log"; cat "$log"; echo "::endgroup::"
-    fail "homecloud serve exited before it became healthy"
-  fi
-  [ "$SECONDS" -lt "$deadline" ] || { mask_password; fail "HomeCloud was not healthy after ${timeout}s"; }
+until curl -fsS --connect-timeout 2 --max-time 5 "$endpoint/api/v1/health" >/dev/null 2>&1; do
+  mask_password
+  kill -0 "$pid" 2>/dev/null || fail "homecloud serve exited before it became healthy (the post step prints its log)"
+  [ "$SECONDS" -lt "$deadline" ] || fail "HomeCloud was not healthy after ${timeout}s"
   sleep 1
 done
 mask_password
 echo "HomeCloud is healthy at $endpoint"
 
-# Services that start containers in the background log a line when they are ready.
-for svc in $(echo "${HC_SERVICES_WAIT:-}" | tr ',\n' '  '); do
-  case "$(echo "$svc" | tr '[:upper:]' '[:lower:]')" in
+for svc in ${waits[@]+"${waits[@]}"}; do
+  case "$svc" in
     s3) ready="s3: MinIO ready" ;;
     ecr) ready="ecr: registry ready" ;;
     route53 | dns) ready="route53: DNS ready" ;;
-    *) echo "$svc runs inside the HomeCloud process: ready"; continue ;;
   esac
   echo "Waiting for $svc"
   until grep -q "$ready" "$log"; do
