@@ -207,8 +207,10 @@ func (s *Service) vmEnsureBase(ctx context.Context, runner string, base vm.Base,
 	s.vm.fetchMu.Lock()
 	defer s.vm.fetchMu.Unlock()
 	vol := s.vmImageVolume()
-	if err := s.env.Docker.CreateVolume(vol, runtime.Labels("ec2", "vm-images", nil)); err != nil {
-		return err
+	if _, err := s.env.Docker.C.InspectVolume(vol); err != nil {
+		if err := s.env.Docker.CreateVolume(vol, runtime.Labels("ec2", "vm-images", nil)); err != nil {
+			return err
+		}
 	}
 	fctx, cancel := context.WithTimeout(ctx, 45*time.Minute)
 	defer cancel()
@@ -217,6 +219,15 @@ func (s *Service) vmEnsureBase(ctx context.Context, runner string, base vm.Base,
 		Mounts: []runtime.Mount{{Volume: vol, Target: vm.ImagesDir}},
 	}); err != nil {
 		return fmt.Errorf("download %s: %w", f.URL, err)
+	}
+	if base.AgentImage != "" {
+		// Without the packages the guest installs the agent from its mirror, if it can reach it.
+		if out, err := s.env.Docker.RunOnce(fctx, runtime.RunSpec{
+			Image: base.AgentImage, Entrypoint: []string{"/bin/sh", "-c", vm.AgentFetchScript, "hc-agent-fetch"}, Cmd: []string{base.AgentCacheName(arch)},
+			Mounts: []runtime.Mount{{Volume: vol, Target: vm.ImagesDir}},
+		}); err != nil {
+			log.Printf("ec2: downloading the qemu-guest-agent packages for %s in %s failed (guests install it from their package mirror instead): %v %s", base.Key, base.AgentImage, err, tail(out, 600))
+		}
 	}
 	return nil
 }
@@ -300,6 +311,9 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 	}
 	if inst.VMAMI != "" {
 		spec.Env["HC_VM_AMI"] = "1"
+	}
+	if base.AgentImage != "" {
+		spec.Env["HC_VM_AGENT"] = base.AgentCacheName(mach.Arch)
 	}
 	return spec
 }
@@ -475,6 +489,9 @@ func (s *Service) launchVM(inst Instance, network string) {
 	s.syncPortsAsync(inst.ID) // groups may have changed while launching
 }
 
+// passtExitMarker starts the VM container's report of a passt that died.
+const passtExitMarker = "[homecloud] passt exited unexpectedly"
+
 // errPasstExited is what vmWaitReady returns when passt died under a running guest.
 var errPasstExited = errors.New("passt exited")
 
@@ -513,7 +530,14 @@ func (s *Service) vmWatchPasst(i Instance) {
 	if err != nil || res.ExitCode != 0 {
 		return
 	}
-	log.Printf("ec2: %s: passt exited under the running guest; restarting it with user-mode networking (the guest reboots, behind NAT)", i.ID)
+	// The report goes with the container: keep it in the server log.
+	report := ""
+	if out, err := s.env.Docker.Logs(i.ContainerID, 0, time.Time{}); err == nil {
+		if k := strings.LastIndex(out, passtExitMarker); k >= 0 {
+			report = head(out[k:], 4000)
+		}
+	}
+	log.Printf("ec2: %s: passt exited under the running guest; restarting it with user-mode networking (the guest reboots, behind NAT). %s", i.ID, report)
 	go func() {
 		defer core.Recover("ec2 passt fallback " + i.ID)
 		if err := s.vmFallbackToUser(i.ID); err != nil {
@@ -551,6 +575,13 @@ func (s *Service) vmPasstFailure(cid string) string {
 	return strings.Join(lines, "; ")
 }
 
+func head(s string, n int) string {
+	if len(s) > n {
+		s = s[:n]
+	}
+	return strings.TrimSpace(s)
+}
+
 func tail(s string, n int) string {
 	s = strings.TrimSpace(s)
 	if len(s) > n {
@@ -584,8 +615,8 @@ func (s *Service) vmWaitReady(inst Instance, since time.Time) error {
 			return nil
 		}
 		out, _ := s.env.Docker.Logs(inst.ContainerID, 0, since)
-		if strings.Contains(out, "[homecloud] passt exited unexpectedly") {
-			return fmt.Errorf("%w, so the guest has no network: %s", errPasstExited, tail(out[strings.LastIndex(out, "[homecloud] passt exited unexpectedly"):], 600))
+		if k := strings.LastIndex(out, passtExitMarker); k >= 0 {
+			return fmt.Errorf("%w, so the guest has no network: %s", errPasstExited, head(out[k:], 4000))
 		}
 		done, prompt := vm.Ready(out)
 		if done {

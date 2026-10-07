@@ -1,10 +1,11 @@
 package ec2_test
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
+	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -26,14 +27,11 @@ func TestVMDisksImagesAndBackup(t *testing.T) {
 	if os.Getenv("HC_TEST_VM") != "1" {
 		t.Skip("set HC_TEST_VM=1 to boot a real VM (slow; downloads a cloud image)")
 	}
-	// Everything this test creates is labelled with an account of its own, so the
-	// backup below archives only that (and never another installation's volumes).
-	acct := "vmdisks" + core.RandHex(8)
-	old := runtime.Account
-	runtime.Account = acct
-	t.Cleanup(func() { runtime.Account = old })
-
+	// dockertest (newVMLab) labels everything this test creates with an account of
+	// its own and removes it afterwards; the backup below archives only that
+	// account's volumes (never another installation's).
 	lab := newVMLab(t)
+	acct := runtime.Account
 	f, h, signer, sg := lab.filterEnv, lab.h, lab.signer, lab.sg
 	d := h.Env.Docker
 	// Volumes that outlive their instance (detached or not deleted on termination) and snapshots.
@@ -162,11 +160,23 @@ func TestVMDisksImagesAndBackup(t *testing.T) {
 	cfg := core.DefaultConfig()
 	cfg.DataDir = t.TempDir()
 	b := &system.Backup{Cfg: cfg, Docker: d, AccountID: acct, Version: "test", OwnVolumesOnly: true, Flatten: f.ec2.FlattenForBackup}
-	var archive bytes.Buffer
-	if err := b.Write(context.Background(), &archive, true, t.Logf); err != nil {
+	// The archive holds whole disks: a file, not memory.
+	archive, err := os.Create(filepath.Join(t.TempDir(), "backup.tar.gz"))
+	if err != nil {
 		t.Fatal(err)
 	}
-	t.Logf("backup: %d bytes", archive.Len())
+	defer archive.Close()
+	if err := b.Write(context.Background(), archive, true, t.Logf); err != nil {
+		t.Fatal(err)
+	}
+	size, _ := archive.Seek(0, io.SeekCurrent)
+	t.Logf("backup: %d bytes", size)
+	if size < 50<<20 {
+		t.Fatalf("the backup (%d bytes) cannot hold the instance's disk", size)
+	}
+	if _, err := archive.Seek(0, io.SeekStart); err != nil {
+		t.Fatal(err)
+	}
 	if err := d.Remove(cid); err != nil {
 		t.Fatal(err)
 	}
@@ -174,7 +184,7 @@ func TestVMDisksImagesAndBackup(t *testing.T) {
 		t.Fatal(err)
 	}
 	restoreCfg := t.TempDir()
-	if _, err := system.Restore(context.Background(), d, bytes.NewReader(archive.Bytes()), system.RestoreOptions{DataDir: restoreCfg, Force: true, Logf: t.Logf}); err != nil {
+	if _, err := system.Restore(context.Background(), d, archive, system.RestoreOptions{DataDir: restoreCfg, Force: true, Logf: t.Logf}); err != nil {
 		t.Fatal(err)
 	}
 	// The record still exists: reading it recreates the VM container from the restored disk.

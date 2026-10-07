@@ -8,6 +8,7 @@ import (
 	"io"
 	"net/http"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -34,7 +35,7 @@ func qgaSlot(cid string) chan struct{} {
 	return v.(chan struct{})
 }
 
-var errGuestAgent = errors.New("the guest agent is not responding (it is installed by cloud-init on first boot; images without it, or a guest that is still booting, cannot run commands)")
+var errGuestAgent = errors.New("qemu-guest-agent in the guest is not connected (it did not answer the handshake)")
 
 // qgaCall sends one command to the guest agent and returns its reply. ctx
 // bounds the whole call, including waiting for the agent and for other callers.
@@ -170,6 +171,19 @@ func (s *Service) guestExec(ctx context.Context, inst Instance, command string, 
 	}
 }
 
+// vmAgentWhy tells, from the guest's console, why its agent does not answer.
+func (s *Service) vmAgentWhy(i Instance) string {
+	out, _ := s.env.Docker.Logs(i.ContainerID, 0, time.Time{})
+	switch {
+	case strings.Contains(out, "homecloud: qemu-guest-agent could not be installed"):
+		return "installing it failed on this boot (its packages were not on the seed disk and the guest could not reach its package mirror; see /var/log/cloud-init-output.log in the guest); it is tried again at every boot"
+	case !strings.Contains(out, vm.CloudInitDone):
+		return "the guest is still booting (cloud-init installs and starts the agent at the end of the boot)"
+	default:
+		return "the guest has booted but the agent is not running (an image without it, or it was stopped or removed in the guest)"
+	}
+}
+
 // vmRunCommand is run-command for VM instances.
 func (s *Service) vmRunCommand(ctx context.Context, i Instance, command string, timeoutSeconds int) (any, error) {
 	timeout := time.Duration(timeoutSeconds) * time.Second
@@ -179,6 +193,9 @@ func (s *Service) vmRunCommand(ctx context.Context, i Instance, command string, 
 		var ce *core.Error
 		if errors.As(err, &ce) {
 			return nil, err
+		}
+		if errors.Is(err, errGuestAgent) {
+			return nil, core.Errf(http.StatusConflict, "InvalidInstanceState", "run-command needs qemu-guest-agent in the guest, and it is not connected: %s", s.vmAgentWhy(i))
 		}
 		return nil, core.Errf(http.StatusConflict, "InvalidInstanceState", "%v", err)
 	}

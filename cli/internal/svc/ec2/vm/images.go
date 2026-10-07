@@ -15,7 +15,38 @@ type Base struct {
 	Release     string
 	DefaultUser string
 	Files       map[Arch]File
+	// AgentImage is the Docker image of the same distribution release: the
+	// qemu-guest-agent packages (and the dependencies its minimal userland
+	// lacks) are downloaded in it once and handed to the guest on the seed
+	// disk, so installing the agent needs no network in the guest.
+	AgentImage string
 }
+
+// AgentCacheName is the directory in the image cache that holds the guest
+// agent's packages for an architecture.
+func (b Base) AgentCacheName(a Arch) string {
+	return fmt.Sprintf("%s-%s-qemu-guest-agent", b.Key, a.Deb())
+}
+
+// AgentFetchScript downloads qemu-guest-agent and the packages it needs that
+// the distribution's minimal image lacks into /images/<$1> (run in a container
+// of AgentImage). The file names are shortened: the seed disk is an ISO image.
+const AgentFetchScript = `set -eu
+dest=/images/$1
+[ -f "$dest/.complete" ] && exit 0
+rm -rf "$dest.part"
+mkdir -p "$dest.part/partial"
+export DEBIAN_FRONTEND=noninteractive
+apt-get update -qq
+apt-get install -y -qq --download-only --no-install-recommends -o Dir::Cache::archives="$dest.part" qemu-guest-agent >/dev/null
+rm -rf "$dest.part/partial" "$dest.part/lock"
+n=0
+for f in "$dest.part"/*.deb; do n=$((n+1)); mv "$f" "$dest.part/p$n.deb"; done
+[ "$n" -gt 0 ]
+touch "$dest.part/.complete"
+rm -rf "$dest"
+mv "$dest.part" "$dest"
+`
 
 // File is one architecture's image.
 type File struct {
@@ -42,7 +73,7 @@ func (b Base) For(a Arch) (File, error) {
 // Bases are the VM images HomeCloud can launch, by key.
 var Bases = map[string]Base{
 	"ubuntu-24.04": {
-		Key: "ubuntu-24.04", Release: "20260926", DefaultUser: "ubuntu",
+		Key: "ubuntu-24.04", Release: "20260926", DefaultUser: "ubuntu", AgentImage: "ubuntu:24.04",
 		Files: map[Arch]File{
 			ArchAArch64: {
 				URL: "https://cloud-images.ubuntu.com/releases/noble/release-20260926/ubuntu-24.04-server-cloudimg-arm64.img",
@@ -55,7 +86,7 @@ var Bases = map[string]Base{
 		},
 	},
 	"debian-12": {
-		Key: "debian-12", Release: "20260923-2610", DefaultUser: "debian",
+		Key: "debian-12", Release: "20260923-2610", DefaultUser: "debian", AgentImage: "debian:12",
 		Files: map[Arch]File{
 			ArchAArch64: {
 				URL: "https://cloud.debian.org/images/cloud/bookworm/20260923-2610/debian-12-genericcloud-arm64-20260923-2610.qcow2",

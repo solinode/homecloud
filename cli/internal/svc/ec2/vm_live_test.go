@@ -214,6 +214,13 @@ func newVMLab(t *testing.T) *vmLab {
 	f := newFilterEnv(t)
 	h := f.h
 	f.ec2.VMImageVolume = "hc-test-vm-images"
+	// The image cache is not the test's (dockertest removes everything labelled
+	// with the test's account): later tests and runs reuse the download.
+	if _, err := h.Env.Docker.C.InspectVolume(f.ec2.VMImageVolume); err != nil {
+		if err := h.Env.Docker.CreateVolume(f.ec2.VMImageVolume, map[string]string{"homecloud.test": "vm-image-cache"}); err != nil {
+			t.Fatal(err)
+		}
+	}
 	// Our own metadata service container, named before anything can attach the
 	// default one (a real installation's) to the test VPC.
 	f.ec2.IMDSContainer = fmt.Sprintf("hc-test-imds-%d", time.Now().UnixNano()%1e9)
@@ -315,7 +322,8 @@ func TestVMInstanceLifecycle(t *testing.T) {
 		t.Errorf("instance-id from the metadata service inside the guest = %q, want %q", got, id)
 	}
 	// (With HC_VM_NET=user, the fallback, the guest sits behind NAT at 10.0.2.15.)
-	if got := sshRun(t, c, "ip -4 -o addr show scope global"); !userNet && !strings.Contains(got, ip+"/") {
+	// (The fallback can also start later, when passt dies under the running guest: read the mode after the guest answered.)
+	if got := sshRun(t, c, "ip -4 -o addr show scope global"); f.vmGet(id).VMNetwork != "user" && !strings.Contains(got, ip+"/") {
 		t.Errorf("guest addresses %q lack the instance's private address %s", got, ip)
 	}
 	if got := sshRun(t, c, "uname -m"); got != "aarch64" && got != "x86_64" {

@@ -35,15 +35,30 @@ func (f *filterEnv) vmAccessChecks(t *testing.T, id string) {
 	// run-command: stdout, stderr and the exit code come from the guest. The
 	// agent may need a moment after the boot marker.
 	var r cmdResult
-	waitFor(t, "run-command through the guest agent", vmTestBudget, func() bool {
+	end, lastBody := time.Now().Add(vmTestBudget), ""
+	for {
 		code, res, body := runCmd(`echo out-$(hostname); echo err-text >&2; exit 3`, 60)
-		if code != http.StatusOK {
-			t.Logf("run-command: %d %s", code, body)
-			return false
+		if code == http.StatusOK {
+			r = res
+			break
 		}
-		r = res
-		return true
-	})
+		if body != lastBody {
+			t.Logf("run-command: %d %s", code, body)
+			lastBody = body
+		}
+		if time.Now().After(end) {
+			// What the guest printed about the agent (cloud-init's output is on the console).
+			var b strings.Builder
+			logs, _ := h.Env.Docker.Logs(f.vmGet(id).ContainerID, 0, time.Time{})
+			for _, l := range strings.Split(logs, "\n") {
+				if strings.Contains(l, "homecloud") || strings.Contains(l, "guest-agent") || strings.Contains(l, "guest_agent") || strings.Contains(l, "dpkg") || strings.Contains(l, "apt") || strings.Contains(l, "Cloud-init") {
+					b.WriteString(l + "\n")
+				}
+			}
+			t.Fatalf("timed out waiting for run-command through the guest agent; console lines about it:\n%s", b.String())
+		}
+		time.Sleep(3 * time.Second)
+	}
 	if r.Status != "Failed" || r.ExitCode != 3 || !strings.HasPrefix(r.Stdout, "out-ip-") || strings.TrimSpace(r.Stderr) != "err-text" {
 		t.Errorf("run-command result: %+v", r)
 	}

@@ -41,19 +41,56 @@ func (s Seed) Files() map[string][]byte {
 // CloudWatch guest metrics talk to. It is a script rather than cloud-config
 // `packages:` because cloud-init does not merge list keys of vendor-data with
 // the user's own cloud-config, which would silently drop the agent whenever
-// the user data sets packages or runcmd. The agent is socket-activated by the
+// the user data sets packages or runcmd. The agent is started by the
 // virtio-serial port on most images, hence the explicit start.
+//
+// The cloud images do not ship the agent. Its packages come from the seed disk
+// (AgentSeedDir, filled from the image cache by the VM container), so the
+// guest needs no network for it: a guest in user-mode networking, or one
+// whose network is not up yet, still gets it. The guest's package mirror is
+// the fallback, and while the agent is missing the script runs again on every
+// boot.
 const VendorData = `#!/bin/sh
-# HomeCloud: the guest agent behind run-command and the instance's metrics.
+# HomeCloud: installs and starts qemu-guest-agent (run-command and the instance's metrics).
+pb=/var/lib/cloud/scripts/per-boot/homecloud-guest-agent
 if ! command -v qemu-ga >/dev/null 2>&1; then
+  dev=$(blkid -L cidata 2>/dev/null || blkid -L CIDATA 2>/dev/null || true)
+  mnt=$(mktemp -d)
+  if [ -n "$dev" ] && mount -o ro "$dev" "$mnt" 2>/dev/null; then
+    debs=""
+    for f in "$mnt"/` + AgentSeedDir + `/*.deb; do
+      [ -f "$f" ] || continue
+      p=$(dpkg-deb -f "$f" Package)
+      dpkg-query -W -f='${Status}' "$p" 2>/dev/null | grep -q ' installed$' || debs="$debs $f"
+    done
+    n=0
+    while [ -n "$debs" ] && [ $n -lt 15 ]; do
+      dpkg -i $debs && break
+      n=$((n+1)); sleep 4 # dpkg may be locked by another first-boot job
+    done
+    umount "$mnt"
+  fi
+  rmdir "$mnt" 2>/dev/null
+fi
+if ! command -v qemu-ga >/dev/null 2>&1; then
+  echo "homecloud: qemu-guest-agent is not on the seed disk; installing it from the package mirror"
   export DEBIAN_FRONTEND=noninteractive
   n=0
   until apt-get update -qq && apt-get install -y -qq qemu-guest-agent; do
-    n=$((n+1)); [ $n -ge 5 ] && break; sleep 5
+    n=$((n+1)); [ $n -ge 3 ] && break; sleep 5
   done
 fi
-systemctl enable --now qemu-guest-agent 2>/dev/null || systemctl start qemu-guest-agent 2>/dev/null || true
+if command -v qemu-ga >/dev/null 2>&1; then
+  rm -f "$pb"
+  systemctl enable --now qemu-guest-agent 2>/dev/null || systemctl start qemu-guest-agent 2>/dev/null || true
+else
+  echo "homecloud: qemu-guest-agent could not be installed; trying again at the next boot" >&2
+  if [ "$0" != "$pb" ]; then mkdir -p "${pb%/*}" && cp "$0" "$pb" && chmod 0755 "$pb"; fi
+fi
 `
+
+// AgentSeedDir is the directory on the seed disk with the guest agent's packages.
+const AgentSeedDir = "qga"
 
 // ReadyMarkers are what the guest prints on its serial console when it is up.
 var (
