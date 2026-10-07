@@ -253,5 +253,5 @@ daemon already runs with the privileges of the administrator who set it up.
 ## Reported for the VM worker (not touched)
 
 None. The VM code was excluded from this audit and has not been reviewed; it needs its own pass before
-VM-backed instances are offered on public servers. `svc/ec2/imds.go` (the metadata service, outside the VM
+VM-backed instances are offered on public servers (done: `security-audit-vm-2026-10.md`). `svc/ec2/imds.go` (the metadata service, outside the VM
 files) is guarded by a per-process key held by the helper container and looks correct.
