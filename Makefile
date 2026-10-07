@@ -1,4 +1,4 @@
-# HomeCloud build. Requires Go 1.23+ and, for the console, Node.js 20+.
+# HomeCloud build. Requires Go 1.25+ (cli/go.mod) and, for the console, Node.js 22+.
 VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
 COMMIT  ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
 LDFLAGS := -s -w -X github.com/homecloudhq/homecloud/cli/cmd.Version=$(VERSION) -X github.com/homecloudhq/homecloud/cli/cmd.Commit=$(COMMIT)
