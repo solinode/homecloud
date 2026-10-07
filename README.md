@@ -1,6 +1,6 @@
 # HomeCloud
 
-**A self-hosted, AWS-compatible cloud in one binary: point your real Terraform, AWS CLI and SDK code at it, and it runs on real containers on your machine.**
+**A self-hosted, AWS-compatible cloud in one binary: point your real Terraform, AWS CLI and SDK code at it, and it runs on real containers and VMs on your machine.**
 
 <p align="center">
   <a href="https://homecloud.pages.dev/demo/"><b>Live demo console</b></a> ·
@@ -11,6 +11,8 @@
   <a href="docs/comparison.md"><b>vs. LocalStack, moto, MinIO…</b></a> ·
   <a href="https://discord.gg/pemra9uaC9"><b>Discord</b></a>
 </p>
+
+<p align="center"><b>Latest:</b> <a href="https://github.com/solinode/homecloud/releases/tag/v0.4.0">v0.4.0</a>: VM instances, a container image, a GitHub Action and testcontainers, 17/17 Terraform modules passing.</p>
 
 - **Your AWS code, unchanged.** HomeCloud speaks the AWS wire protocols (SigV4, awsJson, awsQuery, REST). Set `AWS_ENDPOINT_URL` and the AWS CLI, boto3 and the Terraform AWS provider work against it, with IAM policies enforced as on AWS.
 - **Real compute, not mocks.** Lambda runs on AWS's official runtime images, RDS is a real PostgreSQL/MySQL/MariaDB, S3 is MinIO, EC2 instances are containers you can shell into or full VMs under QEMU/KVM, load balancers are nginx, security groups are iptables rules. Your integration tests hit the same kind of thing production does.
@@ -192,12 +194,13 @@ homecloud serve --addr 0.0.0.0:8080 --public-host homelab.tailnet.ts.net --tls-s
 
 ## Security
 
-HomeCloud needs the Docker socket, which is root-equivalent on the host: treat HomeCloud administrators as host administrators. The API binds to `127.0.0.1` by default. Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
+HomeCloud needs the Docker socket, which is root-equivalent on the host: treat HomeCloud administrators as host administrators. The API binds to `127.0.0.1` by default. Findings and fixes from the audits are in [docs/security-audit-2026-10.md](docs/security-audit-2026-10.md) and [docs/security-audit-vm-2026-10.md](docs/security-audit-vm-2026-10.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
 ## Roadmap
 
-- **In progress:** a container image for one-command starts
-- **Planned:** multi-node clusters ([#55](https://github.com/solinode/homecloud/issues/55)), edge compute and hardware integrations ([#56](https://github.com/solinode/homecloud/issues/56))
+- **Shipped in [0.4.0](https://github.com/solinode/homecloud/releases/tag/v0.4.0):** VM-backed EC2 instances (QEMU, KVM when available), the container image `ghcr.io/solinode/homecloud`, a GitHub Action and testcontainers modules for Go and Python, a nightly Terraform modules compatibility suite ([17 of 17 pass](docs/compatibility.md)), and fixes from two security audits ([platform](docs/security-audit-2026-10.md), [VM instances](docs/security-audit-vm-2026-10.md)).
+- **Next:** signed releases with SBOMs, safer upgrades with automatic backup and rollback, Prometheus metrics for HomeCloud itself, a guided first run in the console, testcontainers for Java and Node, and passt networking for VMs on Ubuntu 24.04 hosts ([#90](https://github.com/solinode/homecloud/issues/90)).
+- **Planned:** multi-node clusters ([#55](https://github.com/solinode/homecloud/issues/55), [design](docs/design/multi-node.md)), edge compute and hardware integrations ([#56](https://github.com/solinode/homecloud/issues/56), [design](docs/design/edge.md)).
 
 See the [open issues](https://github.com/solinode/homecloud/issues) for everything planned.
 
