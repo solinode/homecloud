@@ -1,8 +1,10 @@
 # Using AWS tools with HomeCloud
 
 HomeCloud speaks the AWS wire protocols, so the AWS CLI, the AWS SDKs and tools built on them
-(Terraform, CDK, Pulumi, boto3 scripts) work against it. Point them at your HomeCloud endpoint
-and use a HomeCloud access key:
+work against it. The test suite drives the real AWS CLI, boto3 and Terraform; CloudFormation
+(including CDK-synthesized templates) is covered too. Other SDKs and Pulumi use the same
+protocols but are not tested yet. Point them at your HomeCloud endpoint and use a HomeCloud
+access key:
 
 ```bash
 export AWS_ENDPOINT_URL=http://localhost:8080   # your HomeCloud API address
