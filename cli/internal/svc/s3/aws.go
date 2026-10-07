@@ -150,7 +150,7 @@ func (s *Service) claimsUnsigned(r *http.Request) bool {
 		return v2 || s.knownBucket(b)
 	}
 	p := r.URL.Path
-	for _, pre := range []string{"/api/", "/website/", "/lambda-url/", "/apigw/", "/cognito/", "/_next/"} {
+	for _, pre := range []string{"/api/", "/website/", "/lambda-url/", "/apigw/", "/cognito/", "/_next/", "/lambda-code/", "/_s3/"} {
 		if strings.HasPrefix(p, pre) {
 			return false
 		}
@@ -464,6 +464,26 @@ func (s *Service) serveAWS(a *s3req) error {
 		}
 		if err := s.authorize(a, op.action, res); err != nil { // recorded as the call's action
 			return err
+		}
+	}
+	// Uploads can set retention or a legal hold through headers: AWS needs the
+	// matching permissions for that, not just s3:PutObject.
+	if op.object && (op.action == "s3:PutObject" || op.name == "CopyObject" || op.name == "CreateMultipartUpload") {
+		h := q.R.Header
+		need := ""
+		if h.Get("X-Amz-Object-Lock-Mode") != "" || h.Get("X-Amz-Object-Lock-Retain-Until-Date") != "" {
+			need = "s3:PutObjectRetention"
+		}
+		if h.Get("X-Amz-Object-Lock-Legal-Hold") != "" {
+			need = "s3:PutObjectLegalHold"
+		}
+		if need != "" {
+			if err := s.authorize(a, need, res); err != nil {
+				return err
+			}
+			if err := s.authorize(a, op.action, res); err != nil { // recorded as the call's action
+				return err
+			}
 		}
 	}
 	if _, err := s.cl(); err != nil {
@@ -993,6 +1013,15 @@ func (s *Service) deleteObjects(a *s3req) error {
 		return awsapi.Errorf(http.StatusBadRequest, "MalformedXML", "the XML you provided was not well-formed")
 	}
 	for _, o := range in.Objects {
+		// Keys in the body are forwarded as they are, so they need the same check
+		// as the key in the URL: "allowed/../secret" is authorized as a key under
+		// allowed/ but may name another object.
+		if err := checkKey(o.Key); err != nil {
+			return err
+		}
+		if len(o.Key) > 1024 || strings.ContainsRune(o.Key, 0) {
+			return awsapi.Errorf(http.StatusBadRequest, "KeyTooLongError", "the object key is invalid")
+		}
 		act := "s3:DeleteObject"
 		if o.VersionID != "" {
 			act = "s3:DeleteObjectVersion"

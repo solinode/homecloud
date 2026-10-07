@@ -704,6 +704,41 @@ func (e *ECS) registerTaskDef(az authz, in TaskDefinition) (TaskDefinition, erro
 	if err := e.authorizeSecrets(az, in); err != nil {
 		return in, err
 	}
+	// Passing a role to tasks needs iam:PassRole on the role's real ARN, on every
+	// path that registers task definitions (native API, AWS API, CloudFormation):
+	// running the task hands the role's credentials to the task's code.
+	if in.TaskRole != "" {
+		arn := in.TaskRole
+		if e.Roles != nil {
+			var err error
+			if arn, err = e.Roles.TaskRole(in.TaskRole); err != nil {
+				return in, core.BadRequest("task role: %v", err)
+			}
+		}
+		if err := az("iam:PassRole", arn); err != nil {
+			return in, err
+		}
+		in.TaskRole = arn
+	}
+	if in.ExecutionRole != "" {
+		arn := core.CanonicalARN(in.ExecutionRole)
+		if !strings.HasPrefix(arn, "arn:") {
+			arn = e.env.ARN("iam", "role/"+in.ExecutionRole)
+		}
+		if err := az("iam:PassRole", arn); err != nil {
+			return in, err
+		}
+	}
+	// Running the image discloses its contents to the task: pulling from the local
+	// registry needs the same permissions as pulling from ECR.
+	if repo, ok := core.LocalImageRepo(in.Image, e.env.Cfg.ECRPort); ok {
+		arn := e.env.ARN("ecr", "repository/"+repo)
+		for _, action := range []string{"ecr:BatchGetImage", "ecr:GetDownloadUrlForLayer"} {
+			if err := az(action, arn); err != nil {
+				return in, err
+			}
+		}
+	}
 	e.tdMu.Lock()
 	defer e.tdMu.Unlock()
 	rev := 1

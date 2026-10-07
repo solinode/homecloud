@@ -469,6 +469,24 @@ func TestIAMDenied(t *testing.T) {
 	}
 }
 
+// A subscription's dead-letter queue receives messages on the subscriber's
+// behalf, so naming one needs sqs:SendMessage on it, as subscribing a queue does.
+func TestRedrivePolicyNeedsSendMessageOnTheQueue(t *testing.T) {
+	h, _, _ := harness(t)
+	acct := h.Env.AccountID
+	arn := h.AWSJSON(t, "sns", "create-topic", "--name", "t")["TopicArn"].(string)
+	h.AWS(t, "sqs", "create-queue", "--queue-name", "victim")
+	h.AWS(t, "sqs", "create-queue", "--queue-name", "mine")
+	sub := h.AWSJSON(t, "sns", "subscribe", "--topic-arn", arn, "--protocol", "sqs", "--notification-endpoint", "arn:aws:sqs:us-east-1:"+acct+":mine")["SubscriptionArn"].(string)
+	akid, secret := h.User(t, "topics-only", "SNSFullAccess")
+	rp := `{"deadLetterTargetArn":"arn:aws:sqs:us-east-1:` + acct + `:victim"}`
+	out, err := h.AWSAs(t, akid, secret, "", "sns", "set-subscription-attributes", "--subscription-arn", sub, "--attribute-name", "RedrivePolicy", "--attribute-value", rp)
+	if err == nil || !strings.Contains(out, "AuthorizationError") {
+		t.Fatalf("redrive policy naming a queue the caller may not write to: %v %s", err, out)
+	}
+	h.AWS(t, "sns", "set-subscription-attributes", "--subscription-arn", sub, "--attribute-name", "RedrivePolicy", "--attribute-value", rp) // root may
+}
+
 // TestNativeAPI checks the native routes and their interplay with the AWS API.
 func TestNativeAPI(t *testing.T) {
 	h, _, _ := harness(t)

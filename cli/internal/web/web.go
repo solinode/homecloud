@@ -14,7 +14,23 @@ var dist embed.FS
 
 // Handler serves the console. Unknown paths fall back to their .html page or
 // to index.html so client-side routes survive a reload.
-func Handler() http.Handler {
+func Handler() http.Handler { return withSecurityHeaders(handler()) }
+
+// withSecurityHeaders forbids framing the console (clickjacking of a signed-in
+// administrator), plugins and foreign form targets, and keeps the console's
+// URLs out of Referer headers.
+func withSecurityHeaders(h http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hd := w.Header()
+		hd.Set("X-Frame-Options", "DENY")
+		hd.Set("Content-Security-Policy", "frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self'")
+		hd.Set("X-Content-Type-Options", "nosniff")
+		hd.Set("Referrer-Policy", "no-referrer")
+		h.ServeHTTP(w, r)
+	})
+}
+
+func handler() http.Handler {
 	root, _ := fs.Sub(dist, "dist")
 	files := http.FileServerFS(root)
 	if _, err := fs.Stat(root, "index.html"); err != nil {

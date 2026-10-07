@@ -98,6 +98,18 @@ func roleName(ref string) string {
 	return ref
 }
 
+// resolveResource maps the role a caller named in an iam:PassRole check (a bare
+// name, or an ARN with a wrong path or account part) to the role's real ARN, so
+// an Allow or Deny written for the real ARN applies whatever the spelling.
+func (s *Service) resolveResource(action, resource string) string {
+	if action == "iam:PassRole" {
+		if r, err := s.GetRole(resource); err == nil {
+			return r.ARN
+		}
+	}
+	return resource
+}
+
 // GetRole returns a role by name or ARN.
 func (s *Service) GetRole(ref string) (Role, error) {
 	r, err := store.Get[Role](s.env.Store, cRoles, roleName(ref))
@@ -141,7 +153,7 @@ func (s *Service) rolePrincipal(r Role, t tempCred) *httpx.Principal {
 		AccountID: s.env.AccountID, UserName: "assumed-role/" + r.Name + "/" + t.SessionName,
 		ARN:       s.env.ARN("sts", "assumed-role/"+r.Name+"/"+t.SessionName),
 		AccessKey: t.AccessKeyID, RoleName: r.Name, SessionName: t.SessionName,
-		Context: s.roleContext(r, t),
+		Context: s.roleContext(r, t), ResolveResource: s.resolveResource,
 	}
 	p.Can = func(action, resource string) bool {
 		return decide(docs, boundary, action, resource, CondContext(p.Context)) == allow
@@ -285,8 +297,11 @@ func (s *Service) ServiceRolePrincipal(ref, service, sessionName string) (*httpx
 
 // SessionToken issues temporary credentials carrying a user's own permissions.
 func (s *Service) SessionToken(p *httpx.Principal, seconds int) (Credentials, error) {
-	if p.RoleName != "" {
-		return Credentials{}, core.Errf(http.StatusForbidden, "AccessDenied", "GetSessionToken cannot be called with temporary role credentials")
+	if p.RoleName != "" || strings.HasPrefix(p.AccessKey, tempKeyPrefix) {
+		// As in AWS, only long-term credentials can mint session tokens; otherwise a
+		// stolen session could be renewed forever, outliving the revocation of the
+		// user's access keys.
+		return Credentials{}, core.Errf(http.StatusForbidden, "AccessDenied", "GetSessionToken cannot be called with temporary credentials")
 	}
 	ttl, err := stsTTL(seconds, nil)
 	if err != nil {

@@ -35,6 +35,9 @@ type LaunchConfig struct {
 	SecurityGroupIDs []string      `json:"security_group_ids"`
 	UserData         string        `json:"user_data,omitempty"`
 	FileSystems      []ec2.FSMount `json:"file_systems,omitempty"`
+	// IAMInstanceProfile is the launch template's instance profile; creating or
+	// updating a group needs iam:PassRole for its role.
+	IAMInstanceProfile string `json:"iam_instance_profile,omitempty"`
 }
 
 type Policy struct {
@@ -428,6 +431,9 @@ func (s *Service) authorizeLaunch(c authz, l LaunchConfig, targetGroups []string
 	if err := c.Authorize("ec2:RunInstances", "*"); err != nil {
 		return err
 	}
+	if err := s.ec2.PassProfile(c.Authorize, l.IAMInstanceProfile); err != nil {
+		return err
+	}
 	for _, m := range l.FileSystems {
 		if err := c.Authorize("elasticfilesystem:ClientMount", s.env.ARN("elasticfilesystem", "file-system/"+m.FileSystemID)); err != nil {
 			return err
@@ -486,6 +492,7 @@ func (s *Service) resolveTemplate(g *Group) error {
 	}
 	g.Template.ID, g.Template.Name = rt.ID, rt.Name
 	g.Launch.ImageID, g.Launch.InstanceType, g.Launch.SecurityGroupIDs, g.Launch.UserData = rt.Input.ImageID, rt.Input.InstanceType, rt.Input.SecurityGroupIDs, rt.Input.UserData
+	g.Launch.IAMInstanceProfile = rt.Input.IAMInstanceProfile
 	return nil
 }
 

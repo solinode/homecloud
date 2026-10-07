@@ -243,6 +243,24 @@ func CanonicalARN(s string) string {
 	return strings.Join(parts, ":")
 }
 
+// InternalErrorMessage is what clients are told when a request fails for a
+// reason that is not a *Error: the real error (file paths, Docker daemon output,
+// database errors) goes to the server log, not to the caller or the audit trail.
+const InternalErrorMessage = "an internal error occurred; details are in the server log"
+
+// IsLocalARN reports whether arn names a resource of this deployment: the same
+// partition and account, and the deployment's region (or none, for global
+// services). Code that delivers to "the resource named by this ARN" by looking
+// up only its name must check this first, or an ARN for another account or
+// region would be authorized as one resource and served as another.
+func IsLocalARN(arn, account string) bool {
+	parts := strings.SplitN(CanonicalARN(arn), ":", 6)
+	if len(parts) != 6 || parts[0] != "arn" || parts[1] != Partition || parts[4] != account {
+		return false
+	}
+	return parts[3] == Region || (parts[3] == "" && globalServices[parts[2]])
+}
+
 func Now() time.Time { return time.Now().UTC().Truncate(time.Second) }
 
 // Error is an API error with an AWS-style code and an HTTP status.

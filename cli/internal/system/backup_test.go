@@ -11,16 +11,14 @@ import (
 
 	docker "github.com/fsouza/go-dockerclient"
 	"github.com/homecloudhq/homecloud/cli/internal/core"
+	"github.com/homecloudhq/homecloud/cli/internal/dockertest"
 	"github.com/homecloudhq/homecloud/cli/internal/runtime"
 )
 
 func TestBackupRestoreRoundTrip(t *testing.T) {
-	d, err := runtime.New()
-	if err != nil || d.C.Ping() != nil {
-		t.Skip("Docker not available")
-	}
+	d := dockertest.Start(t)
 	ctx := context.Background()
-	acct := "bk" + core.RandHex(10)
+	acct := runtime.Account
 	vol := "hc-test-backup-" + core.RandHex(8)
 	labels := map[string]string{core.LabelManaged: "true", core.LabelAccount: acct, core.LabelService: "test"}
 	if err := d.CreateVolume(vol, labels); err != nil {

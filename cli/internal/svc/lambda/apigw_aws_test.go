@@ -1,7 +1,6 @@
 package lambda_test
 
 import (
-	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -11,7 +10,7 @@ import (
 	"testing"
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
-	"github.com/homecloudhq/homecloud/cli/internal/runtime"
+	"github.com/homecloudhq/homecloud/cli/internal/dockertest"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/cloudwatch"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/lambda"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
@@ -21,12 +20,7 @@ func gwHarness(t *testing.T, docker bool) (*awstest.Harness, *lambda.Service) {
 	t.Helper()
 	h := awstest.New(t)
 	if docker {
-		d, err := runtime.New()
-		if err != nil {
-			t.Skip("docker not available: ", err)
-		}
-		h.Env.Docker = d
-		runtime.Account = "gwtest" + h.Env.AccountID
+		h.Env.Docker = dockertest.Start(t)
 	}
 	cw, err := cloudwatch.New(h.Env)
 	if err != nil {
@@ -34,9 +28,7 @@ func gwHarness(t *testing.T, docker bool) (*awstest.Harness, *lambda.Service) {
 	}
 	v := vpc.New(h.Env)
 	if docker {
-		if err := v.EnsureDefault(context.Background()); err != nil {
-			t.Skip("cannot create the default VPC: ", err)
-		}
+		dockertest.DefaultVPC(t, v.EnsureDefault)
 		t.Cleanup(func() {
 			for _, x := range v.List() {
 				_ = v.DeleteVPC(x.ID)
@@ -45,6 +37,7 @@ func gwHarness(t *testing.T, docker bool) (*awstest.Harness, *lambda.Service) {
 	}
 	l := lambda.New(h.Env, cw, v)
 	l.Roles = roles{h.IAM}
+	l.HTTP = &http.Client{CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }} // tests proxy to 127.0.0.1
 	l.RegisterAWS()
 	l.Routes(h.Router)
 	return h, l

@@ -500,9 +500,8 @@ func (e *ECS) awsRegisterTaskDefinition(q *awsapi.Req) (any, error) {
 		}
 	}
 	if role := str(raw, "taskRoleArn"); role != "" {
-		if err := q.Authorize("iam:PassRole", role); err != nil {
-			return nil, err
-		}
+		// PassRole is checked against the resolved role ARN by registerTaskDef: a
+		// spelling such as role/x-/admin must not dodge a policy on role/admin.
 		if e.Roles != nil {
 			arn, err := e.Roles.TaskRole(role)
 			if err != nil {
@@ -513,9 +512,6 @@ func (e *ECS) awsRegisterTaskDefinition(q *awsapi.Req) (any, error) {
 		td.TaskRole = role
 	}
 	if role := str(raw, "executionRoleArn"); role != "" {
-		if err := q.Authorize("iam:PassRole", role); err != nil {
-			return nil, err
-		}
 		td.ExecutionRole = role
 	}
 	td, err := e.registerTaskDef(q.Authorize, td)

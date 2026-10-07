@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
-	"github.com/homecloudhq/homecloud/cli/internal/runtime"
+	"github.com/homecloudhq/homecloud/cli/internal/dockertest"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/vpc"
 )
@@ -25,17 +25,10 @@ func efsNoDocker(t *testing.T) *awstest.Harness {
 // efsLive serves EFS on real Docker with the default VPC, or skips.
 func efsLive(t *testing.T) (*awstest.Harness, *vpc.Service) {
 	t.Helper()
-	d, err := runtime.New()
-	if err != nil || d.C.Ping() != nil {
-		t.Skip("Docker not available")
-	}
 	h := awstest.New(t)
-	h.Env.Docker = d
-	runtime.Account = "efstest" + h.Env.AccountID
+	h.Env.Docker = dockertest.Start(t)
 	v := vpc.New(h.Env)
-	if err := v.EnsureDefault(t.Context()); err != nil {
-		t.Skipf("default vpc: %v", err)
-	}
+	dockertest.DefaultVPC(t, v.EnsureDefault)
 	t.Cleanup(func() {
 		for _, x := range v.List() {
 			_ = v.DeleteVPC(x.ID)

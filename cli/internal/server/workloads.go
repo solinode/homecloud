@@ -32,7 +32,7 @@ func workloadListenAddr(goos, bridgeGateway string) (addr string, ok bool) {
 // serveWorkloads serves h on l until the server is closed; the returned
 // function stops it.
 func serveWorkloads(l net.Listener, h http.Handler, logf func(string, ...any)) (stop func()) {
-	srv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Handler: h, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 256 << 10}
 	go func() {
 		if err := srv.Serve(l); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			logf("workload endpoint %s: %v", l.Addr(), err)

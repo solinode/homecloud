@@ -272,6 +272,14 @@ func (s *Service) ltData(q *awsapi.Req) (map[string]string, error) {
 			return nil, core.Errf(http.StatusBadRequest, "InvalidGroup.NotFound", "The security group '%s' does not exist", g)
 		}
 	}
+	// As in AWS, putting an instance profile in a template needs iam:PassRole.
+	ref := d["IamInstanceProfile.Arn"]
+	if ref == "" {
+		ref = d["IamInstanceProfile.Name"]
+	}
+	if err := s.PassProfile(q.Check, ref); err != nil {
+		return nil, err
+	}
 	return d, nil
 }
 

@@ -265,7 +265,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	}
 	lambdaSvc.VerifyJWT = cognitoSvc.VerifyToken
 	lambdaSvc.CheckAuthorizer = cognitoSvc.CheckClient
-	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc, sfn: sfnSvc}
+	tg := &targets{lambda: lambdaSvc, sqs: sqsSvc, sns: snsSvc, sfn: sfnSvc, account: account}
 	sfnSvc.Tasks = tg
 	sfnSvc.Call = func(ctx context.Context, p *httpx.Principal, service, op string, in any) (json.RawMessage, error) {
 		return awsapi.Call(ctx, p, account, service, op, in)
@@ -401,7 +401,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		return err
 	}
 	var handler http.Handler = trust.Wrap(root)
-	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second}
+	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 256 << 10}
 	if workloadLn != nil {
 		// Workloads are never proxies: their listeners ignore forwarding headers.
 		defer serveWorkloads(workloadLn, root, logf)()
@@ -420,7 +420,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if goruntime.GOOS == "linux" {
 		if host, _, _ := net.SplitHostPort(cfg.APIAddr); host == "127.0.0.1" || host == "localhost" {
 			if gw := dk.BridgeGateway(); gw != "" {
-				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: root, ReadHeaderTimeout: 10 * time.Second}
+				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: root, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 256 << 10}
 				go func() {
 					var err error
 					if cfg.TLSCert != "" {
@@ -454,6 +454,11 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 
 func vpcList(st *store.Store) []vpc.VPC { return store.List[vpc.VPC](st, "vpc_vpcs") }
 
+// inlineObjectCSP is the policy of object bytes shown from the native API: an
+// opaque origin, no scripts, forms or navigation, and only inline styles and
+// data:/same-origin media.
+const inlineObjectCSP = "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data: 'self'; media-src data: 'self'; font-src data:; form-action 'none'; base-uri 'none'"
+
 // sandboxUserContent isolates responses whose bytes come from users (static
 // websites, function URLs, HTTP APIs and inline object views). They share an
 // origin with the console, so without a sandbox a page could read the console's
@@ -461,17 +466,53 @@ func vpcList(st *store.Store) []vpc.VPC { return store.List[vpc.VPC](st, "vpc_vp
 func sandboxUserContent(h http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		p := r.URL.Path
-		if strings.HasPrefix(p, "/website/") || strings.HasPrefix(p, "/lambda-url/") || strings.HasPrefix(p, "/apigw/") ||
-			(strings.HasPrefix(p, "/api/v1/s3/") && strings.HasSuffix(p, "/object")) {
+		if strings.HasPrefix(p, "/api/v1/s3/") && strings.HasSuffix(p, "/object") {
+			// The console opens objects with ?access_token=<session> in the URL, which
+			// a script in the object could read from its own location and send away.
+			// So inline views run no scripts, load nothing from elsewhere and send no Referer.
+			w.Header().Set("Content-Security-Policy", inlineObjectCSP)
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+		} else if strings.HasPrefix(p, "/website/") || strings.HasPrefix(p, "/lambda-url/") || strings.HasPrefix(p, "/apigw/") {
 			w.Header().Set("Content-Security-Policy", "sandbox allow-scripts allow-forms allow-popups allow-modals allow-downloads")
 			w.Header().Set("X-Content-Type-Options", "nosniff")
 		}
 		if strings.HasPrefix(p, "/api/") {
 			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("Referrer-Policy", "no-referrer")
+		}
+		if csp := w.Header().Get("Content-Security-Policy"); csp != "" {
+			// Functions and HTTP integrations choose their own response headers: pin
+			// the sandbox so they cannot replace it and run on the console's origin.
+			w = &pinnedHeaders{ResponseWriter: w, pins: map[string]string{"Content-Security-Policy": csp, "X-Content-Type-Options": "nosniff"}}
 		}
 		h.ServeHTTP(w, r)
 	})
 }
+
+// pinnedHeaders re-applies fixed headers just before the response is written,
+// whatever the handler set in between.
+type pinnedHeaders struct {
+	http.ResponseWriter
+	pins map[string]string
+}
+
+func (p *pinnedHeaders) pin() {
+	for k, v := range p.pins {
+		p.Header().Set(k, v)
+	}
+}
+func (p *pinnedHeaders) WriteHeader(code int) { p.pin(); p.ResponseWriter.WriteHeader(code) }
+func (p *pinnedHeaders) Write(b []byte) (int, error) {
+	p.pin()
+	return p.ResponseWriter.Write(b)
+}
+func (p *pinnedHeaders) Flush() {
+	p.pin()
+	if f, ok := p.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+func (p *pinnedHeaders) Unwrap() http.ResponseWriter { return p.ResponseWriter }
 
 // withCORS allows the console dev server and other origins to call the API.
 // Credentials travel in the Authorization header, never cookies, so a wildcard is safe.

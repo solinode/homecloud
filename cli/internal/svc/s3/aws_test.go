@@ -24,6 +24,7 @@ import (
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
 	"github.com/homecloudhq/homecloud/cli/internal/core"
+	"github.com/homecloudhq/homecloud/cli/internal/dockertest"
 	"github.com/homecloudhq/homecloud/cli/internal/store"
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -56,8 +57,10 @@ func startMinIO(t *testing.T) string {
 			minioErr = "docker not available"
 			return
 		}
+		dockertest.SweepStale(t.Logf)
 		name := "s3awstest-" + strings.ToLower(core.RandHex(6))
 		out, err := exec.Command("docker", "run", "-d", "--name", name, "--user", "0", "-p", "127.0.0.1::9000",
+			"--label", core.LabelAccount+"="+dockertest.NewAccount(),
 			"-e", "MINIO_ROOT_USER="+minioUser, "-e", "MINIO_ROOT_PASSWORD="+minioPass,
 			minioImage, "server", "/data").CombinedOutput()
 		if err != nil {

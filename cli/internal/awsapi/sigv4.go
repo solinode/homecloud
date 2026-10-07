@@ -91,6 +91,15 @@ func ParseSignature(r *http.Request) (*Signature, error) {
 	if len(parts) != 5 || parts[4] != "aws4_request" || s.Signature == "" || len(s.SignedHeaders) == 0 {
 		return nil, Errorf(http.StatusBadRequest, "IncompleteSignature", "the request signature is malformed")
 	}
+	// As AWS does, insist that the host (and the operation header) are signed, so a
+	// captured signature can't be replayed against another host or operation.
+	signed := map[string]bool{}
+	for _, h := range s.SignedHeaders {
+		signed[h] = true
+	}
+	if !signed["host"] || (r.Header.Get("X-Amz-Target") != "" && !signed["x-amz-target"]) {
+		return nil, Errorf(http.StatusForbidden, "SignatureDoesNotMatch", "the host and x-amz-target headers must be signed")
+	}
 	s.AccessKeyID, s.Date, s.Region, s.Service = parts[0], parts[1], parts[2], parts[3]
 	t, err := time.Parse(amzDateFormat, dateStr)
 	if err != nil {

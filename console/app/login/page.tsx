@@ -10,8 +10,21 @@ import { Label } from "@/components/ui/label"
 import { Logo } from "@/components/console/topbar"
 import { BASE_PATH, errorMessage, getSession, login } from "@/lib/api"
 
+// safeNext only lets a same-site path through. Browsers read "\" as "/" and drop
+// tabs and newlines inside URLs, so "/\evil.example" and "/<tab>/evil.example"
+// both mean "//evil.example": refuse them by character, then confirm by resolving
+// the path against this origin.
 function safeNext(next: string | null): string {
   if (!next || !next.startsWith("/") || next.startsWith("//") || next.startsWith("/login")) return "/"
+  // eslint-disable-next-line no-control-regex
+  if (/[\\\u0000-\u001f\u007f]/.test(next)) return "/"
+  if (typeof window !== "undefined") {
+    try {
+      if (new URL(next, window.location.origin).origin !== window.location.origin) return "/"
+    } catch {
+      return "/"
+    }
+  }
   return next
 }
 
