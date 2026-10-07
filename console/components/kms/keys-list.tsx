@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { CopyButton } from "@/components/console/copy-button"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -18,18 +18,18 @@ import type { KmsKey } from "@/lib/types"
 
 import { CreateKeyDialog } from "./create-key-dialog"
 import { AliasesView } from "./aliases-view"
-import { KIND_LABEL, KeyStateBadge, ManagedBadge, isServiceManaged, isSymmetric, keyHref, keyKind, useKeyActions, useKmsKeys } from "./shared"
+import { KIND_LABEL, KeySpecTag, KeyStateBadge, ManagedBadge, isServiceManaged, isSymmetric, keyHref, keyKind, useKeyActions, useKmsKeys } from "./shared"
 
 function Aliases({ k }: { k: KmsKey }) {
   if (!k.aliases?.length) return <span className="text-muted-foreground">-</span>
   const [first, ...rest] = k.aliases
   return (
-    <span className="flex flex-wrap items-center gap-x-1.5">
-      <Link href={keyHref(k.id)} onClick={(e) => e.stopPropagation()} className={`${cellLinkClass()} font-mono text-[13px] break-all`}>
+    <span className="flex min-w-0 items-center gap-x-1.5">
+      <CellLink href={keyHref(k.id)} mono max="18rem">
         {first}
-      </Link>
+      </CellLink>
       {rest.length > 0 && (
-        <span className="text-muted-foreground text-xs" title={rest.join(", ")}>
+        <span className="text-muted-foreground shrink-0 text-xs whitespace-nowrap" title={rest.join(", ")}>
           +{rest.length} more
         </span>
       )}
@@ -47,9 +47,9 @@ const columns: Column<KmsKey>[] = [
         {k.aliases?.length ? (
           <span className="font-mono text-[13px]">{k.id.slice(0, 8)}...</span>
         ) : (
-          <Link href={keyHref(k.id)} onClick={(e) => e.stopPropagation()} className={`${cellLinkClass()} font-mono text-[13px]`}>
+          <CellLink href={keyHref(k.id)} mono title={k.id}>
             {k.id.slice(0, 8)}...
-          </Link>
+          </CellLink>
         )}
         <CopyButton value={k.id} label="Copy key ID" />
       </span>
@@ -60,7 +60,7 @@ const columns: Column<KmsKey>[] = [
   {
     id: "desc",
     header: "Description",
-    cell: (k) => <span className="line-clamp-2 max-w-72">{k.description || <span className="text-muted-foreground">-</span>}</span>,
+    cell: (k) => <CellText max="18rem">{k.description}</CellText>,
     value: (k) => k.description,
     hideBelow: "md",
   },
@@ -68,9 +68,9 @@ const columns: Column<KmsKey>[] = [
     id: "type",
     header: "Key type",
     cell: (k) => (
-      <span className="whitespace-nowrap">
+      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
         {KIND_LABEL[keyKind(k.key_spec)]}
-        {!isSymmetric(k) && <span className="text-muted-foreground ml-1 font-mono text-xs">{k.key_spec}</span>}
+        {!isSymmetric(k) && <KeySpecTag spec={k.key_spec} />}
       </span>
     ),
     value: (k) => `${keyKind(k.key_spec)} ${k.key_spec}`,

@@ -7,10 +7,11 @@ import { Eye, KeyRound, Plus, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ActionsMenu } from "@/components/console/actions-menu"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { formatDate } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
@@ -36,7 +37,11 @@ const MANAGED_BY_LABEL: Record<string, string> = {
 
 export function ManagedBadge({ by }: { by?: string }) {
   if (!by) return <span className="text-muted-foreground">-</span>
-  return <StatusBadge status="managed" label={MANAGED_BY_LABEL[by.toLowerCase()] ?? by} tone="info" />
+  return (
+    <Tag accent="info" mono={false} title={`Created and managed by ${MANAGED_BY_LABEL[by.toLowerCase()] ?? by}`}>
+      {MANAGED_BY_LABEL[by.toLowerCase()] ?? by}
+    </Tag>
+  )
 }
 
 export function SecretList() {
@@ -52,9 +57,9 @@ export function SecretList() {
       header: "Secret name",
       value: (s) => s.name,
       cell: (s) => (
-        <Link href={secretHref(s.name)} className="text-primary font-medium break-all hover:underline" onClick={(e) => e.stopPropagation()}>
+        <CellLink href={secretHref(s.name)} max="24rem">
           {s.name}
-        </Link>
+        </CellLink>
       ),
     },
     {
@@ -62,13 +67,7 @@ export function SecretList() {
       header: "Description",
       value: (s) => s.description,
       cell: (s) =>
-        s.description ? (
-          <span className="line-clamp-2 max-w-sm" title={s.description}>
-            {s.description}
-          </span>
-        ) : (
-          <span className="text-muted-foreground">-</span>
-        ),
+<CellText max="20rem">{s.description}</CellText>,
       hideBelow: "md",
     },
     { id: "managed", header: "Managed by", value: (s) => s.managed_by ?? "", cell: (s) => <ManagedBadge by={s.managed_by} />, hideBelow: "sm" },
@@ -80,9 +79,9 @@ export function SecretList() {
         s.rotation_error ? (
           <StatusBadge status="failed" label="Failed" tone="danger" />
         ) : s.rotation_enabled ? (
-          <span className="whitespace-nowrap">Enabled</span>
+          <StatusBadge status="enabled" />
         ) : (
-          <span className="text-muted-foreground">Disabled</span>
+          <StatusBadge status="disabled" />
         ),
       hideBelow: "lg",
     },

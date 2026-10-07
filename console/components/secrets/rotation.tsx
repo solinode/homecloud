@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { CodeBlock } from "@/components/console/code-block"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { Field } from "@/components/console/form-field"
 import { JsonEditor, jsonError } from "@/components/console/json-editor"
@@ -19,7 +20,6 @@ import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { FUNCTIONS_PATH, functionHref } from "@/components/lambda/common"
-import { CodeBlock } from "@/components/s3/common"
 import { formatDate } from "@/lib/format"
 import { api, seg } from "@/lib/api"
 import { useAction, useApi } from "@/lib/hooks"
@@ -69,7 +69,7 @@ export function RotationSection({ secret, onChanged }: { secret: Secret; onChang
     >
       <div className="flex flex-col gap-4">
         {secret.rotation_error && (
-          <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
+          <Alert variant="destructive">
             <AlertTriangle />
             <AlertTitle>The last rotation failed</AlertTitle>
             <AlertDescription className="break-words">{secret.rotation_error}</AlertDescription>
@@ -82,7 +82,7 @@ export function RotationSection({ secret, onChanged }: { secret: Secret; onChang
             {
               label: "Rotation function",
               value: fnName ? (
-                <Link href={functionHref(fnName)} className="text-primary font-mono text-[13px] break-all hover:underline" title={secret.rotation_lambda_arn}>
+                <Link href={functionHref(fnName)} className="text-primary font-mono text-[13px] break-all underline-offset-2 hover:underline" title={secret.rotation_lambda_arn}>
                   {fnName}
                 </Link>
               ) : (
@@ -294,17 +294,17 @@ export function ResourcePolicySection({ secret, onChanged }: { secret: Secret; o
               Block public access (reject policies that grant access to everyone)
             </Label>
           </div>
-          <div className="flex gap-2">
-            <Button size="sm" onClick={save} disabled={pending || !!err}>
-              {pending && <Loader2 className="animate-spin" />} Save policy
-            </Button>
+          <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={pending}>
               Cancel
+            </Button>
+            <Button size="sm" onClick={save} disabled={pending || !!err}>
+              {pending && <Loader2 className="animate-spin" />} Save policy
             </Button>
           </div>
         </div>
       ) : doc ? (
-        <CodeBlock code={doc} className="max-h-96 overflow-y-auto" />
+        <CodeBlock title="Resource policy (JSON)" code={doc} maxHeight="24rem" />
       ) : (
         <p className="text-muted-foreground text-sm">No resource policy is attached. Access is controlled by IAM policies only.</p>
       )}

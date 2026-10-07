@@ -8,7 +8,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
@@ -18,7 +18,7 @@ import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks
 import type { AccessKey, IamUser } from "@/lib/types"
 
 import { CreateUserDialog } from "./create-user-dialog"
-import { IAM, LINK, groupHref, useAccessKeysByUser, userHref } from "./common"
+import { IAM, groupHref, useAccessKeysByUser, userHref } from "./common"
 
 function KeysCell({ keys }: { keys: AccessKey[] | undefined }) {
   if (!keys) return <span className="text-muted-foreground">-</span>
@@ -60,10 +60,8 @@ export function UsersList() {
       header: "User name",
       value: (u) => u.name,
       cell: (u) => (
-        <span className="flex items-center gap-2">
-          <Link href={userHref(u.name)} className={LINK}>
-            {u.name}
-          </Link>
+        <span className="flex min-w-0 items-center gap-2">
+          <CellLink href={userHref(u.name)}>{u.name}</CellLink>
           {u.root && <StatusBadge status="root" tone="warning" label="Root" />}
         </span>
       ),

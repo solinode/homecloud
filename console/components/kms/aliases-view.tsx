@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import Link from "next/link"
 import { Loader2, Plus, Tags, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
@@ -9,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyButton } from "@/components/console/copy-button"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -17,7 +16,7 @@ import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { KmsAlias, KmsKey } from "@/lib/types"
 
-import { AliasInput, KMS_PATH, KeyPicker, KeyStateBadge, aliasError, isServiceManaged, keyHref, keyTypeLabel, normalizeAlias } from "./shared"
+import { AliasInput, KMS_PATH, KeyPicker, KeyStateBadge, KeyTypeTag, aliasError, isServiceManaged, keyHref, normalizeAlias } from "./shared"
 
 const ALIASES_PATH = `${KMS_PATH}/aliases`
 
@@ -35,8 +34,8 @@ export function AliasesView({ keys }: { keys: KmsKey[] | undefined }) {
       id: "name",
       header: "Alias name",
       cell: (a) => (
-        <span className="inline-flex items-center gap-1">
-          <span className="font-mono text-[13px] break-all">{a.name}</span>
+        <span className="inline-flex max-w-full items-center gap-1">
+          <CellText mono>{a.name}</CellText>
           <CopyButton value={a.name} label="Copy alias" />
         </span>
       ),
@@ -46,9 +45,9 @@ export function AliasesView({ keys }: { keys: KmsKey[] | undefined }) {
       id: "key",
       header: "Target key",
       cell: (a) => (
-        <Link href={keyHref(a.key_id)} className={`${cellLinkClass()} font-mono text-[13px]`} title={a.key_id}>
+        <CellLink href={keyHref(a.key_id)} mono title={a.key_id}>
           {a.key_id.slice(0, 8)}...
-        </Link>
+        </CellLink>
       ),
       value: (a) => a.key_id,
     },
@@ -57,7 +56,7 @@ export function AliasesView({ keys }: { keys: KmsKey[] | undefined }) {
       header: "Key type",
       cell: (a) => {
         const k = byId.get(a.key_id)
-        return k ? <span className="whitespace-nowrap">{keyTypeLabel(k)}</span> : <span className="text-muted-foreground">-</span>
+        return k ? <KeyTypeTag spec={k.key_spec} /> : <span className="text-muted-foreground">-</span>
       },
       value: (a) => byId.get(a.key_id)?.key_spec,
       hideBelow: "md",

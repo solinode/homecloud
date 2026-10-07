@@ -2,15 +2,16 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, ArrowRight, Loader2, Lock, LockOpen } from "lucide-react"
+import { AlertCircle, ArrowRight, CheckCircle2, Loader2, Lock, LockOpen, XCircle } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
-import { CopyButton } from "@/components/console/copy-button"
+import { CodeBlock } from "@/components/console/code-block"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
@@ -19,7 +20,6 @@ import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-e
 import { api, errorMessage } from "@/lib/api"
 import { useApi, useQueryParam } from "@/lib/hooks"
 import type { KmsDecryptResult, KmsEncryptResult, KmsKey, KmsPublicKey } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import { KEYS_PATH, KMS_PATH, KeyPicker, keyHref, keyIdFromArn, keyLabel, useKmsKeys } from "./shared"
 
@@ -140,24 +140,16 @@ export function CryptoTool({ keyId, lockKey }: { keyId?: string; lockKey?: boole
 
   return (
     <div className="flex flex-col gap-4">
-      <div role="tablist" aria-label="Operation" className="bg-muted inline-flex w-fit rounded-lg p-1">
-        {(["encrypt", "decrypt"] as const).map((o) => (
-          <button
-            key={o}
-            type="button"
-            role="tab"
-            aria-selected={op === o}
-            onClick={() => switchOp(o)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-              op === o ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {o === "encrypt" ? <Lock className="size-4" /> : <LockOpen className="size-4" />}
-            {o === "encrypt" ? "Encrypt" : "Decrypt"}
-          </button>
-        ))}
-      </div>
+      <Tabs value={op} onValueChange={(v) => switchOp(v as Op)}>
+        <TabsList aria-label="Operation">
+          <TabsTrigger value="encrypt">
+            <Lock /> Encrypt
+          </TabsTrigger>
+          <TabsTrigger value="decrypt">
+            <LockOpen /> Decrypt
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Section title={op === "encrypt" ? "Input" : "Ciphertext"} bodyClassName="flex flex-col gap-4">
@@ -232,27 +224,25 @@ export function CryptoTool({ keyId, lockKey }: { keyId?: string; lockKey?: boole
           )}
           {op === "encrypt" && encrypted ? (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-muted-foreground text-xs font-medium">Ciphertext blob (base64)</span>
-                <div className="flex flex-wrap gap-2">
-                  <CopyButton value={encrypted.ciphertext_blob} size="sm" toastMessage="Ciphertext copied" />
-                  <Button variant="outline" size="sm" onClick={useForDecrypt}>
-                    Decrypt it <ArrowRight />
-                  </Button>
-                </div>
+              <div className="flex justify-end">
+                <Button variant="outline" size="sm" onClick={useForDecrypt}>
+                  Decrypt it <ArrowRight />
+                </Button>
               </div>
-              <Textarea readOnly value={encrypted.ciphertext_blob} rows={6} className="bg-muted/40 font-mono text-[12.5px] break-all" onFocus={(e) => e.target.select()} />
+              <CodeBlock title="Ciphertext blob (base64)" code={encrypted.ciphertext_blob} wrap maxHeight="18rem" copyLabel="Copy ciphertext" />
               <p className="text-muted-foreground text-xs">
                 Encrypted with <KeyRef arn={encrypted.key_id} keys={keys.data} />.
               </p>
             </>
           ) : op === "decrypt" && decrypted ? (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-muted-foreground text-xs font-medium">{decryptedText !== null ? "Plaintext" : "Plaintext (binary, base64)"}</span>
-                <CopyButton value={decryptedText ?? decrypted.plaintext} size="sm" toastMessage="Plaintext copied" />
-              </div>
-              <pre className="bg-muted/40 max-h-72 overflow-auto rounded-md border p-3 font-mono text-[13px] break-all whitespace-pre-wrap">{decryptedText ?? decrypted.plaintext}</pre>
+              <CodeBlock
+                title={decryptedText !== null ? "Plaintext" : "Plaintext (binary, base64)"}
+                code={decryptedText ?? decrypted.plaintext}
+                wrap
+                maxHeight="18rem"
+                copyLabel="Copy plaintext"
+              />
               <p className="text-muted-foreground text-xs">
                 Decrypted with <KeyRef arn={decrypted.key_id} keys={keys.data} />.
               </p>
@@ -346,27 +336,22 @@ export function AsymmetricTool({ k }: { k: KmsKey }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div role="tablist" aria-label="Operation" className="bg-muted inline-flex w-fit rounded-lg p-1">
-        {ops.map((o) => (
-          <button
-            key={o}
-            type="button"
-            role="tab"
-            aria-selected={op === o}
-            onClick={() => {
-              setOp(o)
-              setError(null)
-              setResult(null)
-            }}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md px-3 py-1.5 text-sm font-medium transition-colors",
-              op === o ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-            )}
-          >
-            {OP_LABEL[o]}
-          </button>
-        ))}
-      </div>
+      <Tabs
+        value={op}
+        onValueChange={(v) => {
+          setOp(v as AsymOp)
+          setError(null)
+          setResult(null)
+        }}
+      >
+        <TabsList aria-label="Operation">
+          {ops.map((o) => (
+            <TabsTrigger key={o} value={o}>
+              {OP_LABEL[o]}
+            </TabsTrigger>
+          ))}
+        </TabsList>
+      </Tabs>
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <Section title="Input" bodyClassName="flex flex-col gap-4">
           <Field label="Algorithm" htmlFor="asym-alg">
@@ -420,24 +405,26 @@ export function AsymmetricTool({ k }: { k: KmsKey }) {
             </Alert>
           )}
           {result?.valid !== undefined ? (
-            <Alert variant={result.valid ? "default" : "destructive"}>
+            <Alert variant={result.valid ? "success" : "destructive"}>
+              {result.valid ? <CheckCircle2 /> : <XCircle />}
               <AlertTitle>{result.valid ? `${result.label} is valid` : `${result.label} is not valid`}</AlertTitle>
               <AlertDescription>{result.valid ? "The message matches." : "The message was changed, or a different key or algorithm was used."}</AlertDescription>
             </Alert>
           ) : result ? (
             <>
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <span className="text-muted-foreground text-xs font-medium">{result.text === null ? `${result.label} (binary, base64)` : result.label}</span>
-                <div className="flex flex-wrap gap-2">
-                  <CopyButton value={result.text ?? result.value} size="sm" />
-                  {op !== "decrypt" && (
-                    <Button variant="outline" size="sm" onClick={useOutput}>
-                      {op === "encrypt" ? "Decrypt it" : "Verify it"} <ArrowRight />
-                    </Button>
-                  )}
+              {op !== "decrypt" && (
+                <div className="flex justify-end">
+                  <Button variant="outline" size="sm" onClick={useOutput}>
+                    {op === "encrypt" ? "Decrypt it" : "Verify it"} <ArrowRight />
+                  </Button>
                 </div>
-              </div>
-              <Textarea readOnly value={result.text ?? result.value} rows={5} className="bg-muted/40 font-mono text-[12.5px] break-all" onFocus={(e) => e.target.select()} />
+              )}
+              <CodeBlock
+                title={result.text === null ? `${result.label} (binary, base64)` : result.label}
+                code={result.text ?? result.value}
+                wrap
+                maxHeight="18rem"
+              />
             </>
           ) : (
             !error && <p className="text-muted-foreground text-sm">The result appears here.</p>
@@ -449,12 +436,7 @@ export function AsymmetricTool({ k }: { k: KmsKey }) {
           {pub.error ? (
             <ErrorState error={pub.error} onRetry={() => pub.mutate()} />
           ) : pub.data ? (
-            <div className="flex flex-col gap-2">
-              <div className="flex justify-end">
-                <CopyButton value={pub.data.pem} size="sm" toastMessage="Public key copied" />
-              </div>
-              <pre className="bg-muted/40 overflow-auto rounded-md border p-3 font-mono text-[12px]">{pub.data.pem}</pre>
-            </div>
+            <CodeBlock title="Public key (PEM)" code={pub.data.pem} wrap copyLabel="Copy public key" />
           ) : (
             <p className="text-muted-foreground text-sm">Loading public key...</p>
           )}

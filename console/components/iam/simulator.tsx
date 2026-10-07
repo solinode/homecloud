@@ -2,12 +2,14 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState } from "react"
-import { FlaskConical, Loader2, Play, Plus, X } from "lucide-react"
+import { AlertTriangle, FlaskConical, Loader2, Play, Plus, X } from "lucide-react"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
@@ -28,6 +30,17 @@ const DECISION: Record<SimulationResult["decision"], { label: string; tone: "suc
 }
 
 const ACTION_RE = /^[a-zA-Z0-9*?-]+:[a-zA-Z0-9*?]+$/
+
+const resultColumns: Column<SimulationResult>[] = [
+  { id: "action", header: "Action", value: (r) => r.action, cell: (r) => <CellText mono>{r.action}</CellText> },
+  { id: "resource", header: "Resource", value: (r) => r.resource, cell: (r) => <CellText mono muted>{r.resource}</CellText>, hideBelow: "sm" },
+  {
+    id: "decision",
+    header: "Decision",
+    value: (r) => r.decision,
+    cell: (r) => <StatusBadge status={r.decision} tone={DECISION[r.decision]?.tone} label={DECISION[r.decision]?.label ?? r.decision} />,
+  },
+]
 
 export function PolicySimulator() {
   const users = useApi<IamUser[]>(`${IAM}/users`)
@@ -195,40 +208,21 @@ export function PolicySimulator() {
             </div>
           </Section>
 
-          <Section
+          <DataTable
             title="Results"
-            flush
             description={counts ? `${pluralize(counts.allowed, "action")} allowed, ${counts.denied} denied for ${user}` : undefined}
-          >
-            {!results ? (
-              <EmptyState icon={FlaskConical} title="No simulation yet" description="Choose a user and actions, then run the simulation." />
-            ) : !results.length ? (
-              <p className="text-muted-foreground p-6 text-center text-sm">No actions were simulated.</p>
-            ) : (
-              <div className="overflow-x-auto">
-                <table className="w-full text-sm">
-                  <thead>
-                    <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                      <th className="px-4 py-2 font-semibold">Action</th>
-                      <th className="hidden px-4 py-2 font-semibold sm:table-cell">Resource</th>
-                      <th className="px-4 py-2 font-semibold">Decision</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {results.map((r, i) => (
-                      <tr key={`${r.action}-${i}`} className="border-b last:border-0">
-                        <td className="px-4 py-2 font-mono text-[13px]">{r.action}</td>
-                        <td className="text-muted-foreground hidden px-4 py-2 font-mono text-xs break-all sm:table-cell">{r.resource}</td>
-                        <td className="px-4 py-2">
-                          <StatusBadge status={r.decision} tone={DECISION[r.decision]?.tone} label={DECISION[r.decision]?.label ?? r.decision} />
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </Section>
+            data={results ?? []}
+            columns={resultColumns}
+            rowId={(r) => `${r.action}|${r.resource}`}
+            noSearch
+            empty={
+              results ? (
+                <EmptyState icon={FlaskConical} title="No actions were simulated" />
+              ) : (
+                <EmptyState icon={FlaskConical} title="No simulation yet" description="Choose a user and actions, then run the simulation." />
+              )
+            }
+          />
         </div>
 
         <Section title="Effective policies" description={u ? <>Policies that apply to <Link href={userHref(u.name)} className="text-primary hover:underline">{u.name}</Link></> : undefined}>
@@ -236,7 +230,12 @@ export function PolicySimulator() {
             <Skeleton className="h-24 w-full" />
           ) : (
             <div className="flex flex-col gap-4 text-sm">
-              {u.root && <p className="rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">The root user is allowed every action regardless of policies.</p>}
+              {u.root && (
+                <Alert variant="warning">
+                  <AlertTriangle />
+                  <AlertDescription>The root user is allowed every action regardless of policies.</AlertDescription>
+                </Alert>
+              )}
               <PolicyGroup title="Attached directly" names={u.attached_policies} />
               {viaGroups.map((g) => (
                 <PolicyGroup
@@ -253,7 +252,7 @@ export function PolicySimulator() {
                 />
               ))}
               <div>
-                <p className="text-muted-foreground mb-1 text-xs font-semibold tracking-wide uppercase">Inline policies</p>
+                <p className="hc-eyebrow mb-1.5">Inline policies</p>
                 {Object.keys(u.inline_policies ?? {}).length ? (
                   <ul className="flex flex-col gap-0.5">
                     {Object.keys(u.inline_policies ?? {}).map((n) => (
@@ -279,7 +278,7 @@ export function PolicySimulator() {
 function PolicyGroup({ title, names }: { title: React.ReactNode; names: string[] }) {
   return (
     <div>
-      <p className="text-muted-foreground mb-1 text-xs font-semibold tracking-wide uppercase">{title}</p>
+      <p className="hc-eyebrow mb-1.5">{title}</p>
       {names.length ? (
         <ul className="flex flex-col gap-0.5">
           {names.map((n) => (

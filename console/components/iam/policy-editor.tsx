@@ -60,8 +60,8 @@ export function PolicyEditor({ value, onChange, rows = 18 }: { value: string; on
   return (
     <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_16rem]">
       <JsonEditor value={value} onChange={onChange} rows={rows} validate={validatePolicy} />
-      <div className="flex flex-col gap-2 rounded-md border p-3">
-        <p className="text-sm font-medium">Add actions</p>
+      <div className="bg-muted/40 flex flex-col gap-2 rounded-lg border p-3.5">
+        <p className="hc-eyebrow">Add actions</p>
         <p className="text-muted-foreground text-xs">Click an action to allow it on all resources. Edit the JSON to narrow Resource.</p>
         <div className="flex flex-wrap gap-1">
           {COMMON_ACTIONS.map((s) => (
@@ -87,7 +87,7 @@ export function PolicyEditor({ value, onChange, rows = 18 }: { value: string; on
                 title={has ? "Already in the policy" : invalid ? "Fix the JSON first" : `Allow ${a}`}
                 className={cn(
                   "inline-flex items-center gap-1 rounded-full border px-2 py-0.5 font-mono text-[11px] transition-colors",
-                  has ? "border-emerald-500/40 bg-emerald-50 text-emerald-700 dark:bg-emerald-500/10 dark:text-emerald-300" : "hover:bg-accent disabled:opacity-50",
+                  has ? "border-success/25 bg-success-soft text-success" : "hover:bg-accent disabled:opacity-50",
                 )}
               >
                 {!has && <Plus className="size-3" />}

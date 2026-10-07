@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, Building2, Check, Cloud, FileJson, Loader2 } from "lucide-react"
+import { AlertTriangle, Building2, Cloud, FileJson, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -15,19 +15,22 @@ import { useSession } from "@/components/console/auth"
 import { CopyButton } from "@/components/console/copy-button"
 import { Field } from "@/components/console/form-field"
 import { JsonEditor, jsonError } from "@/components/console/json-editor"
+import { KeyValueGrid } from "@/components/console/key-value"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { Stepper } from "@/components/console/stepper"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
 import { api, errorMessage } from "@/lib/api"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { IamRole, IamUser, PolicySummary, TrustPolicyDocument } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import { BoundaryHelp, BoundarySelect } from "./boundary"
 import { CheckList, IAM, PolicyPicker, PolicyTypeBadge, nameError, policyHref, policyJson, policyNameFromArn } from "./common"
 import { SERVICE_PRINCIPALS, SESSION_DURATIONS, TrustedEntitiesList, accountTrust, roleHref, serviceTrust, validateTrustPolicy } from "./role-common"
 
 const STEPS = ["Select trusted entity", "Add permissions", "Name, review, and create"]
+const STEP_DEFS = STEPS.map((label, i) => ({ label, description: `Step ${i + 1}` }))
 
 type EntityType = "service" | "account" | "custom"
 
@@ -39,28 +42,6 @@ const ENTITY_TYPES: { id: EntityType; label: string; description: string; icon: 
 
 function trustTextError(text: string): string | null {
   return jsonError(text) ?? validateTrustPolicy(JSON.parse(text))
-}
-
-/** RadioCard is a selectable tile (AWS-style "Trusted entity type"). */
-function RadioCard({ selected, onSelect, children, className }: { selected: boolean; onSelect: () => void; children: React.ReactNode; className?: string }) {
-  return (
-    <button
-      type="button"
-      role="radio"
-      aria-checked={selected}
-      onClick={onSelect}
-      className={cn(
-        "flex min-w-0 items-start gap-3 rounded-md border p-3 text-left transition-colors",
-        selected ? "border-primary bg-primary/5 ring-primary ring-1" : "hover:bg-accent/50",
-        className,
-      )}
-    >
-      <span className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border", selected ? "border-primary" : "border-muted-foreground/50")}>
-        {selected && <span className="bg-primary size-2 rounded-full" />}
-      </span>
-      <span className="flex min-w-0 flex-1 flex-col gap-0.5">{children}</span>
-    </button>
-  )
 }
 
 export function RoleCreate() {
@@ -174,66 +155,43 @@ export function RoleCreate() {
       />
 
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-[13rem_minmax(0,1fr)]">
-        <ol className="flex flex-wrap gap-x-4 gap-y-2 text-sm lg:flex-col lg:gap-3">
-          {STEPS.map((s, i) => (
-            <li key={s}>
-              <button
-                type="button"
-                disabled={i > step}
-                onClick={() => i < step && go(i)}
-                className={cn("flex items-start gap-2 text-left", i === step ? "text-foreground font-medium" : i < step ? "text-primary hover:underline" : "text-muted-foreground")}
-              >
-                <span
-                  className={cn(
-                    "flex size-5 shrink-0 items-center justify-center rounded-full border text-[11px]",
-                    i === step && "border-primary bg-primary text-primary-foreground",
-                    i < step && "border-primary text-primary",
-                  )}
-                >
-                  {i < step ? <Check className="size-3" /> : i + 1}
-                </span>
-                <span>
-                  <span className="text-muted-foreground block text-xs font-normal">Step {i + 1}</span>
-                  {s}
-                </span>
-              </button>
-            </li>
-          ))}
-        </ol>
+        <div className="min-w-0">
+          <Stepper steps={STEP_DEFS} current={step} onStepClick={(i) => i < step && go(i)} className="lg:hidden" />
+          <Stepper steps={STEP_DEFS} current={step} onStepClick={(i) => i < step && go(i)} orientation="vertical" className="hidden lg:flex" />
+        </div>
 
         <div className="flex min-w-0 flex-col gap-4">
           {step === 0 && (
             <>
               <Section title="Trusted entity type">
-                <div role="radiogroup" aria-label="Trusted entity type" className="grid grid-cols-1 gap-2 md:grid-cols-3">
+                <OptionGroup label="Trusted entity type" columns={3}>
                   {ENTITY_TYPES.map((t) => (
-                    <RadioCard key={t.id} selected={type === t.id} onSelect={() => chooseType(t.id)}>
-                      <span className="flex items-center gap-1.5 text-sm font-medium">
-                        <t.icon className="text-muted-foreground size-4" /> {t.label}
-                      </span>
-                      <span className="text-muted-foreground text-xs">{t.description}</span>
-                    </RadioCard>
+                    <OptionCard key={t.id} selected={type === t.id} onSelect={() => chooseType(t.id)} icon={t.icon} title={t.label} description={t.description} />
                   ))}
-                </div>
+                </OptionGroup>
               </Section>
 
               {type === "service" && (
                 <Section title="Use case" description="Choose the service that will assume this role. The trust policy allows its service principal to call sts:AssumeRole.">
-                  <div role="radiogroup" aria-label="Service" className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                  <OptionGroup label="Service" columns={3}>
                     {SERVICE_PRINCIPALS.map((s) => (
-                      <RadioCard key={s.principal} selected={service === s.principal} onSelect={() => setService(s.principal)}>
-                        <span className="text-sm font-medium">{s.name}</span>
-                        <span className="text-muted-foreground font-mono text-[11px] break-all">{s.principal}</span>
-                        <span className="text-muted-foreground text-xs">{s.description}</span>
-                      </RadioCard>
+                      <OptionCard
+                        key={s.principal}
+                        selected={service === s.principal}
+                        onSelect={() => setService(s.principal)}
+                        title={s.name}
+                        description={
+                          <>
+                            <span className="text-faint mb-0.5 block font-mono text-[11px] break-all">{s.principal}</span>
+                            {s.description}
+                          </>
+                        }
+                      />
                     ))}
                     {!SERVICE_PRINCIPALS.some((s) => s.principal === service) && service && (
-                      <RadioCard selected onSelect={() => undefined}>
-                        <span className="text-sm font-medium">{service}</span>
-                        <span className="text-muted-foreground text-xs">Service principal from the link that opened this page.</span>
-                      </RadioCard>
+                      <OptionCard selected onSelect={() => undefined} title={<span className="font-mono break-all">{service}</span>} description="Service principal from the link that opened this page." />
                     )}
-                  </div>
+                  </OptionGroup>
                   <p className="text-muted-foreground mt-3 text-xs">
                     For another service principal, choose <span className="text-foreground font-medium">Custom trust policy</span>.
                   </p>
@@ -243,11 +201,8 @@ export function RoleCreate() {
               {type === "account" && (
                 <Section title="This account" description="Principals in this account can assume the role if their own permissions allow sts:AssumeRole on it.">
                   <div className="flex flex-col gap-4">
-                    <div className="text-sm">
-                      <p className="text-muted-foreground text-xs">Account ID</p>
-                      <p className="font-mono">{accountId || "..."}</p>
-                    </div>
-                    <label className="flex items-start gap-3 rounded-md border p-3">
+                    <KeyValueGrid items={[{ label: "Account ID", value: <span className="font-mono">{accountId || "..."}</span> }]} />
+                    <label className="hover:bg-muted/50 flex cursor-pointer items-start gap-3 rounded-lg border p-3.5 transition-colors">
                       <Checkbox checked={specificUsers} onCheckedChange={(v) => setSpecificUsers(v === true)} className="mt-0.5" />
                       <span className="flex flex-col gap-0.5">
                         <span className="text-sm font-medium">Allow only specific users</span>
@@ -340,8 +295,8 @@ export function RoleCreate() {
                 {selectedPolicies.length ? (
                   <ul>
                     {selectedPolicies.map((p) => (
-                      <li key={p} className="flex flex-wrap items-center gap-2 border-b px-4 py-2 text-sm last:border-0">
-                        <Link href={policyHref(p)} className="text-primary font-medium hover:underline" target="_blank">
+                      <li key={p} className="flex flex-wrap items-center gap-2 border-b px-5 py-2.5 text-sm last:border-0">
+                        <Link href={policyHref(p)} className="text-primary min-w-0 truncate font-medium hover:underline" target="_blank" title={p}>
                           {p}
                         </Link>
                         {byName.get(p) && <PolicyTypeBadge managed={byName.get(p)!.managed} />}
@@ -350,21 +305,20 @@ export function RoleCreate() {
                     ))}
                   </ul>
                 ) : (
-                  <p className="text-muted-foreground flex items-center gap-2 p-4 text-sm">
-                    <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" /> No policies selected. The role cannot do anything until you add permissions.
+                  <p className="text-muted-foreground flex items-center gap-2 px-5 py-4 text-sm">
+                    <AlertTriangle className="text-warning size-4 shrink-0" /> No policies selected. The role cannot do anything until you add permissions.
                   </p>
                 )}
-                <p className="border-t px-4 py-2 text-sm">
+                <p className="border-t px-5 py-2.5 text-sm">
                   <span className="text-muted-foreground">Permissions boundary: </span>
                   {boundary ? policyNameFromArn(boundary) : "Not set"}
                 </p>
               </Section>
 
               <Section title="Step 3: Add tags" description="Optional key-value pairs to organize and find roles.">
-                <div className="flex flex-col gap-2">
+                <Field label="Tags" optional error={tagErr ?? dupTag}>
                   <TagsEditor rows={tags} onChange={setTags} addLabel="Add new tag" />
-                  {(tagErr || dupTag) && <p className="text-destructive text-xs">{tagErr ?? dupTag}</p>}
-                </div>
+                </Field>
               </Section>
             </>
           )}

@@ -53,7 +53,7 @@ export function InstanceProfilePicker({ value, onChange, id }: { value: string; 
         )}
       </div>
       {error && <p className="text-destructive text-xs">Cannot list instance profiles: {error.message}</p>}
-      {selected && !selected.roles.length && <p className="text-xs text-amber-700 dark:text-amber-300">{selected.name} has no role, so the instance gets no credentials.</p>}
+      {selected && !selected.roles.length && <p className="text-warning text-xs">{selected.name} has no role, so the instance gets no credentials.</p>}
     </div>
   )
 }

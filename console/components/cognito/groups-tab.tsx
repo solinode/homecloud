@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { api, errorMessage, seg } from "@/lib/api"
@@ -25,8 +25,17 @@ export function GroupsTab({ pool, onChanged }: { pool: UserPool; onChanged: () =
   const members = (g: string) => (users.data ?? []).filter((u) => u.groups?.includes(g)).length
 
   const columns: Column<UserPoolGroup>[] = [
-    { id: "name", header: "Group name", cell: (g) => <span className="font-medium">{g.name}</span>, value: (g) => g.name },
-    { id: "desc", header: "Description", cell: (g) => g.description || <span className="text-muted-foreground">-</span>, value: (g) => g.description, hideBelow: "md" },
+    {
+      id: "name",
+      header: "Group name",
+      cell: (g) => (
+        <CellText max="16rem" className="font-medium">
+          {g.name}
+        </CellText>
+      ),
+      value: (g) => g.name,
+    },
+    { id: "desc", header: "Description", cell: (g) => <CellText muted>{g.description}</CellText>, value: (g) => g.description, hideBelow: "md" },
     { id: "precedence", header: "Precedence", cell: (g) => <span className="tabular-nums">{g.precedence}</span>, value: (g) => g.precedence, hideBelow: "sm" },
     { id: "members", header: "Members", cell: (g) => (users.data ? <span className="tabular-nums">{members(g.name)}</span> : "..."), value: (g) => members(g.name) },
     {

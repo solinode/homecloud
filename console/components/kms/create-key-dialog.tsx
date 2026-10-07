@@ -2,9 +2,10 @@
 
 import { useEffect, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Fingerprint, KeyRound, Loader2, ShieldCheck } from "lucide-react"
+import { Fingerprint, Info, KeyRound, Loader2, ShieldCheck } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -12,13 +13,13 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { Field } from "@/components/console/form-field"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
 import { api, errorMessage } from "@/lib/api"
 import { revalidate } from "@/lib/hooks"
 import type { CreateKmsKeyInput, KmsKey } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
-import { AliasInput, KEYS_PATH, KMS_PATH, SYMMETRIC_SPEC, USAGE_LABEL, aliasError, keyHref, keyLabel, normalizeAlias, type KeyKind } from "./shared"
+import { AliasInput, KEYS_PATH, KMS_PATH, KeySpecTag, KeyUsageTag, SYMMETRIC_SPEC, USAGE_LABEL, aliasError, keyHref, keyLabel, normalizeAlias, type KeyKind } from "./shared"
 
 const KINDS: { kind: KeyKind; icon: typeof KeyRound; title: string; blurb: string }[] = [
   { kind: "symmetric", icon: KeyRound, title: "Symmetric", blurb: "One AES-256 key that encrypts and decrypts. Used by Secrets Manager and Parameter Store." },
@@ -35,6 +36,11 @@ const ECC_SPECS = [
 const HMAC_SPECS = ["HMAC_224", "HMAC_256", "HMAC_384", "HMAC_512"]
 
 type AsymUsage = "ENCRYPT_DECRYPT" | "SIGN_VERIFY"
+
+const ASYM_USAGES: { usage: AsymUsage; blurb: string }[] = [
+  { usage: "ENCRYPT_DECRYPT", blurb: "Encrypt with the public key, decrypt inside KMS. RSA only." },
+  { usage: "SIGN_VERIFY", blurb: "Sign inside KMS, verify with the public key. RSA or elliptic curve." },
+]
 
 export function CreateKeyDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const router = useRouter()
@@ -110,43 +116,22 @@ export function CreateKeyDialog({ open, onOpenChange }: { open: boolean; onOpenC
             <DialogDescription>Choose the kind of key. The key spec and usage can&apos;t be changed after the key is created.</DialogDescription>
           </DialogHeader>
 
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Key type">
-            {KINDS.map((t) => {
-              const active = kind === t.kind
-              return (
-                <button
-                  key={t.kind}
-                  type="button"
-                  role="radio"
-                  aria-checked={active}
-                  onClick={() => setKind(t.kind)}
-                  className={cn(
-                    "flex flex-col gap-1 rounded-lg border p-3 text-left transition-colors",
-                    active ? "border-primary bg-primary/5 ring-primary/30 dark:bg-primary/10 ring-1" : "hover:bg-muted/40",
-                  )}
-                >
-                  <span className="flex items-center gap-2 text-sm font-medium">
-                    <t.icon className={cn("size-4", active ? "text-primary" : "text-muted-foreground")} />
-                    {t.title}
-                  </span>
-                  <span className="text-muted-foreground text-xs">{t.blurb}</span>
-                </button>
-              )
-            })}
-          </div>
+          <Field label="Key type">
+            <OptionGroup label="Key type" columns={3}>
+              {KINDS.map((t) => (
+                <OptionCard key={t.kind} selected={kind === t.kind} onSelect={() => setKind(t.kind)} icon={t.icon} title={t.title} description={t.blurb} />
+              ))}
+            </OptionGroup>
+          </Field>
 
           {kind === "asymmetric" && (
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-              <Field label="Key usage" htmlFor="kms-usage">
-                <Select value={usage} onValueChange={(v) => chooseUsage(v as AsymUsage)}>
-                  <SelectTrigger id="kms-usage" className="w-full">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="ENCRYPT_DECRYPT">{USAGE_LABEL.ENCRYPT_DECRYPT}</SelectItem>
-                    <SelectItem value="SIGN_VERIFY">{USAGE_LABEL.SIGN_VERIFY}</SelectItem>
-                  </SelectContent>
-                </Select>
+            <div className="flex flex-col gap-4">
+              <Field label="Key usage" help="Choose what the key pair is for; it can't be changed later.">
+                <OptionGroup label="Key usage" columns={2}>
+                  {ASYM_USAGES.map((u) => (
+                    <OptionCard key={u.usage} selected={usage === u.usage} onSelect={() => chooseUsage(u.usage)} title={USAGE_LABEL[u.usage]} description={u.blurb} />
+                  ))}
+                </OptionGroup>
               </Field>
               <Field
                 label="Key spec"
@@ -154,7 +139,7 @@ export function CreateKeyDialog({ open, onOpenChange }: { open: boolean; onOpenC
                 help={usage === "ENCRYPT_DECRYPT" ? "Elliptic curve keys can only sign and verify." : asymSpec.startsWith("ECC_") ? "ECDSA signatures." : "RSASSA PKCS #1 v1.5 or PSS signatures."}
               >
                 <Select value={asymSpec} onValueChange={setAsymSpec}>
-                  <SelectTrigger id="kms-spec" className="w-full font-mono text-[13px]">
+                  <SelectTrigger id="kms-spec" className="w-full font-mono text-[13px] sm:w-64">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
@@ -222,10 +207,16 @@ export function CreateKeyDialog({ open, onOpenChange }: { open: boolean; onOpenC
               <Switch id="kms-rotation" checked={rotation} onCheckedChange={setRotation} />
             </div>
           ) : (
-            <p className="text-muted-foreground rounded-md border border-dashed p-3 text-xs">
-              {kind === "hmac" ? "HMAC" : "Asymmetric"} keys don&apos;t support automatic or on-demand rotation. Spec{" "}
-              <span className="text-foreground font-mono">{spec}</span>, usage <span className="text-foreground font-mono">{keyUsage}</span>.
-            </p>
+            <Alert variant="info">
+              <Info />
+              <AlertDescription>
+                <p>{kind === "hmac" ? "HMAC" : "Asymmetric"} keys don&apos;t support automatic or on-demand rotation.</p>
+                <p className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                  <KeySpecTag spec={spec} />
+                  <KeyUsageTag usage={keyUsage} />
+                </p>
+              </AlertDescription>
+            </Alert>
           )}
 
           <Field label="Tags" optional>

@@ -15,6 +15,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
+import { DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
@@ -39,7 +40,9 @@ import {
   KEY_POLL,
   KIND_LABEL,
   KMS_PATH,
+  KeySpecTag,
   KeyStateBadge,
+  KeyUsageTag,
   ManagedBadge,
   USAGE_LABEL,
   aliasError,
@@ -162,7 +165,7 @@ export function KeyDetail() {
         </Alert>
       )}
       {pending && key.deletion_date && (
-        <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
+        <Alert variant="destructive">
           <AlertTriangle />
           <AlertTitle>This key is scheduled for deletion on {formatDate(key.deletion_date)}</AlertTitle>
           <AlertDescription>
@@ -280,12 +283,12 @@ function DetailsTab({ k, managed, actions, onSaved }: { k: KmsKey; managed: bool
             { label: "Description", value: <DescriptionField k={k} editable={!managed} onSaved={onSaved} /> },
             { label: "Created", value: <span>{formatDate(k.created_at)} (<TimeAgo value={k.created_at} />)</span> },
             { label: "Key type", value: KIND_LABEL[keyKind(k.key_spec)] },
-            { label: "Key spec", value: <span className="font-mono text-[13px]">{k.key_spec}</span> },
+            { label: "Key spec", value: <KeySpecTag spec={k.key_spec} /> },
             {
               label: "Key usage",
               value: (
-                <span>
-                  {USAGE_LABEL[k.key_usage] ?? k.key_usage} <span className="text-muted-foreground font-mono text-xs">({k.key_usage})</span>
+                <span className="inline-flex flex-wrap items-center gap-1.5">
+                  {USAGE_LABEL[k.key_usage] ?? k.key_usage} <KeyUsageTag usage={k.key_usage} />
                 </span>
               ),
             },
@@ -413,65 +416,63 @@ function AliasesTab({ k, managed, onChanged }: { k: KmsKey; managed: boolean; on
   const [deleting, setDeleting] = useState<string | null>(null)
   const aliases = k.aliases ?? []
 
+  const columns: Column<string>[] = [
+    { id: "name", header: "Alias name", cell: (a) => <CopyableText value={a} />, value: (a) => a },
+    {
+      id: "actions",
+      header: "",
+      className: "text-right",
+      cell: (a) => {
+        const reserved = a.startsWith("alias/hc/")
+        return (
+          <Button
+            variant="outline"
+            size="sm"
+            className="text-destructive hover:text-destructive"
+            disabled={reserved}
+            title={reserved ? "Service-managed aliases cannot be deleted" : undefined}
+            onClick={(e) => {
+              e.stopPropagation()
+              setDeleting(a)
+            }}
+          >
+            <Trash2 /> Delete
+          </Button>
+        )
+      },
+    },
+  ]
+
   return (
-    <Section
-      title={`Aliases (${aliases.length})`}
-      description="Aliases are friendly names you can use instead of the key ID in Encrypt calls and key pickers. Moving an alias means deleting it and creating it on another key."
-      flush
-      actions={
-        <Button size="sm" onClick={() => setAdding(true)} disabled={managed} title={managed ? READ_ONLY_REASON : undefined}>
-          <Plus /> Create alias
-        </Button>
-      }
-    >
-      {aliases.length === 0 ? (
-        <EmptyState
-          title="No aliases"
-          description="This key can only be referenced by its ID or ARN."
-          action={
-            !managed && (
-              <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
-                <Plus /> Create alias
-              </Button>
-            )
-          }
-        />
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                <th className="px-4 py-2 font-semibold">Alias name</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {aliases.map((a) => {
-                const reserved = a.startsWith("alias/hc/")
-                return (
-                  <tr key={a} className="border-b last:border-0">
-                    <td className="px-4 py-2">
-                      <CopyableText value={a} />
-                    </td>
-                    <td className="px-4 py-2 text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="text-destructive hover:text-destructive"
-                        disabled={reserved}
-                        title={reserved ? "Service-managed aliases cannot be deleted" : undefined}
-                        onClick={() => setDeleting(a)}
-                      >
-                        <Trash2 /> Delete
-                      </Button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
-      )}
+    <>
+      <DataTable
+        title="Aliases"
+        description="Aliases are friendly names you can use instead of the key ID in Encrypt calls and key pickers. Moving an alias means deleting it and creating it on another key."
+        data={aliases}
+        columns={columns}
+        rowId={(a) => a}
+        noSearch={aliases.length < 6}
+        searchPlaceholder="Filter aliases"
+        defaultSort={{ id: "name" }}
+        actions={
+          <Button size="sm" onClick={() => setAdding(true)} disabled={managed} title={managed ? READ_ONLY_REASON : undefined}>
+            <Plus /> Create alias
+          </Button>
+        }
+        empty={
+          <EmptyState
+            title="No aliases"
+            description="This key can only be referenced by its ID or ARN."
+            action={
+              !managed && (
+                <Button size="sm" onClick={() => setAdding(true)}>
+                  <Plus /> Create alias
+                </Button>
+              )
+            }
+          />
+        }
+      />
 
       <CreateAliasDialog keyId={adding ? k.id : null} onClose={() => setAdding(false)} onCreated={onChanged} />
       <ConfirmDialog
@@ -492,7 +493,7 @@ function AliasesTab({ k, managed, onChanged }: { k: KmsKey; managed: boolean; on
           onChanged()
         }}
       />
-    </Section>
+    </>
   )
 }
 

@@ -108,7 +108,7 @@ export function RolePicker({ value, onChange, service, valueType = "arn", allowN
       </div>
       {error && <p className="text-destructive text-xs">Cannot list roles: {error.message}</p>}
       {selectedDoesNotTrust && (
-        <p className="text-xs text-amber-700 dark:text-amber-300">
+        <p className="text-warning text-xs">
           {selected!.name} does not trust {service}. Add the service to its trust policy or the service cannot assume it.
         </p>
       )}

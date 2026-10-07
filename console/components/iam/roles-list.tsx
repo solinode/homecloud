@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -18,7 +18,7 @@ import { pluralize } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { IamRole } from "@/lib/types"
 
-import { IAM, LINK } from "./common"
+import { IAM } from "./common"
 import { TrustedEntitiesList, createRoleHref, roleHref, trustedEntities } from "./role-common"
 
 const policyCount = (r: IamRole) => r.attached_policies.length + Object.keys(r.inline_policies ?? {}).length
@@ -104,11 +104,7 @@ export function RolesList() {
       id: "name",
       header: "Role name",
       value: (r) => r.name,
-      cell: (r) => (
-        <Link href={roleHref(r.name)} className={LINK}>
-          {r.name}
-        </Link>
-      ),
+      cell: (r) => <CellLink href={roleHref(r.name)}>{r.name}</CellLink>,
       className: "whitespace-nowrap",
     },
     {
@@ -125,7 +121,7 @@ export function RolesList() {
       id: "description",
       header: "Description",
       value: (r) => r.description,
-      cell: (r) => <span className="text-muted-foreground line-clamp-2 max-w-48">{r.description || "-"}</span>,
+      cell: (r) => <CellText muted max="16rem">{r.description}</CellText>,
       hideBelow: "lg",
     },
     {

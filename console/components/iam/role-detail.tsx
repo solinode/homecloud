@@ -6,6 +6,7 @@ import { useEffect, useMemo, useState } from "react"
 import { AlertTriangle, Eye, EyeOff, KeyRound, Loader2, Pencil, Plus, ShieldCheck, ShieldOff, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -16,7 +17,8 @@ import { ActionsMenu } from "@/components/console/actions-menu"
 import { useSession } from "@/components/console/auth"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CodeBlock } from "@/components/console/code-block"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
@@ -87,20 +89,22 @@ export function RoleDetail() {
         breadcrumbs={crumbs}
         badge={role.service_linked ? <StatusBadge status="service-linked" tone="info" label="Service-linked role" /> : undefined}
         actions={
-          <Button variant="outline" size="sm" onClick={() => setConfirmDelete(true)}>
-            <Trash2 /> Delete
-          </Button>
+          <>
+            <ActionsMenu
+              items={[
+                { label: "Assume role", icon: <KeyRound />, onSelect: () => setParam("tab", "sessions") },
+                { separator: true },
+                { label: "Delete role", icon: <Trash2 />, destructive: true, onSelect: () => setConfirmDelete(true) },
+              ]}
+            />
+            <Button size="sm" onClick={() => setEditOpen(true)}>
+              <Pencil /> Edit
+            </Button>
+          </>
         }
       />
 
-      <Section
-        title="Summary"
-        actions={
-          <Button variant="outline" size="sm" onClick={() => setEditOpen(true)}>
-            <Pencil /> Edit
-          </Button>
-        }
-      >
+      <Section title="Summary">
         <KeyValueGrid
           columns={3}
           items={[
@@ -279,14 +283,10 @@ function PermissionsTab({ role, policies, loading, onChanged }: { role: IamRole;
       id: "policy",
       header: "Policy name",
       value: (r) => r.policy,
-      cell: (r) => (
-        <Link href={policyHref(r.policy)} className={LINK}>
-          {r.policy}
-        </Link>
-      ),
+      cell: (r) => <CellLink href={policyHref(r.policy)}>{r.policy}</CellLink>,
     },
     { id: "type", header: "Type", value: (r) => (r.managed ? "AWS managed" : "Customer managed"), cell: (r) => (r.managed === undefined ? "-" : <PolicyTypeBadge managed={r.managed} />), hideBelow: "sm" },
-    { id: "desc", header: "Description", value: (r) => r.description, cell: (r) => <span className="text-muted-foreground">{r.description || "-"}</span>, hideBelow: "lg" },
+    { id: "desc", header: "Description", value: (r) => r.description, cell: (r) => <CellText muted>{r.description}</CellText>, hideBelow: "lg" },
   ]
 
   return (
@@ -518,10 +518,12 @@ function SessionsTab({ role, onChanged }: { role: IamRole; onChanged: () => void
       >
         <div className="flex flex-col gap-4">
           {!userTrusted && (
-            <p className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              The trust policy does not name this account or {session.user.name}, so the request is likely to be denied. Service roles are assumed by their service, not by users.
-            </p>
+            <Alert variant="warning">
+              <AlertTriangle />
+              <AlertDescription>
+                The trust policy does not name this account or {session.user.name}, so the request is likely to be denied. Service roles are assumed by their service, not by users.
+              </AlertDescription>
+            </Alert>
           )}
           <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_14rem]">
             <Field label="Session name" htmlFor="session-name" error={touched ? snErr : null} help="Shows in the assumed-role ARN and in CloudTrail. 2-64 characters.">
@@ -549,45 +551,47 @@ function SessionsTab({ role, onChanged }: { role: IamRole; onChanged: () => void
           </div>
 
           {creds && (
-            <div className="flex flex-col gap-3 rounded-md border p-3">
-              <p className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
-                <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                <span>
-                  These credentials are shown only once. Copy them now; they expire <TimeAgo value={creds.expiration} className="font-medium" /> ({formatDate(creds.expiration)}).
-                </span>
-              </p>
-              <div className="grid gap-3 text-sm">
-                {creds.assumed_role_arn && (
-                  <div className="min-w-0">
-                    <p className="text-muted-foreground mb-1 text-xs">Assumed role ARN</p>
-                    <CopyableText value={creds.assumed_role_arn} className="text-[13px]" />
-                  </div>
-                )}
-                <div className="min-w-0">
-                  <p className="text-muted-foreground mb-1 text-xs">Access key ID</p>
-                  <CopyableText value={creds.access_key_id} className="text-[13px]" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-muted-foreground mb-1 text-xs">Secret access key</p>
-                  <SecretValue value={creds.secret_access_key} label="Secret access key" />
-                </div>
-                <div className="min-w-0">
-                  <p className="text-muted-foreground mb-1 text-xs">Session token</p>
-                  <SecretValue value={creds.session_token} label="Session token" />
-                </div>
-              </div>
-              <div className="flex min-w-0 flex-col gap-1">
-                <div className="flex items-center justify-between gap-2">
-                  <p className="text-muted-foreground text-xs">Shell (AWS CLI and SDKs)</p>
-                  <span className="flex items-center gap-1">
-                    <Button type="button" size="icon" variant="ghost" className="size-8" onClick={() => setShowSnippet(!showSnippet)} aria-label={showSnippet ? "Hide secrets" : "Show secrets"}>
-                      {showSnippet ? <EyeOff /> : <Eye />}
-                    </Button>
-                    <CopyButton value={snippet} size="sm" label="Copy" toastMessage="Environment variables copied" />
+            <div className="bg-muted/40 flex flex-col gap-4 rounded-lg border p-4">
+              <Alert variant="warning">
+                <AlertTriangle />
+                <AlertDescription>
+                  <span>
+                    These credentials are shown only once. Copy them now; they expire <TimeAgo value={creds.expiration} className="font-medium" /> ({formatDate(creds.expiration)}).
                   </span>
-                </div>
-                <pre className="bg-muted/40 overflow-x-auto rounded-md border p-3 font-mono text-xs leading-5 break-all whitespace-pre-wrap">{showSnippet ? snippet : masked}</pre>
-              </div>
+                </AlertDescription>
+              </Alert>
+              <KeyValueGrid
+                columns={2}
+                items={[
+                  ...(creds.assumed_role_arn ? [{ label: "Assumed role ARN", value: <CopyableText value={creds.assumed_role_arn} className="text-[13px]" />, wide: true }] : []),
+                  { label: "Access key ID", value: <CopyableText value={creds.access_key_id} className="text-[13px]" />, wide: true },
+                  { label: "Secret access key", value: <SecretValue value={creds.secret_access_key} label="Secret access key" />, wide: true },
+                  { label: "Session token", value: <SecretValue value={creds.session_token} label="Session token" />, wide: true },
+                ]}
+              />
+              <CodeBlock
+                title="Shell (AWS CLI and SDKs)"
+                code={snippet}
+                wrap
+                actions={
+                  <Button
+                    type="button"
+                    size="icon"
+                    variant="ghost"
+                    className="text-code-muted size-7 hover:bg-white/10 hover:text-white"
+                    onClick={() => setShowSnippet(!showSnippet)}
+                    aria-label={showSnippet ? "Hide secrets" : "Show secrets"}
+                  >
+                    {showSnippet ? <EyeOff /> : <Eye />}
+                  </Button>
+                }
+              >
+                {(showSnippet ? snippet : masked).split("\n").map((l, i) => (
+                  <div key={i} className="break-all whitespace-pre-wrap">
+                    {l}
+                  </div>
+                ))}
+              </CodeBlock>
               <div className="flex justify-end">
                 <Button size="sm" variant="outline" onClick={() => setCreds(null)}>
                   Done

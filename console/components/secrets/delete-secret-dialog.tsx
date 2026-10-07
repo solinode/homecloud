@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { AlertTriangle } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -18,12 +19,14 @@ import type { Secret } from "@/lib/types"
 export function ManagedWarning({ by, action }: { by?: string; action: string }) {
   if (!by) return null
   return (
-    <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-      <span>
-        This secret is managed by <strong>{by}</strong>. {action} it can break the {by} service, which reads it on startup.
-      </span>
-    </div>
+    <Alert variant="warning">
+      <AlertTriangle />
+      <AlertDescription>
+        <p>
+          This secret is managed by <strong className="text-foreground">{by}</strong>. {action} it can break the {by} service, which reads it on startup.
+        </p>
+      </AlertDescription>
+    </Alert>
   )
 }
 
@@ -75,7 +78,7 @@ export function DeleteSecretDialog({ secret, onOpenChange, onDeleted }: { secret
           error={!daysValid ? "Enter a whole number of days between 7 and 30" : undefined}
           help={`The secret will be deleted on ${formatDate(deletionDate, false)}.`}
         >
-          <Input id="recovery-days" type="number" min={7} max={30} value={days} onChange={(e) => setDays(e.target.value)} className="w-32" />
+          <Input id="recovery-days" type="number" min={7} max={30} value={days} onChange={(e) => setDays(e.target.value)} className="w-32" aria-invalid={!daysValid} />
         </Field>
       )}
       <div className="flex items-start gap-3 rounded-md border p-3">
