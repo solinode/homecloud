@@ -1,9 +1,8 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Loader2, Megaphone, Plus } from "lucide-react"
+import { ListOrdered, Loader2, Megaphone, Plus } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -14,9 +13,10 @@ import { Switch } from "@/components/ui/switch"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { PageHeader } from "@/components/console/page-header"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -25,7 +25,6 @@ import { api, errorMessage } from "@/lib/api"
 import { formatNumber } from "@/lib/format"
 import { revalidate, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { Topic } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import { SNS_PATH, TOPICS_PATH, TOPIC_NAME_RE, topicHref, topicPath, useTopics } from "./common"
 
@@ -33,18 +32,14 @@ const columns: Column<Topic>[] = [
   {
     id: "name",
     header: "Name",
-    cell: (t) => (
-      <Link href={topicHref(t.name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-        {t.name}
-      </Link>
-    ),
+    cell: (t) => <CellLink href={topicHref(t.name)}>{t.name}</CellLink>,
     value: (t) => t.name,
   },
   { id: "type", header: "Type", cell: (t) => <QueueTypeBadge fifo={t.fifo} />, value: (t) => (t.fifo ? "FIFO" : "Standard"), hideBelow: "sm" },
   {
     id: "display",
     header: "Display name",
-    cell: (t) => t.display_name || <span className="text-muted-foreground">-</span>,
+    cell: (t) => <CellText max="16rem">{t.display_name}</CellText>,
     value: (t) => t.display_name,
     hideBelow: "md",
   },
@@ -221,31 +216,24 @@ export function CreateTopicDialog({ open, onOpenChange, existing }: { open: bool
             <DialogTitle>Create topic</DialogTitle>
             <DialogDescription>A topic is a communication channel: publishers send to it, and every subscription receives a copy.</DialogDescription>
           </DialogHeader>
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium">Type</span>
-            <div role="radiogroup" aria-label="Topic type" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {[
-                { f: false, title: "Standard", text: "Best-effort ordering, at-least-once delivery; all protocols." },
-                { f: true, title: "FIFO", text: "Strict ordering and deduplication; delivers to SQS queues." },
-              ].map((o) => (
-                <button
-                  key={o.title}
-                  type="button"
-                  role="radio"
-                  aria-checked={fifo === o.f}
-                  onClick={() => setType(o.f)}
-                  className={cn(
-                    "flex flex-col gap-0.5 rounded-md border p-3 text-left transition-colors",
-                    fifo === o.f ? "border-primary bg-primary/5 ring-primary ring-1" : "hover:bg-muted/40",
-                  )}
-                >
-                  <span className="text-sm font-medium">{o.title}</span>
-                  <span className="text-muted-foreground text-xs">{o.text}</span>
-                </button>
-              ))}
-            </div>
-            <p className="text-muted-foreground text-xs">You can&apos;t change the topic type after you create it.</p>
-          </div>
+          <Field label="Type" help="You can't change the topic type after you create it.">
+            <OptionGroup label="Topic type">
+              <OptionCard
+                selected={!fifo}
+                onSelect={() => setType(false)}
+                icon={Megaphone}
+                title="Standard"
+                description="Best-effort ordering, at-least-once delivery; all protocols."
+              />
+              <OptionCard
+                selected={fifo}
+                onSelect={() => setType(true)}
+                icon={ListOrdered}
+                title="FIFO"
+                description="Strict ordering and deduplication; delivers to SQS queues."
+              />
+            </OptionGroup>
+          </Field>
           <Field
             label="Name"
             htmlFor="topic-name"

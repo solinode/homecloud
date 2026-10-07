@@ -9,6 +9,7 @@ import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CopyableText } from "@/components/console/copy-button"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { Field } from "@/components/console/form-field"
 import { JsonEditor, jsonError } from "@/components/console/json-editor"
 import { PageHeader } from "@/components/console/page-header"
@@ -42,6 +43,25 @@ interface SentRow {
   eventId: string
   matched: number
 }
+
+const resultColumns: Column<SentRow & { n: number }>[] = [
+  { id: "n", header: "#", cell: (r) => <span className="tabular-nums">{r.n}</span>, value: (r) => r.n, headerClassName: "w-10" },
+  { id: "id", header: "Event ID", cell: (r) => <CopyableText value={r.eventId} className="max-w-56" />, value: (r) => r.eventId },
+  {
+    id: "src",
+    header: "Source / detail type",
+    cell: (r) => <CellText mono>{`${r.source} / ${r.detailType}`}</CellText>,
+    value: (r) => `${r.source} ${r.detailType}`,
+    hideBelow: "sm",
+  },
+  {
+    id: "matched",
+    header: "Matched rules",
+    cell: (r) =>
+      r.matched ? <StatusBadge status="success" label={pluralize(r.matched, "rule")} /> : <StatusBadge status="none" tone="neutral" label="No match" />,
+    value: (r) => r.matched,
+  },
+]
 
 export function SendEvents() {
   const [entries, setEntries] = useState<EntryRow[]>([newEntry()])
@@ -155,7 +175,7 @@ export function SendEvents() {
             </div>
           </Section>
         ))}
-        <div className="flex flex-wrap items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 border-t pt-4">
           <Button
             type="button"
             variant="outline"
@@ -166,7 +186,7 @@ export function SendEvents() {
             <Plus /> Add event
           </Button>
           <span className="text-muted-foreground text-xs">{entries.length} of 10</span>
-          <Button type="submit" size="sm" disabled={pending} className="ml-auto">
+          <Button type="submit" disabled={pending} className="ml-auto">
             {pending ? <Loader2 className="animate-spin" /> : <Send />}
             Send {entries.length > 1 ? `${entries.length} events` : "event"}
           </Button>
@@ -174,47 +194,22 @@ export function SendEvents() {
       </form>
 
       {results && (
-        <Section title="Results" flush>
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b">
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">#</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Event ID</th>
-                  <th className="text-muted-foreground hidden px-3 py-2 text-left text-xs font-semibold sm:table-cell">Source / detail type</th>
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Matched rules</th>
-                </tr>
-              </thead>
-              <tbody>
-                {results.map((r, i) => (
-                  <tr key={r.eventId} className="border-b last:border-0">
-                    <td className="px-4 py-2 tabular-nums">{i + 1}</td>
-                    <td className="max-w-56 px-3 py-2">
-                      <CopyableText value={r.eventId} />
-                    </td>
-                    <td className="hidden px-3 py-2 font-mono text-[13px] sm:table-cell">
-                      {r.source} / {r.detailType}
-                    </td>
-                    <td className="px-4 py-2">
-                      {r.matched ? (
-                        <StatusBadge status="success" label={pluralize(r.matched, "rule")} />
-                      ) : (
-                        <StatusBadge status="none" tone="neutral" label="No match" />
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-          <p className="text-muted-foreground border-t px-4 py-3 text-xs">
-            Matching rules deliver asynchronously. Check invocations and errors on the{" "}
-            <Link href="/events/" className="text-primary hover:underline">
-              rules page
-            </Link>
-            .
-          </p>
-        </Section>
+        <DataTable
+          title="Results"
+          description={
+            <>
+              Matching rules deliver asynchronously. Check invocations and errors on the{" "}
+              <Link href="/events/" className="text-primary hover:underline">
+                rules page
+              </Link>
+              .
+            </>
+          }
+          data={results.map((r, i) => ({ ...r, n: i + 1 }))}
+          columns={resultColumns}
+          rowId={(r) => r.eventId}
+          noSearch
+        />
       )}
     </div>
   )

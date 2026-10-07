@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { FormDialog } from "@/components/console/form-dialog"
@@ -21,20 +21,18 @@ import type { EventBus } from "@/lib/types"
 
 import { BUSES_PATH } from "./bus-select"
 
+const busRulesHref = (name: string) => (name === "default" ? "/events/" : `/events/?bus=${encodeURIComponent(name)}`)
+
 const columns: Column<EventBus>[] = [
-  { id: "name", header: "Name", cell: (b) => <span className="font-medium">{b.name}</span>, value: (b) => b.name },
-  { id: "desc", header: "Description", cell: (b) => b.description || <span className="text-muted-foreground">-</span>, value: (b) => b.description, hideBelow: "md" },
-  { id: "arn", header: "ARN", cell: (b) => <span className="font-mono text-[13px]">{b.arn}</span>, value: (b) => b.arn, hideBelow: "lg" },
+  { id: "name", header: "Name", cell: (b) => <CellLink href={busRulesHref(b.name)}>{b.name}</CellLink>, value: (b) => b.name },
+  { id: "desc", header: "Description", cell: (b) => <CellText muted>{b.description}</CellText>, value: (b) => b.description, hideBelow: "md" },
+  { id: "arn", header: "ARN", cell: (b) => <CellText mono max="28rem">{b.arn}</CellText>, value: (b) => b.arn, hideBelow: "lg" },
   { id: "created", header: "Created", cell: (b) => (b.created_at ? <TimeAgo value={b.created_at} /> : <span className="text-muted-foreground">-</span>), value: (b) => b.created_at, hideBelow: "lg" },
   {
     id: "rules",
     header: "",
     cell: (b) => (
-      <Link
-        href={b.name === "default" ? "/events/" : `/events/?bus=${encodeURIComponent(b.name)}`}
-        onClick={(e) => e.stopPropagation()}
-        className="text-primary text-sm hover:underline"
-      >
+      <Link href={busRulesHref(b.name)} onClick={(e) => e.stopPropagation()} className="text-primary text-sm whitespace-nowrap hover:underline">
         View rules
       </Link>
     ),
@@ -106,7 +104,18 @@ export function BusesList() {
             </Button>
           </>
         }
-        empty={<EmptyState icon={Cable} title="No event buses" />}
+        empty={
+          <EmptyState
+            icon={Cable}
+            title="No event buses"
+            description="Create a custom bus to keep your application's events and rules apart from the default bus."
+            action={
+              <Button size="sm" onClick={() => setDialog("create")}>
+                <Plus /> Create event bus
+              </Button>
+            }
+          />
+        }
       />
       {dialog === "create" && <CreateBusDialog onClose={() => setDialog(null)} />}
       {sel && (

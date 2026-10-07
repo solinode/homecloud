@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
+import { Tag, methodAccent } from "@/components/console/tag"
 import { api, seg } from "@/lib/api"
 import { revalidate } from "@/lib/hooks"
 import type { HttpApi } from "@/lib/types"
@@ -17,26 +18,12 @@ export const apiHref = (id: string) => `/apigateway/api/?id=${encodeURIComponent
 
 export const ROUTE_METHODS = ["ANY", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"] as const
 
-const METHOD_TONE: Record<string, string> = {
-  GET: "text-emerald-700 bg-emerald-50 ring-emerald-600/20 dark:text-emerald-300 dark:bg-emerald-500/10 dark:ring-emerald-400/20",
-  POST: "text-blue-700 bg-blue-50 ring-blue-600/20 dark:text-blue-300 dark:bg-blue-500/10 dark:ring-blue-400/20",
-  PUT: "text-amber-700 bg-amber-50 ring-amber-600/20 dark:text-amber-300 dark:bg-amber-500/10 dark:ring-amber-400/20",
-  PATCH: "text-violet-700 bg-violet-50 ring-violet-600/20 dark:text-violet-300 dark:bg-violet-500/10 dark:ring-violet-400/20",
-  DELETE: "text-red-700 bg-red-50 ring-red-600/20 dark:text-red-300 dark:bg-red-500/10 dark:ring-red-400/20",
-}
-const METHOD_NEUTRAL = "text-slate-600 bg-slate-100 ring-slate-500/20 dark:text-slate-300 dark:bg-slate-500/15 dark:ring-slate-400/20"
-
+/** MethodBadge is the HTTP method chip of a route (GET, POST ...). */
 export function MethodBadge({ method, className }: { method: string; className?: string }) {
   return (
-    <span
-      className={cn(
-        "inline-flex min-w-14 justify-center rounded px-1.5 py-0.5 font-mono text-[11px] font-semibold ring-1 ring-inset",
-        METHOD_TONE[method] ?? METHOD_NEUTRAL,
-        className,
-      )}
-    >
+    <Tag accent={methodAccent(method)} className={cn("min-w-14 justify-center font-semibold", className)}>
       {method}
-    </span>
+    </Tag>
   )
 }
 

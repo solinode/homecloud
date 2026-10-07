@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, Check, Loader2, Pencil, Send, Tags as TagsIcon, Trash2, X } from "lucide-react"
+import { AlertCircle, ArrowLeft, Check, Loader2, Pencil, RefreshCw, Send, Tags as TagsIcon, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -11,14 +11,17 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
+import { Field } from "@/components/console/form-field"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { TagList, TagsEditor, rowsToTags, tagsToRows, type TagRow } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, api, errorMessage } from "@/lib/api"
@@ -74,6 +77,7 @@ export function TopicDetail() {
   if (isLoading || !topic) return <DetailSkeleton />
 
   const pendingCount = (topic.subscription_list ?? []).filter(isPending).length
+  const failedCount = (topic.subscription_list ?? []).reduce((n, x) => n + (x.failed ?? 0), 0)
 
   return (
     <div className="flex flex-col gap-4">
@@ -84,19 +88,41 @@ export function TopicDetail() {
         breadcrumbs={crumbs}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating} aria-label="Refresh">
-              {isValidating ? <Loader2 className="animate-spin" /> : null}
+            <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating}>
+              {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setDeleting(true)}>
-              <Trash2 /> Delete
-            </Button>
+            <ActionsMenu
+              items={[
+                { label: "View subscriptions", onSelect: () => setParam("tab", null) },
+                { label: "Manage tags", icon: <TagsIcon />, onSelect: () => setTagging(true) },
+                { separator: true },
+                { label: "Delete topic", icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(true) },
+              ]}
+            />
             <Button size="sm" onClick={() => setParam("tab", "publish")}>
               <Send /> Publish message
             </Button>
           </>
         }
       />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Subscriptions" value={formatNumber(topic.subscriptions)} caption="Endpoints receiving copies" />
+        <StatTile
+          label="Pending"
+          value={formatNumber(pendingCount)}
+          tone={pendingCount > 0 ? "warning" : undefined}
+          caption={pendingCount > 0 ? "Awaiting confirmation" : "All confirmed"}
+        />
+        <StatTile label="Published" value={formatNumber(topic.messages_published)} caption="Messages since creation" />
+        <StatTile
+          label="Failed"
+          value={formatNumber(failedCount)}
+          tone={failedCount > 0 ? "danger" : undefined}
+          caption={failedCount > 0 ? "Deliveries that failed" : "No failed deliveries"}
+        />
+      </div>
 
       <Section title="Details">
         <KeyValueGrid
@@ -110,7 +136,7 @@ export function TopicDetail() {
               value: (
                 <span>
                   {formatNumber(topic.subscriptions)}
-                  {pendingCount > 0 && <span className="text-amber-700 dark:text-amber-300"> ({pendingCount} pending confirmation)</span>}
+                  {pendingCount > 0 && <span className="text-warning"> ({pendingCount} pending confirmation)</span>}
                 </span>
               ),
             },
@@ -299,8 +325,9 @@ function TagsDialog({ topic, onClose }: { topic: TopicDetailT | null; onClose: (
             <DialogTitle>Manage tags</DialogTitle>
             <DialogDescription>Tags are key/value labels for organizing topics.</DialogDescription>
           </DialogHeader>
-          <TagsEditor rows={rows} onChange={(r) => (setRows(r), setErr(null))} />
-          {err && <p className="text-destructive text-xs">{err}</p>}
+          <Field label="Tags" error={err} help="Up to 50 tags. Keys must be unique.">
+            <TagsEditor rows={rows} onChange={(r) => (setRows(r), setErr(null))} />
+          </Field>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={pending}>
               Cancel

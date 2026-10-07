@@ -1,9 +1,11 @@
 "use client"
 
 import { useState, type ReactNode } from "react"
+import { CalendarClock, Workflow } from "lucide-react"
 import { toast } from "sonner"
 
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
+import { Tag, type TagAccent } from "@/components/console/tag"
 import { api, errorMessage, seg } from "@/lib/api"
 import { pluralize } from "@/lib/format"
 import { revalidate, useQueryParam } from "@/lib/hooks"
@@ -29,6 +31,17 @@ export function ruleNameError(name: string): string | null {
 
 export const isSchedule = (r: Pick<EventRule, "schedule_expression">) => !!r.schedule_expression
 
+/** RuleTypeTag shows whether a rule runs on a schedule or on an event pattern. */
+export function RuleTypeTag({ rule }: { rule: Pick<EventRule, "schedule_expression"> }) {
+  const sched = isSchedule(rule)
+  return (
+    <Tag accent={sched ? "info" : "violet"} mono={false}>
+      {sched ? <CalendarClock /> : <Workflow />}
+      {sched ? "Schedule" : "Event pattern"}
+    </Tag>
+  )
+}
+
 // ---- targets ----
 
 export type TargetKind = "lambda" | "sqs" | "sns" | "sfn"
@@ -49,6 +62,19 @@ export function targetKind(arn: string): TargetKind | null {
 }
 
 export const targetKindLabel = (arn: string) => TARGET_KINDS.find((t) => t.kind === targetKind(arn))?.label ?? "Unknown"
+
+const TARGET_ACCENT: Record<TargetKind, TagAccent> = { lambda: "brand", sqs: "warning", sns: "info", sfn: "violet" }
+const TARGET_SHORT: Record<TargetKind, string> = { lambda: "Lambda", sqs: "SQS", sns: "SNS", sfn: "Step Functions" }
+
+/** TargetKindTag is the chip for a target's service (Lambda, SQS, SNS, Step Functions). */
+export function TargetKindTag({ arn, kind }: { arn?: string; kind?: TargetKind | null }) {
+  const k = kind ?? (arn ? targetKind(arn) : null)
+  return (
+    <Tag accent={k ? TARGET_ACCENT[k] : "neutral"} mono={false} title={k ? TARGET_KINDS.find((t) => t.kind === k)?.label : undefined}>
+      {k ? TARGET_SHORT[k] : "Unknown"}
+    </Tag>
+  )
+}
 
 /** targetName is the resource name at the end of a target ARN. */
 export function targetName(arn: string): string {

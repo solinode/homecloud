@@ -11,7 +11,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { FormDialog } from "@/components/console/form-dialog"
@@ -21,7 +21,7 @@ import { api, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { IamRole, Schedule, ScheduleGroup } from "@/lib/types"
 
-import { TARGET_KINDS, targetKind, targetKindLabel, targetName, type TargetKind } from "./common"
+import { TARGET_KINDS, TargetKindTag, targetKind, targetKindLabel, targetName, type TargetKind } from "./common"
 import { useTargetOptions } from "./rule-wizard"
 
 const SCHED = "/api/v1/scheduler"
@@ -98,7 +98,7 @@ function ScheduleDialog({ existing, groups, defaultGroup, onClose }: { existing?
       }}
     >
       <div className="grid max-h-[65vh] gap-4 overflow-y-auto pr-1 sm:grid-cols-2">
-        <Field label="Name" htmlFor="sc-name">
+        <Field label="Name" htmlFor="sc-name" help={existing ? "Schedule names cannot be changed." : "Unique within the schedule group."}>
           <Input id="sc-name" value={name} onChange={(e) => setName(e.target.value)} disabled={!!existing} autoFocus={!existing} autoComplete="off" />
         </Field>
         <Field label="Schedule group" htmlFor="sc-group">
@@ -118,7 +118,7 @@ function ScheduleDialog({ existing, groups, defaultGroup, onClose }: { existing?
         <Field label="Schedule expression" htmlFor="sc-expr" help="at(2026-12-31T23:59:00), rate(5 minutes) or cron(0 12 * * ? *)" className="sm:col-span-2">
           <Input id="sc-expr" value={expr} onChange={(e) => setExpr(e.target.value)} className="font-mono" spellCheck={false} />
         </Field>
-        <Field label="Time zone" htmlFor="sc-tz">
+        <Field label="Time zone" htmlFor="sc-tz" help="IANA name, e.g. Europe/Berlin. cron and at() use it.">
           <Input id="sc-tz" value={tz} onChange={(e) => setTz(e.target.value)} list="sc-tzs" autoComplete="off" />
           <datalist id="sc-tzs">
             {tzList().map((z) => (
@@ -157,7 +157,7 @@ function ScheduleDialog({ existing, groups, defaultGroup, onClose }: { existing?
             </SelectContent>
           </Select>
         </Field>
-        <Field label="Target" htmlFor="sc-target">
+        <Field label="Target" htmlFor="sc-target" help={opts[kind].data && !targets.length ? "None found for this target type." : undefined}>
           <Select value={arn} onValueChange={setArn}>
             <SelectTrigger id="sc-target" className="w-full">
               <SelectValue placeholder={opts[kind].data ? "Select a target" : "Loading..."} />
@@ -197,7 +197,7 @@ function ScheduleDialog({ existing, groups, defaultGroup, onClose }: { existing?
         <Field label="Delete after completion" htmlFor="sc-del" help="Remove the schedule when it has no invocations left.">
           <Switch id="sc-del" checked={del} onCheckedChange={setDel} />
         </Field>
-        <Field label="Enabled" htmlFor="sc-enabled">
+        <Field label="Enabled" htmlFor="sc-enabled" help="Disabled schedules keep their settings but never run.">
           <Switch id="sc-enabled" checked={enabled} onCheckedChange={setEnabled} />
         </Field>
       </div>
@@ -220,7 +220,7 @@ function GroupDialog({ onClose }: { onClose: () => void }) {
         await revalidate(SCHED)
       }}
     >
-      <Field label="Name" htmlFor="sg-name">
+      <Field label="Name" htmlFor="sg-name" help="Groups organize schedules; deleting a group deletes its schedules.">
         <Input id="sg-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus autoComplete="off" />
       </Field>
     </FormDialog>
@@ -228,8 +228,8 @@ function GroupDialog({ onClose }: { onClose: () => void }) {
 }
 
 const columns: Column<Schedule>[] = [
-  { id: "name", header: "Name", cell: (s) => <span className="font-medium">{s.Name}</span>, value: (s) => s.Name },
-  { id: "group", header: "Group", cell: (s) => s.GroupName, value: (s) => s.GroupName, hideBelow: "sm" },
+  { id: "name", header: "Name", cell: (s) => <CellText className="font-medium">{s.Name}</CellText>, value: (s) => s.Name },
+  { id: "group", header: "Group", cell: (s) => <CellText muted>{s.GroupName}</CellText>, value: (s) => s.GroupName, hideBelow: "sm" },
   { id: "state", header: "State", cell: (s) => <StatusBadge status={s.State} />, value: (s) => s.State },
   {
     id: "expr",
@@ -246,8 +246,11 @@ const columns: Column<Schedule>[] = [
     id: "target",
     header: "Target",
     cell: (s) => (
-      <span>
-        {targetName(s.Target.Arn)} <span className="text-muted-foreground text-xs">{targetKindLabel(s.Target.Arn)}</span>
+      <span className="flex min-w-0 items-center gap-2">
+        <TargetKindTag arn={s.Target.Arn} />
+        <CellText max="16rem" title={`${targetKindLabel(s.Target.Arn)}: ${s.Target.Arn}`}>
+          {targetName(s.Target.Arn)}
+        </CellText>
       </span>
     ),
     value: (s) => s.Target.Arn,
@@ -318,7 +321,18 @@ export function SchedulerPage() {
             </Button>
           </>
         }
-        empty={<EmptyState icon={CalendarClock} title="No schedules" description="Create a schedule to invoke a Lambda function, queue, topic or state machine." />}
+        empty={
+          <EmptyState
+            icon={CalendarClock}
+            title="No schedules"
+            description="Create a schedule to invoke a Lambda function, queue, topic or state machine."
+            action={
+              <Button size="sm" onClick={() => setDialog("create")}>
+                <Plus /> Create schedule
+              </Button>
+            }
+          />
+        }
       />
       {dialog === "create" && <ScheduleDialog groups={groupList} defaultGroup={group || "default"} onClose={() => setDialog(null)} />}
       {dialog === "edit" && sel && <ScheduleDialog existing={sel} groups={groupList} defaultGroup={sel.GroupName} onClose={() => setDialog(null)} />}

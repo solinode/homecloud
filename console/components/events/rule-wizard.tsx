@@ -3,9 +3,10 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, CalendarClock, Check, CheckCircle2, FlaskConical, Info, Loader2, Plus, Workflow, X, XCircle } from "lucide-react"
+import { AlertCircle, ArrowLeft, ArrowRight, CalendarClock, CheckCircle2, FlaskConical, Info, Loader2, Plus, Workflow, X, XCircle } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -17,17 +18,20 @@ import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { JsonEditor, jsonError } from "@/components/console/json-editor"
 import { DetailSkeleton } from "@/components/console/loading"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { Stepper } from "@/components/console/stepper"
 import { ApiError, api, errorMessage, getSession, seg } from "@/lib/api"
 import { formatDate } from "@/lib/format"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { EventRule, LambdaFunction, PutRuleInput, Queue, RuleTarget, StateMachineSummary, Topic } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import {
   CRON_FIELDS,
   EVENTS_PATH,
   RULES_PATH,
+  RuleTypeTag,
+  TargetKindTag,
   busQuery,
   TARGET_KINDS,
   describeSchedule,
@@ -199,6 +203,8 @@ export function RuleWizard() {
   const [loaded, setLoaded] = useState(false)
   const [submitted, setSubmitted] = useState(false)
   const [pending, setPending] = useState(false)
+  const [step, setStep] = useState(0)
+  const [maxStep, setMaxStep] = useState(0)
 
   useEffect(() => setSample(sampleEvent()), [])
 
@@ -281,6 +287,9 @@ export function RuleWizard() {
   }, [editing, name, allRules.data, description, type, schedule, pattern, targets, bus])
   const err = (k: string) => (submitted ? errors[k] : undefined)
   const valid = Object.keys(errors).length === 0
+  /** stepOf maps an error key to the wizard step that shows its field. */
+  const stepOf = (k: string) => (k === "name" || k === "description" ? 0 : k === "schedule" || k === "pattern" ? 1 : 2)
+  const stepHasErrors = (i: number) => Object.keys(errors).some((k) => stepOf(k) === i)
 
   const preview = useMemo(() => (type === "schedule" && !scheduleError(schedule) ? nextRuns(schedule, 5) : []), [type, schedule])
   const isRate = useMemo(() => {
@@ -312,6 +321,9 @@ export function RuleWizard() {
   const save = async () => {
     setSubmitted(true)
     if (!valid) {
+      const first = Math.min(...Object.keys(errors).map(stepOf))
+      setStep(first)
+      setMaxStep((m) => Math.max(m, first))
       toast.error("Fix the highlighted fields before saving")
       return
     }
@@ -370,6 +382,26 @@ export function RuleWizard() {
   }
   if (editing && !loaded) return <DetailSkeleton />
 
+  const steps = [
+    { label: "Rule details", description: "Bus, name and rule type" },
+    { label: type === "schedule" ? "Schedule" : "Event pattern", description: type === "schedule" ? "When the rule runs" : "Which events match" },
+    { label: "Targets", description: "Where matched events go" },
+  ]
+  const last = step === steps.length - 1
+  const goTo = (i: number) => {
+    setSubmitted(false)
+    setStep(i)
+    setMaxStep((m) => Math.max(m, i))
+  }
+  const next = () => {
+    if (stepHasErrors(step)) {
+      setSubmitted(true)
+      return
+    }
+    goTo(step + 1)
+  }
+  const configuredTargets = targets.filter((t) => t.arn)
+
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
@@ -377,100 +409,87 @@ export function RuleWizard() {
         description="A rule runs on a schedule or matches published events, then delivers to up to five targets."
         breadcrumbs={crumbs}
       />
+      <Stepper steps={steps} current={step} onStepClick={(i) => (editing || i <= maxStep) && goTo(i)} className="mb-1" />
       <form
         onSubmit={(e) => {
           e.preventDefault()
-          save()
+          if (last || editing) save()
+          else next()
         }}
         className="grid grid-cols-1 items-start gap-4 xl:grid-cols-[minmax(0,1fr)_320px]"
       >
         <div className="flex min-w-0 flex-col gap-4">
           {/* ---- Details ---- */}
-          <Section title="Rule details">
-            <div className="flex flex-col gap-4">
-              <Field label="Event bus" htmlFor="rule-bus" help={editing ? "A rule's bus cannot be changed." : "Schedules run on the default bus only; event patterns work on any bus."}>
-                <BusSelect id="rule-bus" value={bus} onChange={setBus} disabled={editing} className="max-w-md" />
-              </Field>
-              <Field
-                label="Name"
-                htmlFor="rule-name"
-                error={err("name")}
-                help={editing ? "Rule names cannot be changed." : "Up to 64 letters, digits, dots, hyphens and underscores."}
-              >
-                <Input
-                  id="rule-name"
-                  value={name}
-                  onChange={(e) => setName(e.target.value)}
-                  disabled={editing}
-                  placeholder="e.g. nightly-report"
-                  autoFocus={!editing}
-                  autoComplete="off"
-                  spellCheck={false}
-                  className="max-w-md"
-                />
-              </Field>
-              <Field label="Description" htmlFor="rule-desc" optional error={err("description")}>
-                <Textarea id="rule-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} className="max-w-xl" />
-              </Field>
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium">Rule type</span>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Rule type">
-                  {(
-                    [
-                      ["schedule", CalendarClock, "Schedule", "Run the targets at a fixed rate or on a cron schedule (UTC)."],
-                      ["pattern", Workflow, "Event pattern", "Run the targets when a published event matches a pattern."],
-                    ] as const
-                  ).map(([k, Icon, label, desc]) => {
-                    const active = type === k
-                    return (
-                      <button
-                        key={k}
-                        type="button"
-                        role="radio"
-                        aria-checked={active}
-                        onClick={() => setType(k)}
-                        className={cn(
-                          "relative flex gap-3 rounded-lg border p-3 text-left transition-colors",
-                          active ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
-                        )}
-                      >
-                        <Icon className={cn("mt-0.5 size-5 shrink-0", active ? "text-primary" : "text-muted-foreground")} />
-                        <span className="flex flex-col gap-0.5 pr-6">
-                          <span className="text-sm font-medium">{label}</span>
-                          <span className="text-muted-foreground text-xs">{desc}</span>
-                        </span>
-                        {active && (
-                          <span className="bg-primary text-primary-foreground absolute top-2 right-2 flex size-5 items-center justify-center rounded-full">
-                            <Check className="size-3.5" />
-                          </span>
-                        )}
-                      </button>
-                    )
-                  })}
-                </div>
+          {step === 0 && (
+            <Section title="Rule details">
+              <div className="flex flex-col gap-4">
+                <Field label="Event bus" htmlFor="rule-bus" help={editing ? "A rule's bus cannot be changed." : "Schedules run on the default bus only; event patterns work on any bus."}>
+                  <BusSelect id="rule-bus" value={bus} onChange={setBus} disabled={editing} className="max-w-md" />
+                </Field>
+                <Field
+                  label="Name"
+                  htmlFor="rule-name"
+                  error={err("name")}
+                  help={editing ? "Rule names cannot be changed." : "Up to 64 letters, digits, dots, hyphens and underscores."}
+                >
+                  <Input
+                    id="rule-name"
+                    value={name}
+                    onChange={(e) => setName(e.target.value)}
+                    disabled={editing}
+                    placeholder="e.g. nightly-report"
+                    autoFocus={!editing}
+                    autoComplete="off"
+                    spellCheck={false}
+                    className="max-w-md"
+                  />
+                </Field>
+                <Field label="Description" htmlFor="rule-desc" optional error={err("description")}>
+                  <Textarea id="rule-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} className="max-w-xl" />
+                </Field>
+                <Field label="Rule type" help="Pick how the rule is triggered; the next step configures it.">
+                  <OptionGroup label="Rule type">
+                    <OptionCard
+                      selected={type === "schedule"}
+                      onSelect={() => setType("schedule")}
+                      icon={CalendarClock}
+                      title="Schedule"
+                      description="Run the targets at a fixed rate or on a cron schedule (UTC)."
+                    />
+                    <OptionCard
+                      selected={type === "pattern"}
+                      onSelect={() => setType("pattern")}
+                      icon={Workflow}
+                      title="Event pattern"
+                      description="Run the targets when a published event matches a pattern."
+                    />
+                  </OptionGroup>
+                </Field>
               </div>
-            </div>
-          </Section>
+            </Section>
+          )}
 
           {/* ---- Schedule ---- */}
-          {type === "schedule" && (
+          {step === 1 && type === "schedule" && (
             <Section title="Schedule" description="Times are UTC. The scheduler checks rules at the top of every minute.">
               <div className="flex flex-col gap-4">
-                <div className="flex flex-wrap gap-1.5">
-                  {PRESETS.map(([label, expr]) => (
-                    <Button
-                      key={expr}
-                      type="button"
-                      size="sm"
-                      variant={schedule.trim() === expr ? "secondary" : "outline"}
-                      className="h-7 text-xs"
-                      onClick={() => setScheduleExpr(expr)}
-                      title={expr}
-                    >
-                      {label}
-                    </Button>
-                  ))}
-                </div>
+                <Field label="Presets" help="Start from a common schedule, then adjust the expression.">
+                  <div className="flex flex-wrap gap-1.5">
+                    {PRESETS.map(([label, expr]) => (
+                      <Button
+                        key={expr}
+                        type="button"
+                        size="sm"
+                        variant={schedule.trim() === expr ? "secondary" : "outline"}
+                        className="h-7 text-xs"
+                        onClick={() => setScheduleExpr(expr)}
+                        title={expr}
+                      >
+                        {label}
+                      </Button>
+                    ))}
+                  </div>
+                </Field>
                 <Field
                   label="Schedule expression"
                   htmlFor="rule-schedule"
@@ -497,7 +516,7 @@ export function RuleWizard() {
                     {showCron ? "Hide cron builder" : "Build a cron expression"}
                   </button>
                   {showCron && (
-                    <div className="flex flex-col gap-2 rounded-md border p-3">
+                    <div className="bg-muted/30 flex flex-col gap-2 rounded-lg border p-3">
                       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
                         {CRON_FIELDS.map((f, i) => (
                           <Field key={f.label} label={<span className="text-xs">{f.label}</span>} htmlFor={`cron-${i}`} help={f.hint}>
@@ -521,10 +540,9 @@ export function RuleWizard() {
                   )}
                 </div>
 
-                <div className="bg-muted/30 flex flex-col gap-2 rounded-md border p-3">
-                  <span className="text-sm font-medium">
-                    Next runs{" "}
-                    {!errors.schedule && <span className="text-muted-foreground font-normal">· {describeSchedule(schedule)}</span>}
+                <div className="bg-muted/30 flex flex-col gap-2 rounded-lg border p-3">
+                  <span className="hc-eyebrow">
+                    Next runs{!errors.schedule && <span className="normal-case tracking-normal"> · {describeSchedule(schedule)}</span>}
                   </span>
                   {preview.length ? (
                     <ol className="flex flex-col gap-0.5 text-sm">
@@ -551,35 +569,41 @@ export function RuleWizard() {
           )}
 
           {/* ---- Event pattern ---- */}
-          {type === "pattern" && (
+          {step === 1 && type === "pattern" && (
             <Section
               title="Event pattern"
               description="Every key in the pattern must match the event. Arrays list allowed values; nested objects match nested fields."
             >
               <div className="flex flex-col gap-4">
-                <Field label="Pattern" error={err("pattern")}>
+                <Field
+                  label="Pattern"
+                  error={err("pattern")}
+                  help={
+                    <>
+                      Supported matchers: exact values <span className="font-mono">{`["a","b"]`}</span>, <span className="font-mono">{`{"prefix":"ord"}`}</span>,{" "}
+                      <span className="font-mono">{`{"exists":true}`}</span>, <span className="font-mono">{`{"anything-but":["x"]}`}</span> and{" "}
+                      <span className="font-mono">{`{"numeric":[">",0,"<=",100]}`}</span>.
+                    </>
+                  }
+                >
                   <JsonEditor value={pattern} onChange={(v) => (setPattern(v), setTestResult(null))} rows={8} validate={objectOnly} />
                 </Field>
-                <p className="text-muted-foreground text-xs">
-                  Supported matchers: exact values <span className="font-mono">{`["a","b"]`}</span>, <span className="font-mono">{`{"prefix":"ord"}`}</span>,{" "}
-                  <span className="font-mono">{`{"exists":true}`}</span>, <span className="font-mono">{`{"anything-but":["x"]}`}</span> and{" "}
-                  <span className="font-mono">{`{"numeric":[">",0,"<=",100]}`}</span>.
-                </p>
-                <div className="flex flex-col gap-2 border-t pt-4">
-                  <span className="text-sm font-medium">Test with a sample event</span>
-                  <JsonEditor value={sample} onChange={(v) => (setSample(v), setTestResult(null))} rows={12} validate={objectOnly} />
+                <div className="flex flex-col gap-3 border-t pt-4">
+                  <Field label="Test with a sample event" optional help="Checks the pattern against this event on the server; nothing is published.">
+                    <JsonEditor value={sample} onChange={(v) => (setSample(v), setTestResult(null))} rows={12} validate={objectOnly} />
+                  </Field>
                   <div className="flex flex-wrap items-center gap-3">
                     <Button type="button" variant="outline" size="sm" onClick={testPattern} disabled={testing}>
                       {testing ? <Loader2 className="animate-spin" /> : <FlaskConical />}
                       Test pattern
                     </Button>
                     {testResult === true && (
-                      <span className="flex items-center gap-1.5 text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                      <span className="text-success flex items-center gap-1.5 text-sm font-medium">
                         <CheckCircle2 className="size-4" /> The sample event matches the pattern
                       </span>
                     )}
                     {testResult === false && (
-                      <span className="text-destructive flex items-center gap-1.5 text-sm font-medium">
+                      <span className="text-danger flex items-center gap-1.5 text-sm font-medium">
                         <XCircle className="size-4" /> The sample event does not match
                       </span>
                     )}
@@ -590,44 +614,70 @@ export function RuleWizard() {
           )}
 
           {/* ---- Targets ---- */}
-          <Section title="Targets" description="Each target receives the event JSON, part of it, a constant, or a transformed template. Failed deliveries are retried and can go to a dead-letter queue.">
-            <div className="flex flex-col gap-3">
-              {targets.length === 0 && (
-                <p className="text-muted-foreground text-sm">No targets: the rule will fire and count invocations but deliver nothing.</p>
-              )}
-              {targets.map((t, i) => (
-                <TargetEditor
-                  key={i}
-                  index={i}
-                  row={t}
-                  options={targetOpts[t.kind]}
-                  onChange={(p) => setTarget(i, p)}
-                  onRemove={() => setTargets(targets.filter((_, j) => j !== i))}
-                  queues={targetOpts.sqs}
-                  errors={{
-                    arn: err(`t${i}arn`),
-                    input: err(`t${i}input`),
-                    paths: err(`t${i}paths`) ?? errors[`t${i}paths`],
-                    template: err(`t${i}template`),
-                    retries: err(`t${i}retries`) ?? errors[`t${i}retries`],
-                    age: err(`t${i}age`) ?? errors[`t${i}age`],
-                  }}
-                />
-              ))}
-              <div className="flex flex-wrap items-center gap-3">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  disabled={targets.length >= 5}
-                  onClick={() => setTargets([...targets, newTarget()])}
-                >
-                  <Plus /> Add target
-                </Button>
-                <span className="text-muted-foreground text-xs">{targets.length} of 5</span>
+          {step === 2 && (
+            <Section
+              title="Targets"
+              description="Each target receives the event JSON, part of it, a constant, or a transformed template. Failed deliveries are retried and can go to a dead-letter queue."
+              actions={<span className="text-muted-foreground font-mono text-xs tabular-nums">{targets.length} / 5</span>}
+            >
+              <div className="flex flex-col gap-3">
+                {targets.length === 0 && (
+                  <Alert variant="info">
+                    <Info />
+                    <AlertDescription>No targets: the rule will fire and count invocations but deliver nothing.</AlertDescription>
+                  </Alert>
+                )}
+                {targets.map((t, i) => (
+                  <TargetEditor
+                    key={i}
+                    index={i}
+                    row={t}
+                    options={targetOpts[t.kind]}
+                    onChange={(p) => setTarget(i, p)}
+                    onRemove={() => setTargets(targets.filter((_, j) => j !== i))}
+                    queues={targetOpts.sqs}
+                    errors={{
+                      arn: err(`t${i}arn`),
+                      input: err(`t${i}input`),
+                      paths: err(`t${i}paths`) ?? errors[`t${i}paths`],
+                      template: err(`t${i}template`),
+                      retries: err(`t${i}retries`) ?? errors[`t${i}retries`],
+                      age: err(`t${i}age`) ?? errors[`t${i}age`],
+                    }}
+                  />
+                ))}
+                <div>
+                  <Button type="button" variant="outline" size="sm" disabled={targets.length >= 5} onClick={() => setTargets([...targets, newTarget()])}>
+                    <Plus /> Add target
+                  </Button>
+                </div>
               </div>
-            </div>
-          </Section>
+            </Section>
+          )}
+
+          {/* ---- Footer ---- */}
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {submitted && stepHasErrors(step) && <p className="text-danger mr-auto text-xs">Some settings need attention. Check the highlighted fields.</p>}
+            <Button type="button" variant="outline" asChild>
+              <Link href={editing ? ruleHref(editName, bus) : "/events/"}>Cancel</Link>
+            </Button>
+            {step > 0 && (
+              <Button type="button" variant="outline" onClick={() => goTo(step - 1)} disabled={pending}>
+                <ArrowLeft /> Back
+              </Button>
+            )}
+            {!last && (
+              <Button type="button" variant={editing ? "outline" : "default"} onClick={next}>
+                Next <ArrowRight />
+              </Button>
+            )}
+            {(last || editing) && (
+              <Button type="submit" disabled={pending}>
+                {pending && <Loader2 className="animate-spin" />}
+                {editing ? "Save changes" : "Create rule"}
+              </Button>
+            )}
+          </div>
         </div>
 
         {/* ---- Summary ---- */}
@@ -647,7 +697,10 @@ export function RuleWizard() {
                 <SummaryItem label="Name">
                   <span className="font-mono text-[13px] break-all">{name || "-"}</span>
                 </SummaryItem>
-                <SummaryItem label="Type">{type === "schedule" ? "Schedule" : "Event pattern"}</SummaryItem>
+                <SummaryItem label="Event bus">{bus}</SummaryItem>
+                <SummaryItem label="Type">
+                  <RuleTypeTag rule={{ schedule_expression: type === "schedule" ? "schedule" : undefined }} />
+                </SummaryItem>
                 {type === "schedule" ? (
                   <SummaryItem label="Schedule">
                     <span className="font-mono text-[13px] break-all">{schedule || "-"}</span>
@@ -658,31 +711,22 @@ export function RuleWizard() {
                   </SummaryItem>
                 )}
                 <SummaryItem label="Targets">
-                  {targets.filter((t) => t.arn).length ? (
-                    <ul className="flex flex-col gap-0.5">
-                      {targets
-                        .filter((t) => t.arn)
-                        .map((t) => (
-                          <li key={t.arn} className="truncate">
-                            <span className="text-muted-foreground text-xs">{TARGET_KINDS.find((k) => k.kind === t.kind)?.label}:</span> {targetName(t.arn)}
-                          </li>
-                        ))}
+                  {configuredTargets.length ? (
+                    <ul className="flex flex-col gap-1">
+                      {configuredTargets.map((t) => (
+                        <li key={t.arn} className="flex min-w-0 items-center gap-2">
+                          <TargetKindTag kind={t.kind} />
+                          <span className="truncate" title={t.arn}>
+                            {targetName(t.arn)}
+                          </span>
+                        </li>
+                      ))}
                     </ul>
                   ) : (
-                    "None"
+                    <span className="text-muted-foreground">None</span>
                   )}
                 </SummaryItem>
               </dl>
-              {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
-              <div className="flex flex-col gap-2 border-t pt-4">
-                <Button type="submit" disabled={pending}>
-                  {pending && <Loader2 className="animate-spin" />}
-                  {editing ? "Save changes" : "Create rule"}
-                </Button>
-                <Button type="button" variant="outline" asChild>
-                  <Link href={editing ? ruleHref(editName, bus) : "/events/"}>Cancel</Link>
-                </Button>
-              </div>
             </div>
           </Section>
         </aside>
@@ -727,17 +771,20 @@ function TargetEditor({
   const mode = INPUT_MODES.find((m) => m.value === row.mode)!
 
   return (
-    <div className="flex flex-col gap-3 rounded-md border p-3">
+    <div className="flex flex-col gap-3 rounded-lg border p-4">
       <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">Target {index + 1}</span>
+        <span className="flex items-center gap-2 text-sm font-medium">
+          Target {index + 1}
+          <TargetKindTag kind={row.kind} />
+        </span>
         <Button type="button" variant="ghost" size="icon" className="size-7" onClick={onRemove} aria-label="Remove target">
           <X />
         </Button>
       </div>
       <div className="grid grid-cols-1 gap-3 sm:grid-cols-[12rem_minmax(0,1fr)]">
-        <Field label="Target type">
+        <Field label="Target type" htmlFor={`t${index}-kind`}>
           <Select value={row.kind} onValueChange={(v) => onChange({ kind: v as TargetKind, arn: "" })}>
-            <SelectTrigger size="sm" className="w-full" aria-label="Target type">
+            <SelectTrigger id={`t${index}-kind`} size="sm" className="w-full">
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -749,15 +796,20 @@ function TargetEditor({
             </SelectContent>
           </Select>
         </Field>
-        <Field label={kind.label} error={errors.arn ?? (options.error ? errorMessage(options.error) : undefined)} help={row.arn ? <span className="font-mono break-all">{row.arn}</span> : undefined}>
+        <Field
+          label={kind.label}
+          htmlFor={`t${index}-arn`}
+          error={errors.arn ?? (options.error ? errorMessage(options.error) : undefined)}
+          help={row.arn ? <span className="font-mono break-all">{row.arn}</span> : undefined}
+        >
           <Select value={row.arn} onValueChange={(v) => onChange({ arn: v })} disabled={!options.data}>
-            <SelectTrigger size="sm" className="w-full" aria-label={kind.label}>
+            <SelectTrigger id={`t${index}-arn`} size="sm" className="w-full">
               <SelectValue placeholder={!options.data ? "Loading..." : list.length ? `Choose a ${kind.noun}` : `No ${kind.noun}s found`} />
             </SelectTrigger>
             <SelectContent>
               {missing && (
                 <SelectItem value={row.arn}>
-                  {targetName(row.arn)} <span className="text-destructive text-xs">(not found)</span>
+                  {targetName(row.arn)} <span className="text-danger text-xs">(not found)</span>
                 </SelectItem>
               )}
               {list.map((o) => (
@@ -769,9 +821,9 @@ function TargetEditor({
           </Select>
         </Field>
       </div>
-      <Field label="Configure target input" help={mode.help}>
+      <Field label="Configure target input" htmlFor={`t${index}-mode`} help={mode.help}>
         <Select value={row.mode} onValueChange={(v) => onChange({ mode: v as InputMode })}>
-          <SelectTrigger size="sm" className="w-full sm:w-72" aria-label="Target input">
+          <SelectTrigger id={`t${index}-mode`} size="sm" className="w-full sm:w-72">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -784,19 +836,20 @@ function TargetEditor({
         </Select>
       </Field>
       {row.mode === "constant" && (
-        <Field label="Constant input (JSON)" error={errors.input}>
-          <Textarea rows={3} value={row.input} onChange={(e) => onChange({ input: e.target.value })} placeholder='{"task": "cleanup"}' className="font-mono text-[13px]" spellCheck={false} />
+        <Field label="Constant input (JSON)" htmlFor={`t${index}-input`} error={errors.input}>
+          <Textarea id={`t${index}-input`} rows={3} value={row.input} onChange={(e) => onChange({ input: e.target.value })} placeholder='{"task": "cleanup"}' className="font-mono text-[13px]" spellCheck={false} />
         </Field>
       )}
       {row.mode === "path" && (
-        <Field label="Input path" error={errors.input} help="For example $.detail sends only the event's detail object.">
-          <Input value={row.inputPath} onChange={(e) => onChange({ inputPath: e.target.value })} placeholder="$.detail" className="h-8 font-mono text-[13px]" spellCheck={false} />
+        <Field label="Input path" htmlFor={`t${index}-path`} error={errors.input} help="For example $.detail sends only the event's detail object.">
+          <Input id={`t${index}-path`} value={row.inputPath} onChange={(e) => onChange({ inputPath: e.target.value })} placeholder="$.detail" className="h-8 font-mono text-[13px]" spellCheck={false} />
         </Field>
       )}
       {row.mode === "transformer" && (
         <>
-          <Field label="Input path" optional error={errors.paths} help="A JSON object mapping variable names to JSONPaths into the event.">
+          <Field label="Input path" htmlFor={`t${index}-paths`} optional error={errors.paths} help="A JSON object mapping variable names to JSONPaths into the event.">
             <Textarea
+              id={`t${index}-paths`}
               rows={3}
               value={row.pathsMap}
               onChange={(e) => onChange({ pathsMap: e.target.value })}
@@ -805,8 +858,14 @@ function TargetEditor({
               spellCheck={false}
             />
           </Field>
-          <Field label="Template" error={errors.template} help="Use <variable> placeholders. <aws.events.event> inserts the whole event, <aws.events.rule-name> the rule name.">
+          <Field
+            label="Template"
+            htmlFor={`t${index}-template`}
+            error={errors.template}
+            help="Use <variable> placeholders. <aws.events.event> inserts the whole event, <aws.events.rule-name> the rule name."
+          >
             <Textarea
+              id={`t${index}-template`}
               rows={3}
               value={row.template}
               onChange={(e) => onChange({ template: e.target.value })}
@@ -823,15 +882,20 @@ function TargetEditor({
       </label>
       {showAdvanced && (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <Field label="Maximum age of event" error={errors.age} help="Seconds, 60-86400 (default 86400).">
-            <Input inputMode="numeric" value={row.maxAge} onChange={(e) => onChange({ maxAge: e.target.value.replace(/[^\d]/g, "") })} placeholder="86400" className="h-8" />
+          <Field label="Maximum age of event" htmlFor={`t${index}-age`} error={errors.age} help="Seconds, 60-86400 (default 86400).">
+            <Input id={`t${index}-age`} inputMode="numeric" value={row.maxAge} onChange={(e) => onChange({ maxAge: e.target.value.replace(/[^\d]/g, "") })} placeholder="86400" className="h-8" />
           </Field>
-          <Field label="Retry attempts" error={errors.retries} help="0-185 (default 185).">
-            <Input inputMode="numeric" value={row.retries} onChange={(e) => onChange({ retries: e.target.value.replace(/[^\d]/g, "") })} placeholder="185" className="h-8" />
+          <Field label="Retry attempts" htmlFor={`t${index}-retries`} error={errors.retries} help="0-185 (default 185).">
+            <Input id={`t${index}-retries`} inputMode="numeric" value={row.retries} onChange={(e) => onChange({ retries: e.target.value.replace(/[^\d]/g, "") })} placeholder="185" className="h-8" />
           </Field>
-          <Field label="Dead-letter queue" help="Undeliverable events go to this SQS queue." error={queues.error ? errorMessage(queues.error) : undefined}>
+          <Field
+            label="Dead-letter queue"
+            htmlFor={`t${index}-dlq`}
+            help="Undeliverable events go to this SQS queue."
+            error={queues.error ? errorMessage(queues.error) : undefined}
+          >
             <Select value={row.dlq || NO_DLQ} onValueChange={(v) => onChange({ dlq: v === NO_DLQ ? "" : v })} disabled={!queues.data}>
-              <SelectTrigger size="sm" className="w-full" aria-label="Dead-letter queue">
+              <SelectTrigger id={`t${index}-dlq`} size="sm" className="w-full">
                 <SelectValue placeholder="None" />
               </SelectTrigger>
               <SelectContent>
@@ -854,7 +918,7 @@ function TargetEditor({
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+      <dt className="text-faint mb-0.5 text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )

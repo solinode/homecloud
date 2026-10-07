@@ -2,24 +2,41 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, Loader2, Pencil, Play, Power, PowerOff, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, Loader2, Pencil, Play, Power, PowerOff, RefreshCw, Send, Target, Trash2 } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyableText } from "@/components/console/copy-button"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, seg } from "@/lib/api"
 import { formatDate, formatNumber } from "@/lib/format"
 import { useApi, useQueryParam } from "@/lib/hooks"
 import type { EventRule, RuleTarget } from "@/lib/types"
-import { RULES_PATH, busQuery, describeSchedule, editRuleHref, hasNextRun, isSchedule, targetHref, targetKindLabel, targetName, useRuleActions } from "./common"
+import {
+  RULES_PATH,
+  RuleTypeTag,
+  TargetKindTag,
+  busQuery,
+  describeSchedule,
+  editRuleHref,
+  hasNextRun,
+  isSchedule,
+  targetHref,
+  targetKindLabel,
+  targetName,
+  useRuleActions,
+} from "./common"
 
 export function RuleDetail() {
   const router = useRouter()
@@ -72,29 +89,28 @@ export function RuleDetail() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating}>
-              {isValidating && <Loader2 className="animate-spin" />}
+              {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Refresh
             </Button>
-            {enabled ? (
-              <Button variant="outline" size="sm" disabled={actions.busy} onClick={() => actions.disable([rule.name])}>
-                <PowerOff /> Disable
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" disabled={actions.busy} onClick={() => actions.enable([rule.name])}>
-                <Power /> Enable
-              </Button>
-            )}
             <Button variant="outline" size="sm" disabled={actions.busy} onClick={() => actions.run([rule.name])} title="Invoke the targets now with a Scheduled Event">
               {actions.busy ? <Loader2 className="animate-spin" /> : <Play />}
               Run now
             </Button>
-            <Button variant="outline" size="sm" asChild>
+            <ActionsMenu
+              disabled={actions.busy}
+              items={[
+                enabled
+                  ? { label: "Disable rule", icon: <PowerOff />, onSelect: () => actions.disable([rule.name]) }
+                  : { label: "Enable rule", icon: <Power />, onSelect: () => actions.enable([rule.name]) },
+                { label: "Run now", icon: <Play />, onSelect: () => actions.run([rule.name]), hint: "Invoke the targets now with a Scheduled Event" },
+                { separator: true },
+                { label: "Delete rule", icon: <Trash2 />, destructive: true, onSelect: () => actions.remove([rule]) },
+              ]}
+            />
+            <Button size="sm" asChild>
               <Link href={editRuleHref(rule.name, bus)}>
-                <Pencil /> Edit
+                <Pencil /> Edit rule
               </Link>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => actions.remove([rule])}>
-              <Trash2 /> Delete
             </Button>
           </>
         }
@@ -110,13 +126,37 @@ export function RuleDetail() {
         </Alert>
       )}
 
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Invocations" value={formatNumber(rule.invocations)} caption="Target deliveries" />
+        <StatTile
+          label="Failed"
+          value={formatNumber(rule.failed_invocations)}
+          tone={rule.failed_invocations ? "danger" : undefined}
+          caption={rule.failed_invocations ? "See the last error above" : "No failures"}
+        />
+        <StatTile label="Targets" value={targets.length} caption={targets.length ? "Receive matched events" : "Nothing is delivered"} />
+        {sched ? (
+          <StatTile
+            label="Next run"
+            value={<span className="text-xl tracking-[-0.03em]">{enabled && hasNextRun(rule) ? <TimeAgo value={rule.next_run} /> : "-"}</span>}
+            caption={!enabled ? "Rule disabled" : hasNextRun(rule) ? formatDate(rule.next_run) : "None within a year"}
+          />
+        ) : (
+          <StatTile
+            label="Last triggered"
+            value={<span className="text-xl tracking-[-0.03em]">{rule.last_triggered ? <TimeAgo value={rule.last_triggered} /> : "Never"}</span>}
+            caption={rule.last_triggered ? formatDate(rule.last_triggered) : "No matching events yet"}
+          />
+        )}
+      </div>
+
       <Section title="Rule details">
         <KeyValueGrid
           columns={3}
           items={[
             { label: "Rule name", value: rule.name },
             { label: "Status", value: <StatusBadge status={rule.state} /> },
-            { label: "Type", value: sched ? "Schedule" : "Event pattern" },
+            { label: "Type", value: <RuleTypeTag rule={rule} /> },
             { label: "Event bus", value: rule.event_bus },
             { label: "Description", value: rule.description },
             { label: "Created", value: <span>{formatDate(rule.created_at)} (<TimeAgo value={rule.created_at} />)</span> },
@@ -147,7 +187,7 @@ export function RuleDetail() {
             { label: "Invocations", value: formatNumber(rule.invocations) },
             {
               label: "Failed invocations",
-              value: <span className={rule.failed_invocations ? "text-destructive font-medium" : undefined}>{formatNumber(rule.failed_invocations)}</span>,
+              value: <span className={rule.failed_invocations ? "text-danger font-medium" : undefined}>{formatNumber(rule.failed_invocations)}</span>,
             },
             { label: "Rule ARN", value: <CopyableText value={rule.arn} />, wide: true },
           ]}
@@ -155,82 +195,80 @@ export function RuleDetail() {
       </Section>
 
       {!sched && (
-        <Section title="Event pattern" actions={<Link href="/events/send/" className="text-primary text-sm hover:underline">Send a test event</Link>}>
-          <pre className="bg-muted/50 max-h-96 overflow-auto rounded-md border p-3 font-mono text-[12.5px]">{JSON.stringify(rule.event_pattern ?? {}, null, 2)}</pre>
+        <Section
+          title="Event pattern"
+          description="Events published to the bus that match this pattern are delivered to the targets."
+          actions={
+            <Button variant="outline" size="sm" asChild>
+              <Link href="/events/send/">
+                <Send /> Send a test event
+              </Link>
+            </Button>
+          }
+        >
+          <CodeBlock code={JSON.stringify(rule.event_pattern ?? {}, null, 2)} title="event-pattern.json" maxHeight="24rem" />
         </Section>
       )}
 
-      <Section title={`Targets (${targets.length})`} flush>
-        {targets.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b">
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Type</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Name</th>
-                  <th className="text-muted-foreground hidden px-3 py-2 text-left text-xs font-semibold md:table-cell">ARN</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Input</th>
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Retry / DLQ</th>
-                </tr>
-              </thead>
-              <tbody>
-                {targets.map((t) => {
-                  const href = targetHref(t.arn)
-                  return (
-                    <tr key={t.id || t.arn} className="border-b align-top last:border-0">
-                      <td className="px-4 py-2 whitespace-nowrap">{targetKindLabel(t.arn)}</td>
-                      <td className="px-3 py-2">
-                        {href ? (
-                          <Link href={href} className="text-primary font-medium hover:underline">
-                            {targetName(t.arn)}
-                          </Link>
-                        ) : (
-                          targetName(t.arn)
-                        )}
-                      </td>
-                      <td className="hidden max-w-md px-3 py-2 md:table-cell">
-                        <CopyableText value={t.arn} />
-                      </td>
-                      <td className="px-3 py-2">
-                        <TargetInput t={t} />
-                      </td>
-                      <td className="px-4 py-2 text-xs whitespace-nowrap">
-                        <div>
-                          {t.retry_policy?.maximum_retry_attempts ?? 185} retries, {t.retry_policy?.maximum_event_age_in_seconds ?? 86400}s max age
-                        </div>
-                        {t.dead_letter_arn ? (
-                          <Link href={targetHref(t.dead_letter_arn) ?? "#"} className="text-primary hover:underline">
-                            DLQ: {targetName(t.dead_letter_arn)}
-                          </Link>
-                        ) : (
-                          <span className="text-muted-foreground">No DLQ</span>
-                        )}
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        ) : (
+      <DataTable
+        title="Targets"
+        data={targets}
+        columns={targetColumns}
+        rowId={(t) => t.id || t.arn}
+        noSearch
+        empty={
           <EmptyState
+            icon={Target}
             title="No targets"
             description="The rule fires but delivers nothing. Edit the rule to add a Lambda function, SQS queue, SNS topic or state machine."
             action={
-              <Button size="sm" variant="outline" asChild>
+              <Button size="sm" asChild>
                 <Link href={editRuleHref(rule.name, bus)}>
                   <Pencil /> Edit rule
                 </Link>
               </Button>
             }
           />
-        )}
-      </Section>
+        }
+      />
 
       {actions.dialogs}
     </div>
   )
 }
+
+const targetColumns: Column<RuleTarget>[] = [
+  { id: "type", header: "Type", cell: (t) => <TargetKindTag arn={t.arn} />, value: (t) => targetKindLabel(t.arn) },
+  {
+    id: "name",
+    header: "Name",
+    cell: (t) => {
+      const href = targetHref(t.arn)
+      return href ? <CellLink href={href}>{targetName(t.arn)}</CellLink> : <CellText>{targetName(t.arn)}</CellText>
+    },
+    value: (t) => targetName(t.arn),
+  },
+  { id: "arn", header: "ARN", cell: (t) => <CopyableText value={t.arn} className="max-w-md" />, hideBelow: "md" },
+  { id: "input", header: "Input", cell: (t) => <TargetInput t={t} /> },
+  {
+    id: "retry",
+    header: "Retry / DLQ",
+    cell: (t) => (
+      <div className="text-xs whitespace-nowrap">
+        <div>
+          {t.retry_policy?.maximum_retry_attempts ?? 185} retries, {t.retry_policy?.maximum_event_age_in_seconds ?? 86400}s max age
+        </div>
+        {t.dead_letter_arn ? (
+          <Link href={targetHref(t.dead_letter_arn) ?? "#"} className="text-primary hover:underline">
+            DLQ: {targetName(t.dead_letter_arn)}
+          </Link>
+        ) : (
+          <span className="text-muted-foreground">No DLQ</span>
+        )}
+      </div>
+    ),
+  },
+]
 
 function BackButton() {
   return (
@@ -246,7 +284,7 @@ function TargetInput({ t }: { t: RuleTarget }) {
   const code = (label: string, v: string) => (
     <div className="flex flex-col gap-0.5">
       <span className="text-muted-foreground text-xs">{label}</span>
-      <code className="bg-muted block max-w-xs truncate rounded px-1.5 py-0.5 font-mono text-[12.5px]" title={v}>
+      <code className="bg-muted block max-w-xs truncate rounded border px-1.5 py-0.5 font-mono text-[12.5px]" title={v}>
         {v}
       </code>
     </div>
