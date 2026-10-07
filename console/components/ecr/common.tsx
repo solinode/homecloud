@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { AlertTriangle, CheckCircle2, Circle, Info, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -14,9 +15,11 @@ import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { CopyButton, CopyableText } from "@/components/console/copy-button"
+import { CodeBlock } from "@/components/console/code-block"
+import { CopyableText } from "@/components/console/copy-button"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
+import { KeyValueGrid } from "@/components/console/key-value"
 import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
@@ -58,12 +61,7 @@ export function useRegistryStatus() {
 
 /** CommandBlock is one copyable shell command. */
 export function CommandBlock({ command, className }: { command: string; className?: string }) {
-  return (
-    <div className={cn("bg-muted/50 flex items-start gap-2 rounded-md border px-3 py-2", className)}>
-      <pre className="min-w-0 flex-1 overflow-x-auto font-mono text-[12.5px] leading-5 whitespace-pre">{command}</pre>
-      <CopyButton value={command} label="Copy command" className="mt-px" />
-    </div>
-  )
+  return <CodeBlock code={command} prompt copyLabel="Copy command" className={className} />
 }
 
 /** CommandSteps renders numbered shell steps, each with its own copy button. */
@@ -72,7 +70,9 @@ export function CommandSteps({ steps }: { steps: { title: React.ReactNode; comma
     <ol className="flex flex-col gap-4">
       {steps.map((s, i) => (
         <li key={i} className="flex gap-3">
-          <span className="bg-primary/10 text-primary flex size-6 shrink-0 items-center justify-center rounded-full text-xs font-semibold">{i + 1}</span>
+          <span className="border-brand-line bg-brand-soft text-primary flex size-6 shrink-0 items-center justify-center rounded-full border font-mono text-[11px] font-medium tabular-nums">
+            {i + 1}
+          </span>
           <div className="flex min-w-0 flex-1 flex-col gap-1.5">
             <p className="text-sm">{s.title}</p>
             <CommandBlock command={s.command} />
@@ -97,28 +97,19 @@ export function RegistryPanel() {
         </div>
       ) : (
         <div className="flex flex-col gap-4">
-          <dl className="grid grid-cols-1 gap-x-8 gap-y-3 sm:grid-cols-3">
-            <div className="min-w-0">
-              <dt className="text-muted-foreground mb-0.5 text-xs font-medium">Registry host</dt>
-              <dd className="text-sm">
-                <CopyableText value={data.registry} />
-              </dd>
-            </div>
-            <div className="min-w-0">
-              <dt className="text-muted-foreground mb-0.5 text-xs font-medium">Status</dt>
-              <dd className="text-sm">
-                <StatusBadge status={data.status} />
-              </dd>
-            </div>
-            <div className="min-w-0">
-              <dt className="text-muted-foreground mb-0.5 text-xs font-medium">Authentication</dt>
-              <dd className="text-sm">None (loopback only)</dd>
-            </div>
-          </dl>
+          <KeyValueGrid
+            columns={3}
+            items={[
+              { label: "Registry host", value: <CopyableText value={data.registry} /> },
+              { label: "Status", value: <StatusBadge status={data.status} /> },
+              { label: "Authentication", value: "None (loopback only)" },
+            ]}
+          />
           {data.status !== "available" && (
-            <p className="text-muted-foreground flex items-center gap-2 text-sm">
-              <Loader2 className="size-4 animate-spin" /> The registry container is {data.status}. Pushes and image listings work once it is available.
-            </p>
+            <Alert variant="info">
+              <Loader2 className="animate-spin" />
+              <AlertDescription>The registry container is {data.status}. Pushes and image listings work once it is available.</AlertDescription>
+            </Alert>
           )}
           <CommandSteps
             steps={[
@@ -211,7 +202,7 @@ export function CreateRepositoryDialog({ open, onOpenChange }: { open: boolean; 
                   key={c.label}
                   className={cn(
                     "flex items-center gap-1.5",
-                    c.ok ? "text-emerald-600 dark:text-emerald-400" : touched || name ? "text-destructive" : "text-muted-foreground",
+                    c.ok ? "text-success" : touched || name ? "text-destructive" : "text-muted-foreground",
                   )}
                 >
                   {c.ok ? <CheckCircle2 className="size-3.5 shrink-0" /> : <Circle className="size-3.5 shrink-0" />}
@@ -317,10 +308,10 @@ export function DeleteRepositoryDialog({
         </div>
       </div>
       {apiError && (
-        <div className="border-destructive/30 bg-destructive/5 text-destructive flex items-start gap-2 rounded-md border p-3 text-sm">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>{apiError}</span>
-        </div>
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertDescription>{apiError}</AlertDescription>
+        </Alert>
       )}
     </ConfirmDialog>
   )

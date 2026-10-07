@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Boxes, Info, Loader2, Plus, X } from "lucide-react"
+import { AlertTriangle, Boxes, Info, Loader2, Plus, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
+import { CodeBlock } from "@/components/console/code-block"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
@@ -163,7 +164,7 @@ export function RegisterTaskDefinition() {
       />
       {from && source.error && <ErrorState error={source.error} onRetry={() => source.mutate()} />}
       {newRevision && (
-        <Alert>
+        <Alert variant="info">
           <Info />
           <AlertDescription>
             Prefilled from <span className="font-mono">{from}</span>. Change what you need and register to create the next revision.
@@ -401,16 +402,21 @@ export function RegisterTaskDefinition() {
               </dl>
               <details className="border-t pt-3 text-sm">
                 <summary className="text-muted-foreground cursor-pointer text-xs font-medium">Request JSON</summary>
-                <pre className="bg-muted/50 mt-2 max-h-72 overflow-auto rounded-md border p-2 font-mono text-[11.5px]">{JSON.stringify(body, null, 2)}</pre>
+                <CodeBlock code={JSON.stringify(body, null, 2)} className="mt-2" maxHeight="18rem" />
               </details>
-              {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
-              <div className="flex flex-col gap-2 border-t pt-4">
+              {submitted && !valid && (
+                <Alert variant="destructive">
+                  <AlertTriangle />
+                  <AlertDescription>Some settings need attention. Check the highlighted fields.</AlertDescription>
+                </Alert>
+              )}
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+                <Button type="button" variant="outline" asChild>
+                  <Link href="/ecs/task-definitions/">Cancel</Link>
+                </Button>
                 <Button type="submit" disabled={pending || (!!from && source.isLoading)}>
                   {pending && <Loader2 className="animate-spin" />}
                   {newRevision ? "Create new revision" : "Register"}
-                </Button>
-                <Button type="button" variant="outline" asChild>
-                  <Link href="/ecs/task-definitions/">Cancel</Link>
                 </Button>
               </div>
             </div>
@@ -434,7 +440,7 @@ function EcrPicker({ value, onPick }: { value: string; onPick: (uri: string) => 
   const images = detail.data?.images ?? []
 
   return (
-    <div className="bg-muted/30 flex flex-col gap-3 rounded-md border p-3">
+    <div className="bg-muted/30 flex flex-col gap-3 rounded-lg border p-3">
       {repos.error ? (
         <ErrorState error={repos.error} onRetry={() => repos.mutate()} />
       ) : !repos.data ? (
@@ -468,7 +474,7 @@ function EcrPicker({ value, onPick }: { value: string; onPick: (uri: string) => 
           ) : images.length === 0 ? (
             <div className="text-muted-foreground flex flex-col gap-1 text-sm">
               <span>This repository has no images yet. Push one with:</span>
-              <pre className="bg-card overflow-x-auto rounded border p-2 font-mono text-[12px]">{(detail.data.push_commands ?? []).join("\n")}</pre>
+              <CodeBlock code={(detail.data.push_commands ?? []).join("\n")} prompt />
             </div>
           ) : (
             <div className="bg-card divide-y overflow-hidden rounded-md border">
@@ -480,8 +486,8 @@ function EcrPicker({ value, onPick }: { value: string; onPick: (uri: string) => 
                     type="button"
                     onClick={() => onPick(uri)}
                     className={cn(
-                      "hover:bg-muted/50 flex w-full flex-col gap-0.5 px-3 py-2 text-left sm:flex-row sm:items-center sm:gap-3",
-                      uri === value && "bg-primary/5 dark:bg-primary/10",
+                      "flex w-full flex-col gap-0.5 px-3 py-2 text-left transition-colors sm:flex-row sm:items-center sm:gap-3",
+                      uri === value ? "bg-brand-soft" : "hover:bg-muted/50",
                     )}
                   >
                     <span className="min-w-0 flex-1 truncate font-mono text-[13px]">{uri}</span>
@@ -504,8 +510,8 @@ function EcrPicker({ value, onPick }: { value: string; onPick: (uri: string) => 
 
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+    <div className="min-w-0">
+      <dt className="text-faint mb-0.5 text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )

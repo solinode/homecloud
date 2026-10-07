@@ -1,7 +1,6 @@
 "use client"
 
 import { useState } from "react"
-import Link from "next/link"
 import { MapPin, Plus } from "lucide-react"
 import { toast } from "sonner"
 
@@ -10,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { FormDialog } from "@/components/console/form-dialog"
@@ -43,24 +42,24 @@ export function ElasticIPsList() {
   const live = (instances.data ?? []).filter((i) => i.state !== "terminated" && i.state !== "shutting-down")
 
   const columns: Column<ElasticIP>[] = [
-    { id: "name", header: "Name", cell: (a) => a.tags?.Name || <span className="text-muted-foreground">-</span>, value: (a) => a.tags?.Name },
-    { id: "ip", header: "Allocated IPv4 address", cell: (a) => <span className="font-mono text-[13px] font-medium">{a.public_ip}</span>, value: (a) => a.public_ip },
-    { id: "id", header: "Allocation ID", cell: (a) => <span className="font-mono text-[13px]">{a.allocation_id}</span>, value: (a) => a.allocation_id },
+    { id: "name", header: "Name", cell: (a) => <CellText max="14rem">{a.tags?.Name}</CellText>, value: (a) => a.tags?.Name },
+    { id: "ip", header: "Allocated IPv4 address", cell: (a) => <CellText mono className="font-medium">{a.public_ip}</CellText>, value: (a) => a.public_ip },
+    { id: "id", header: "Allocation ID", cell: (a) => <CellText mono>{a.allocation_id}</CellText>, value: (a) => a.allocation_id },
     {
       id: "instance",
       header: "Associated instance",
       cell: (a) =>
         a.instance_id ? (
-          <Link href={instanceHref(a.instance_id)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] hover:underline">
+          <CellLink href={instanceHref(a.instance_id)} mono>
             {a.instance_id}
-          </Link>
+          </CellLink>
         ) : (
           <span className="text-muted-foreground">-</span>
         ),
       value: (a) => a.instance_id,
     },
-    { id: "private", header: "Private IP", cell: (a) => a.private_ip || <span className="text-muted-foreground">-</span>, value: (a) => a.private_ip },
-    { id: "assoc", header: "Association ID", cell: (a) => (a.association_id ? <span className="font-mono text-[13px]">{a.association_id}</span> : <span className="text-muted-foreground">-</span>), value: (a) => a.association_id },
+    { id: "private", header: "Private IP", cell: (a) => <CellText mono>{a.private_ip}</CellText>, value: (a) => a.private_ip },
+    { id: "assoc", header: "Association ID", cell: (a) => <CellText mono>{a.association_id}</CellText>, value: (a) => a.association_id },
   ]
 
   return (
@@ -99,7 +98,18 @@ export function ElasticIPsList() {
             </Button>
           </>
         }
-        empty={<EmptyState icon={MapPin} title="No Elastic IP addresses" description="Allocate one and associate it with an instance." />}
+        empty={
+          <EmptyState
+            icon={MapPin}
+            title="No Elastic IP addresses"
+            description="Allocate one and associate it with an instance."
+            action={
+              <Button size="sm" onClick={() => open("allocate")}>
+                <Plus /> Allocate Elastic IP address
+              </Button>
+            }
+          />
+        }
       />
       {dialog === "allocate" && (
         <FormDialog
@@ -113,7 +123,7 @@ export function ElasticIPsList() {
             await done()
           }}
         >
-          <Field label="Name tag" htmlFor="eip-name" optional>
+          <Field label="Name tag" htmlFor="eip-name" optional help="Stored as the Name tag of the allocation.">
             <Input id="eip-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </Field>
         </FormDialog>

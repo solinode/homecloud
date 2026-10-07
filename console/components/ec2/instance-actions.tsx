@@ -15,7 +15,7 @@ import { StatusBadge } from "@/components/console/status-badge"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import { formatMemoryMB, pluralize } from "@/lib/format"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/console/tag"
 import type { Ec2Capabilities, Image, Instance, InstanceState, InstanceType } from "@/lib/types"
 
 export const INSTANCES_PATH = "/api/v1/ec2/instances"
@@ -85,11 +85,11 @@ export function instanceKind(i: Pick<Instance, "virtualization">) {
 
 /** Type badge for an instance: Container / VM · KVM / VM · emulated (slow). */
 export function InstanceKindBadge({ instance }: { instance: Pick<Instance, "virtualization"> }) {
-  const vm = isVMInstance(instance)
+  const accent = !isVMInstance(instance) ? "info" : instance.virtualization === "kvm" ? "violet" : "warning"
   return (
-    <Badge variant={vm ? "secondary" : "outline"} title={instance.virtualization === "emulated" ? "No /dev/kvm on the host: the CPU is emulated, so this VM is slow" : undefined}>
+    <Tag accent={accent} title={instance.virtualization === "emulated" ? "No /dev/kvm on the host: the CPU is emulated, so this VM is slow" : undefined}>
       {instanceKind(instance)}
-    </Badge>
+    </Tag>
   )
 }
 
@@ -279,7 +279,7 @@ function ChangeTypeDialog({ instance, onClose }: { instance: Instance | null; on
               <span className="text-muted-foreground">({typeSummary({ vcpus: instance.vcpus, memory_mb: instance.memory_mb })})</span>
             </p>
           )}
-          <Field label="New instance type" htmlFor="new-type">
+          <Field label="New instance type" htmlFor="new-type" help="Choose a different type than the current one.">
             <InstanceTypeSelect id="new-type" value={type} onChange={setType} />
           </Field>
           <DialogFooter>

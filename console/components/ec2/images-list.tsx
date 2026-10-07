@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Layers, Loader2, Plus } from "lucide-react"
 import { toast } from "sonner"
@@ -14,7 +13,7 @@ import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
@@ -23,7 +22,7 @@ import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { Image } from "@/lib/types"
-import { Badge } from "@/components/ui/badge"
+import { Tag } from "@/components/console/tag"
 import { instanceHref, isVMImage } from "./instance-actions"
 
 const IMAGES_PATH = "/api/v1/ec2/images"
@@ -32,25 +31,42 @@ type Owner = "all" | "catalog" | "mine"
 const isCatalog = (im: Image) => im.owner === "homecloud"
 
 const columns: Column<Image>[] = [
-  { id: "name", header: "Name", cell: (im) => <span className="font-medium">{im.name}</span>, value: (im) => im.name },
-  { id: "id", header: "AMI ID", cell: (im) => <span className="font-mono text-[13px]">{im.id}</span>, value: (im) => im.id },
+  {
+    id: "name",
+    header: "Name",
+    cell: (im) => (
+      <CellText className="font-medium" max="16rem">
+        {im.name}
+      </CellText>
+    ),
+    value: (im) => im.name,
+  },
+  { id: "id", header: "AMI ID", cell: (im) => <CellText mono>{im.id}</CellText>, value: (im) => im.id },
   {
     id: "desc",
     header: "Description",
-    cell: (im) => <span className="text-muted-foreground line-clamp-1 max-w-72">{im.description || "-"}</span>,
+    cell: (im) => (
+      <CellText muted max="18rem">
+        {im.description}
+      </CellText>
+    ),
     value: (im) => im.description,
     hideBelow: "lg",
   },
   {
     id: "kind",
     header: "Type",
-    cell: (im) => <Badge variant={isVMImage(im) ? "secondary" : "outline"}>{isVMImage(im) ? "VM" : "Container"}</Badge>,
+    cell: (im) => <Tag accent={isVMImage(im) ? "violet" : "info"}>{isVMImage(im) ? "VM" : "Container"}</Tag>,
     value: (im) => (isVMImage(im) ? "VM" : "Container"),
   },
   {
     id: "ref",
     header: "Docker image / VM base",
-    cell: (im) => <span className="font-mono text-[13px]">{im.ref || im.vm_base || "-"}</span>,
+    cell: (im) => (
+      <CellText mono max="16rem">
+        {im.ref || im.vm_base}
+      </CellText>
+    ),
     value: (im) => im.ref || im.vm_base || "",
   },
   {
@@ -81,9 +97,9 @@ const columns: Column<Image>[] = [
     header: "Source instance",
     cell: (im) =>
       im.source_instance ? (
-        <Link href={instanceHref(im.source_instance)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] hover:underline">
+        <CellLink href={instanceHref(im.source_instance)} mono>
           {im.source_instance}
-        </Link>
+        </CellLink>
       ) : (
         <span className="text-muted-foreground">-</span>
       ),

@@ -3,12 +3,14 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, Copy, Play, Plus, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, Copy, KeyRound, Play, Plus, Trash2, Variable } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ActionsMenu } from "@/components/console/actions-menu"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
+import { CellLink, CellText, DataTable } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { JsonEditor } from "@/components/console/json-editor"
@@ -103,17 +105,16 @@ export function TaskDefinitionDetail() {
                 </SelectContent>
               </Select>
             )}
-            <Button variant="outline" size="sm" onClick={() => setDeregistering(true)} disabled={!active}>
-              <Trash2 /> Deregister
-            </Button>
             <Button variant="outline" size="sm" onClick={() => setRunning(true)} disabled={!active}>
               <Play /> Run task
             </Button>
-            <Button variant="outline" size="sm" asChild>
-              <Link href={`/ecs/create/?family=${encodeURIComponent(td.family)}`}>
-                <Plus /> Create service
-              </Link>
-            </Button>
+            <ActionsMenu
+              items={[
+                { label: "Create service", icon: <Plus />, onSelect: () => router.push(`/ecs/create/?family=${encodeURIComponent(td.family)}`) },
+                { separator: true },
+                { label: "Deregister", icon: <Trash2 />, destructive: true, disabled: !active, onSelect: () => setDeregistering(true) },
+              ]}
+            />
             <Button size="sm" asChild>
               <Link href={registerHref(tdKey(td))}>
                 <Copy /> Create new revision
@@ -179,50 +180,45 @@ export function TaskDefinitionDetail() {
                 ]}
               />
             </Section>
-            <Section title={`Environment variables (${env.length})`} flush>
-              {env.length ? (
-                <KvTable
-                  head={["Name", "Value"]}
-                  rows={env.map(([k, v]) => [
-                    <span key="k" className="font-mono text-[13px]">
-                      {k}
-                    </span>,
-                    <span key="v" className="font-mono text-[13px] break-all">
-                      {v}
-                    </span>,
-                  ])}
-                />
-              ) : (
-                <p className="text-muted-foreground p-4 text-sm">No environment variables.</p>
-              )}
-            </Section>
-            <Section
-              title={`Secrets (${secrets.length})`}
+            <DataTable
+              title="Environment variables"
+              data={env}
+              rowId={([k]) => k}
+              noSearch={env.length < 10}
+              searchPlaceholder="Filter variables"
+              columns={[
+                { id: "name", header: "Name", value: ([k]) => k, cell: ([k]) => <CellText mono>{k}</CellText>, className: "w-1/3" },
+                { id: "value", header: "Value", value: ([, v]) => v, cell: ([, v]) => <span className="font-mono text-[13px] break-all">{v}</span> },
+              ]}
+              empty={<EmptyState icon={Variable} title="No environment variables" className="py-8" />}
+            />
+            <DataTable
+              title="Secrets"
               description="Resolved from Secrets Manager when each task starts and injected as environment variables."
-              flush
-            >
-              {secrets.length ? (
-                <KvTable
-                  head={["Environment variable", "Value from"]}
-                  rows={secrets.map((s) => {
+              data={secrets}
+              rowId={(s) => s.name}
+              noSearch
+              columns={[
+                { id: "name", header: "Environment variable", value: (s) => s.name, cell: (s) => <CellText mono>{s.name}</CellText>, className: "w-1/3" },
+                {
+                  id: "from",
+                  header: "Value from",
+                  value: (s) => s.value_from,
+                  cell: (s) => {
                     const [name, jsonKey] = splitValueFrom(s.value_from)
-                    return [
-                      <span key="k" className="font-mono text-[13px]">
-                        {s.name}
-                      </span>,
-                      <span key="v" className="font-mono text-[13px]">
-                        <Link href={secretHref(name)} className="text-primary hover:underline">
+                    return (
+                      <span className="flex items-center whitespace-nowrap">
+                        <CellLink href={secretHref(name)} mono>
                           {name}
-                        </Link>
-                        {jsonKey && <span className="text-muted-foreground">:{jsonKey}</span>}
-                      </span>,
-                    ]
-                  })}
-                />
-              ) : (
-                <p className="text-muted-foreground p-4 text-sm">No secrets.</p>
-              )}
-            </Section>
+                        </CellLink>
+                        {jsonKey && <span className="text-muted-foreground font-mono text-[13px]">:{jsonKey}</span>}
+                      </span>
+                    )
+                  },
+                },
+              ]}
+              empty={<EmptyState icon={KeyRound} title="No secrets" className="py-8" />}
+            />
           </div>
         </TabsContent>
         <TabsContent value="json">
@@ -234,29 +230,6 @@ export function TaskDefinitionDetail() {
 
       <DeregisterDialog td={deregistering ? td : null} onClose={() => setDeregistering(false)} />
       <RunTaskDialog open={running} onClose={() => setRunning(false)} initial={tdKey(td)} />
-    </div>
-  )
-}
-
-function KvTable({ head, rows }: { head: [string, string]; rows: React.ReactNode[][] }) {
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-muted/40 border-b">
-            <th className="text-muted-foreground w-1/3 px-4 py-2 text-left text-xs font-semibold">{head[0]}</th>
-            <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">{head[1]}</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r, i) => (
-            <tr key={i} className="border-b last:border-0">
-              <td className="px-4 py-2 align-top">{r[0]}</td>
-              <td className="px-4 py-2 align-top">{r[1]}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
     </div>
   )
 }

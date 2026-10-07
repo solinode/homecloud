@@ -19,6 +19,46 @@ const STATE_BADGE: Record<ConnState, { status: string; label: string }> = {
   closed: { status: "stopped", label: "Disconnected" },
 }
 
+/** cssVar reads a design token (e.g. --code-bg) from the document at runtime. */
+function cssVar(name: string) {
+  return getComputedStyle(document.documentElement).getPropertyValue(name).trim() || undefined
+}
+
+/** terminalTheme maps the code-surface tokens onto xterm's theme (xterm needs concrete colours). */
+function terminalTheme() {
+  const bg = cssVar("--code-bg")
+  const fg = cssVar("--code-fg")
+  const muted = cssVar("--code-muted")
+  const red = cssVar("--code-red")
+  const green = cssVar("--code-green")
+  const yellow = cssVar("--code-yellow")
+  const blue = cssVar("--code-blue")
+  const violet = cssVar("--code-violet")
+  return {
+    background: bg,
+    foreground: fg,
+    cursor: fg,
+    cursorAccent: bg,
+    selectionBackground: cssVar("--code-selection"),
+    black: bg,
+    red,
+    green,
+    yellow,
+    blue,
+    magenta: violet,
+    cyan: blue,
+    white: fg,
+    brightBlack: muted,
+    brightRed: red,
+    brightGreen: green,
+    brightYellow: yellow,
+    brightBlue: blue,
+    brightMagenta: violet,
+    brightCyan: blue,
+    brightWhite: fg,
+  }
+}
+
 /**
  * InstanceTerminal is a browser shell (EC2 Instance Connect): an xterm.js
  * terminal bridged to the instance over a WebSocket.
@@ -45,12 +85,7 @@ export function InstanceTerminal({ instance }: { instance: Instance }) {
         fontSize: 13,
         fontFamily: `${geist ? `${geist}, ` : ""}ui-monospace, SFMono-Regular, Menlo, monospace`,
         scrollback: 5000,
-        theme: {
-          background: "#09090b",
-          foreground: "#e4e4e7",
-          cursor: "#e4e4e7",
-          selectionBackground: "#3f3f46",
-        },
+        theme: terminalTheme(),
       })
       const fit = new FitAddon()
       term.loadAddon(fit)
@@ -152,8 +187,8 @@ export function InstanceTerminal({ instance }: { instance: Instance }) {
         </Button>
       }
     >
-      <div className="overflow-hidden rounded-md border border-zinc-800 bg-[#09090b]">
-        <div ref={hostRef} className="hc-terminal h-[520px] w-full" />
+      <div className="bg-code border-code-line dark:border-border-strong overflow-hidden rounded-lg border p-2">
+        <div ref={hostRef} className="hc-terminal h-[504px] w-full" />
       </div>
     </Section>
   )

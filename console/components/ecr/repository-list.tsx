@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { Boxes, Copy, Plus, Terminal, Trash2 } from "lucide-react"
 import useSWR from "swr"
 import { toast } from "sonner"
@@ -10,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { CopyableText, copyText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -100,9 +99,9 @@ export function RepositoryList() {
       header: "Repository name",
       value: (r) => r.name,
       cell: (r) => (
-        <Link href={repoHref(r.name)} className="text-primary font-medium break-all hover:underline" onClick={(e) => e.stopPropagation()}>
+        <CellLink href={repoHref(r.name)} max="20rem">
           {r.name}
-        </Link>
+        </CellLink>
       ),
     },
     { id: "uri", header: "URI", value: (r) => r.uri, cell: (r) => <CopyableText value={r.uri} className="max-w-72" />, hideBelow: "md" },
@@ -134,7 +133,7 @@ export function RepositoryList() {
   ]
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       <PageHeader
         title="Repositories"
         description="Amazon ECR-compatible private container registry. Push images with the standard docker CLI and run them on EC2, ECS or Lambda."

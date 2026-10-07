@@ -3,13 +3,16 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, Loader2, Plus, Rocket } from "lucide-react"
+import { AlertTriangle, FileCode2, Loader2, Plus, Rocket } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
@@ -19,6 +22,7 @@ import { api, errorMessage } from "@/lib/api"
 import { formatMemoryMB } from "@/lib/format"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { EcsCreateServiceInput, EcsService } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import {
   ECS_PATH,
   SERVICES_PATH,
@@ -156,13 +160,19 @@ export function CreateService() {
             {tds.error ? (
               <ErrorState error={tds.error} onRetry={() => tds.mutate()} />
             ) : noTds ? (
-              <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
-                You have no active task definitions.{" "}
-                <Link href={registerHref()} className="text-primary hover:underline">
-                  Register a task definition
-                </Link>{" "}
-                first.
-              </p>
+              <EmptyState
+                icon={FileCode2}
+                title="No active task definitions"
+                description="A service runs a task definition. Register one first."
+                className="py-8"
+                action={
+                  <Button type="button" size="sm" asChild>
+                    <Link href={registerHref()}>
+                      <Plus /> Register task definition
+                    </Link>
+                  </Button>
+                }
+              />
             ) : (
               <div className="flex flex-col gap-3">
                 <Field label="Family and revision" error={err("td")} help="Defaults to the latest ACTIVE revision.">
@@ -171,13 +181,13 @@ export function CreateService() {
                   </div>
                 </Field>
                 {taskDef && (
-                  <div className="bg-muted/40 grid max-w-xl grid-cols-2 gap-3 rounded-md border p-3 text-sm sm:grid-cols-4">
+                  <dl className="bg-muted/40 grid max-w-xl grid-cols-2 gap-3 rounded-lg border px-3.5 py-3 text-sm sm:grid-cols-4">
                     <Mini label="Image" value={<span className="font-mono text-xs break-all">{taskDef.image}</span>} className="col-span-2 sm:col-span-4" />
                     <Mini label="CPU" value={formatCpu(taskDef.cpu)} />
                     <Mini label="Memory" value={formatMemoryMB(taskDef.memory_mb)} />
                     <Mini label="Container port" value={taskDef.container_port || "-"} />
                     <Mini label="Command" value={<span className="font-mono text-xs break-all">{joinCommand(taskDef.command) || "image default"}</span>} />
-                  </div>
+                  </dl>
                 )}
               </div>
             )}
@@ -193,9 +203,9 @@ export function CreateService() {
             actions={
               <div className="flex items-center gap-2">
                 <Switch id="lb-on" checked={lbOn} onCheckedChange={setLbOn} />
-                <label htmlFor="lb-on" className="text-sm">
+                <Label htmlFor="lb-on" className="text-sm font-normal">
                   Use a load balancer
-                </label>
+                </Label>
               </div>
             }
           >
@@ -251,7 +261,7 @@ export function CreateService() {
                   />
                 </Field>
                 {taskDef && !taskDef.container_port && (
-                  <p className="flex gap-2 text-xs text-amber-700 sm:col-span-2 dark:text-amber-400">
+                  <p className="text-warning flex gap-2 text-xs sm:col-span-2">
                     <AlertTriangle className="size-3.5 shrink-0" /> The task definition declares no container port; enter the port the container listens on.
                   </p>
                 )}
@@ -301,14 +311,19 @@ export function CreateService() {
                   </SummaryItem>
                 )}
               </dl>
-              {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
-              <div className="flex flex-col gap-2 border-t pt-4">
+              {submitted && !valid && (
+                <Alert variant="destructive">
+                  <AlertTriangle />
+                  <AlertDescription>Some settings need attention. Check the highlighted fields.</AlertDescription>
+                </Alert>
+              )}
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+                <Button type="button" variant="outline" asChild>
+                  <Link href="/ecs/">Cancel</Link>
+                </Button>
                 <Button type="submit" disabled={pending || !!noTds}>
                   {pending ? <Loader2 className="animate-spin" /> : <Rocket />}
                   Create service
-                </Button>
-                <Button type="button" variant="outline" asChild>
-                  <Link href="/ecs/">Cancel</Link>
                 </Button>
               </div>
             </div>
@@ -321,17 +336,17 @@ export function CreateService() {
 
 function Mini({ label, value, className }: { label: string; value: React.ReactNode; className?: string }) {
   return (
-    <div className={className}>
-      <div className="text-muted-foreground text-xs">{label}</div>
-      <div>{value}</div>
+    <div className={cn("min-w-0", className)}>
+      <dt className="text-faint text-xs font-medium">{label}</dt>
+      <dd>{value}</dd>
     </div>
   )
 }
 
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+    <div className="min-w-0">
+      <dt className="text-faint mb-0.5 text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )

@@ -6,9 +6,9 @@ import { useRouter } from "next/navigation";
 import {
   AlertTriangle,
   Box,
-  Check,
   ExternalLink,
   Info,
+  Layers,
   Loader2,
   Monitor,
   Plus,
@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 
-import { Badge } from "@/components/ui/badge";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
@@ -31,8 +31,11 @@ import {
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
+import { EmptyState } from "@/components/console/empty-state";
 import { ErrorState } from "@/components/console/error-state";
 import { Field } from "@/components/console/form-field";
+import { OptionCard, OptionGroup } from "@/components/console/option-card";
+import { Tag } from "@/components/console/tag";
 import { PageHeader } from "@/components/console/page-header";
 import { Section } from "@/components/console/section";
 import {
@@ -444,83 +447,43 @@ export function LaunchWizard() {
             description="Choose how the instance runs. This decides which images you can pick."
           >
             <div className="flex flex-col gap-3">
-              <div
-                className="grid grid-cols-1 gap-3 sm:grid-cols-2"
-                role="radiogroup"
-                aria-label="Instance kind"
-              >
-                {(
-                  [
-                    [
-                      "container",
-                      "Container",
-                      Box,
-                      "Starts in seconds and is lightweight, but shares the host kernel.",
-                    ],
-                    [
-                      "vm",
-                      "Virtual machine",
-                      Monitor,
-                      "Has its own kernel and stronger isolation. Boots in about a minute; needs KVM on the host for full speed.",
-                    ],
-                  ] as [Kind, string, typeof Box, string][]
-                ).map(([k, label, Icon, blurb]) => {
-                  const active = kind === k;
-                  return (
-                    <button
-                      key={k}
-                      type="button"
-                      role="radio"
-                      aria-checked={active}
-                      onClick={() => chooseKind(k)}
-                      className={cn(
-                        "relative flex items-start gap-3 rounded-lg border p-3 text-left transition-colors",
-                        active
-                          ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10"
-                          : "hover:bg-muted/50",
-                      )}
-                    >
-                      <Icon className="text-muted-foreground mt-0.5 size-5 shrink-0" />
-                      <span className="flex flex-col gap-0.5 pr-6">
-                        <span className="text-sm font-medium">{label}</span>
-                        <span className="text-muted-foreground text-xs">
-                          {blurb}
-                        </span>
-                      </span>
-                      {active && (
-                        <span className="bg-primary text-primary-foreground absolute top-2 right-2 flex size-5 items-center justify-center rounded-full">
-                          <Check className="size-3.5" />
-                        </span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+              <OptionGroup label="Instance kind" columns={2}>
+                <OptionCard
+                  selected={kind === "container"}
+                  onSelect={() => chooseKind("container")}
+                  icon={Box}
+                  title="Container"
+                  description="Starts in seconds and is lightweight, but shares the host kernel."
+                />
+                <OptionCard
+                  selected={kind === "vm"}
+                  onSelect={() => chooseKind("vm")}
+                  icon={Monitor}
+                  title="Virtual machine"
+                  description="Has its own kernel and stronger isolation. Boots in about a minute; needs KVM on the host for full speed."
+                />
+              </OptionGroup>
               {isVM && caps.data?.vm === "emulated" && (
-                <div
-                  role="alert"
-                  className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm"
-                >
-                  <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-600 dark:text-amber-400" />
-                  <span>
+                <Alert variant="warning">
+                  <AlertTriangle />
+                  <AlertTitle>Virtual machines are emulated on this host</AlertTitle>
+                  <AlertDescription>
                     This host has no KVM (
                     <span className="font-mono text-xs">/dev/kvm</span>), so
-                    virtual machines are emulated and will be slow. Booting can
-                    take several minutes. Containers are not affected.
-                  </span>
-                </div>
+                    virtual machines will be slow. Booting can take several
+                    minutes. Containers are not affected.
+                  </AlertDescription>
+                </Alert>
               )}
               {isVM && caps.data?.vm === "unavailable" && (
-                <div
-                  role="alert"
-                  className="border-destructive/40 bg-destructive/10 flex items-start gap-2 rounded-md border p-3 text-sm"
-                >
-                  <AlertTriangle className="text-destructive mt-0.5 size-4 shrink-0" />
-                  <span>
+                <Alert variant="destructive">
+                  <AlertTriangle />
+                  <AlertTitle>Virtual machines are unavailable</AlertTitle>
+                  <AlertDescription>
                     Virtual machines are currently unavailable on this host.
                     Launching one is likely to fail.
-                  </span>
-                </div>
+                  </AlertDescription>
+                </Alert>
               )}
             </div>
           </Section>
@@ -586,86 +549,68 @@ export function LaunchWizard() {
                   ))}
                 </div>
               ) : visibleImages.length === 0 ? (
-                <p className="text-muted-foreground rounded-lg border border-dashed p-6 text-center text-sm">
+                <div className="rounded-lg border border-dashed">
                   {imageFilter === "mine" && !imageQuery ? (
-                    <>
-                      You have no custom images yet. Create one from an instance
-                      or{" "}
-                      <Link
-                        href="/ec2/images/"
-                        className="text-primary hover:underline"
-                      >
-                        register a Docker image
-                      </Link>
-                      .
-                    </>
+                    <EmptyState
+                      icon={Layers}
+                      title="No custom images yet"
+                      description="Create one from an instance (Actions, Create image) or register a Docker image."
+                      className="py-8"
+                      action={
+                        <Button type="button" variant="outline" size="sm" asChild>
+                          <Link href="/ec2/images/">Register a Docker image</Link>
+                        </Button>
+                      }
+                    />
                   ) : (
-                    "No images match."
+                    <EmptyState
+                      icon={Search}
+                      title="No images match"
+                      description="Try another search or filter."
+                      className="py-8"
+                    />
                   )}
-                </p>
-              ) : (
-                <div
-                  className="grid grid-cols-1 gap-3 sm:grid-cols-2 2xl:grid-cols-3"
-                  role="radiogroup"
-                  aria-label="Image"
-                >
-                  {visibleImages.map((im) => {
-                    const active = im.id === imageId;
-                    return (
-                      <button
-                        key={im.id}
-                        type="button"
-                        role="radio"
-                        aria-checked={active}
-                        onClick={() => setImageId(im.id)}
-                        className={cn(
-                          "relative flex flex-col gap-1 rounded-lg border p-3 text-left transition-colors",
-                          active
-                            ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10"
-                            : "hover:bg-muted/50",
-                        )}
-                      >
-                        {active && (
-                          <span className="bg-primary text-primary-foreground absolute top-2 right-2 flex size-5 items-center justify-center rounded-full">
-                            <Check className="size-3.5" />
-                          </span>
-                        )}
-                        <span className="pr-6 text-sm font-medium">
-                          {im.name}
-                        </span>
-                        {im.description && (
-                          <span className="text-muted-foreground line-clamp-2 text-xs">
-                            {im.description}
-                          </span>
-                        )}
-                        <span
-                          className="text-muted-foreground truncate font-mono text-xs"
-                          title={im.ref || im.vm_base}
-                        >
-                          {im.ref || im.vm_base}
-                        </span>
-                        <span className="mt-1 flex flex-wrap gap-1">
-                          <Badge
-                            variant={
-                              im.owner === "homecloud" ? "secondary" : "outline"
-                            }
-                          >
-                            {im.owner === "homecloud"
-                              ? "HomeCloud catalog"
-                              : "Custom"}
-                          </Badge>
-                          {isVMImage(im) ? (
-                            <Badge variant="secondary">VM</Badge>
-                          ) : (
-                            !im.keep_alive && (
-                              <Badge variant="outline">Application image</Badge>
-                            )
-                          )}
-                        </span>
-                      </button>
-                    );
-                  })}
                 </div>
+              ) : (
+                <OptionGroup label="Image" columns={3}>
+                  {visibleImages.map((im) => (
+                    <OptionCard
+                      key={im.id}
+                      selected={im.id === imageId}
+                      onSelect={() => setImageId(im.id)}
+                      title={im.name}
+                      description={
+                        im.description ? (
+                          <span className="line-clamp-2">{im.description}</span>
+                        ) : undefined
+                      }
+                    >
+                      <span
+                        className="text-faint mt-0.5 truncate font-mono text-xs"
+                        title={im.ref || im.vm_base}
+                      >
+                        {im.ref || im.vm_base}
+                      </span>
+                      <span className="mt-1.5 flex flex-wrap gap-1">
+                        <Tag
+                          mono={false}
+                          accent={im.owner === "homecloud" ? "brand" : "neutral"}
+                        >
+                          {im.owner === "homecloud"
+                            ? "HomeCloud catalog"
+                            : "Custom"}
+                        </Tag>
+                        {isVMImage(im) ? (
+                          <Tag accent="violet">VM</Tag>
+                        ) : (
+                          !im.keep_alive && (
+                            <Tag mono={false}>Application image</Tag>
+                          )
+                        )}
+                      </span>
+                    </OptionCard>
+                  ))}
+                </OptionGroup>
               )}
               {err("image") && (
                 <p className="text-destructive text-xs">{err("image")}</p>
@@ -712,20 +657,22 @@ export function LaunchWizard() {
                 </div>
               </Field>
               {instanceType && (
-                <div className="bg-muted/40 grid max-w-md grid-cols-3 gap-2 rounded-md border p-3 text-sm">
+                <dl className="bg-muted/40 grid max-w-md grid-cols-3 gap-2 rounded-lg border px-3.5 py-3 text-sm">
                   <div>
-                    <div className="text-muted-foreground text-xs">Family</div>
-                    <div>{instanceType.family}</div>
+                    <dt className="text-faint text-xs font-medium">Family</dt>
+                    <dd>{instanceType.family}</dd>
                   </div>
                   <div>
-                    <div className="text-muted-foreground text-xs">vCPUs</div>
-                    <div>{instanceType.vcpus}</div>
+                    <dt className="text-faint text-xs font-medium">vCPUs</dt>
+                    <dd className="tabular-nums">{instanceType.vcpus}</dd>
                   </div>
                   <div>
-                    <div className="text-muted-foreground text-xs">Memory</div>
-                    <div>{formatMemoryMB(instanceType.memory_mb)}</div>
+                    <dt className="text-faint text-xs font-medium">Memory</dt>
+                    <dd className="tabular-nums">
+                      {formatMemoryMB(instanceType.memory_mb)}
+                    </dd>
                   </div>
-                </div>
+                </dl>
               )}
             </div>
           </Section>
@@ -844,7 +791,9 @@ export function LaunchWizard() {
 
               <div className="flex flex-col gap-2">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-sm font-medium">Security groups</span>
+                  <span id="sg-label" className="text-[13px] font-medium">
+                    Security groups
+                  </span>
                   <Link
                     href="/vpc/security-groups/"
                     className="text-primary inline-flex items-center gap-1 text-sm hover:underline"
@@ -861,15 +810,19 @@ export function LaunchWizard() {
                     This VPC has no security groups.
                   </p>
                 ) : (
-                  <div className="divide-y rounded-md border">
+                  <div
+                    className="divide-y overflow-hidden rounded-lg border"
+                    role="group"
+                    aria-labelledby="sg-label"
+                  >
                     {groups.map((g) => {
                       const checked = sgIds.includes(g.id);
                       return (
                         <label
                           key={g.id}
                           className={cn(
-                            "flex cursor-pointer items-start gap-3 px-3 py-2.5",
-                            checked && "bg-primary/5 dark:bg-primary/10",
+                            "flex cursor-pointer items-start gap-3 px-3 py-2.5 transition-colors",
+                            checked ? "bg-brand-soft" : "hover:bg-muted/50",
                           )}
                         >
                           <Checkbox
@@ -902,12 +855,7 @@ export function LaunchWizard() {
                                 </span>
                               ) : (
                                 g.ingress.map((r) => (
-                                  <span
-                                    key={r.id}
-                                    className="bg-muted rounded border px-1.5 py-0.5 font-mono text-[11px]"
-                                  >
-                                    {ruleSummary(r)}
-                                  </span>
+                                  <Tag key={r.id}>{ruleSummary(r)}</Tag>
                                 ))
                               )}
                             </span>
@@ -918,7 +866,7 @@ export function LaunchWizard() {
                   </div>
                 )}
                 {sgs.data && sgIds.length === 0 && (
-                  <p className="text-xs text-amber-700 dark:text-amber-400">
+                  <p className="text-warning text-xs">
                     No group selected: the VPC&apos;s default security group
                     will be used.
                   </p>
@@ -1332,15 +1280,16 @@ export function LaunchWizard() {
                 />
               </Field>
               {image && !image.keep_alive && userData.trim() && (
-                <p className="flex gap-2 rounded-md border border-amber-600/30 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300">
-                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                  <span>
+                <Alert variant="warning">
+                  <AlertTriangle />
+                  <AlertTitle>User data will not run</AlertTitle>
+                  <AlertDescription>
                     <strong>{image.name}</strong> is an application image: it
                     runs its own entrypoint, so user data is written to
                     /var/lib/homecloud/user-data but not executed. Only
                     keep-alive images run it.
-                  </span>
-                </p>
+                  </AlertDescription>
+                </Alert>
               )}
             </div>
           </Section>
@@ -1454,18 +1403,21 @@ export function LaunchWizard() {
                 )}
               </dl>
               {submitted && !valid && (
-                <p className="text-destructive text-xs">
-                  Some settings need attention. Check the highlighted fields.
-                </p>
+                <Alert variant="destructive">
+                  <AlertTriangle />
+                  <AlertDescription>
+                    Some settings need attention. Check the highlighted fields.
+                  </AlertDescription>
+                </Alert>
               )}
-              <div className="flex flex-col gap-2 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+                <Button type="button" variant="outline" asChild>
+                  <Link href="/ec2/">Cancel</Link>
+                </Button>
                 <Button type="submit" disabled={pending || !image}>
                   {pending ? <Loader2 className="animate-spin" /> : <Rocket />}
                   Launch{" "}
                   {Number.isInteger(n) && n > 1 ? `${n} instances` : "instance"}
-                </Button>
-                <Button type="button" variant="outline" asChild>
-                  <Link href="/ec2/">Cancel</Link>
                 </Button>
               </div>
             </div>
@@ -1484,8 +1436,8 @@ function SummaryItem({
   children: React.ReactNode;
 }) {
   return (
-    <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+    <div className="min-w-0">
+      <dt className="text-faint mb-0.5 text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   );

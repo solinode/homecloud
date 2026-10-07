@@ -8,7 +8,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -24,9 +24,9 @@ const columns: Column<AutoScalingGroup>[] = [
     id: "name",
     header: "Name",
     cell: (g) => (
-      <Link href={groupHref(g.name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
+      <CellLink href={groupHref(g.name)} max="18rem">
         {g.name}
-      </Link>
+      </CellLink>
     ),
     value: (g) => g.name,
   },
@@ -44,9 +44,9 @@ const columns: Column<AutoScalingGroup>[] = [
     id: "launch",
     header: "Launch configuration",
     cell: (g) => (
-      <span className="font-mono text-[13px] whitespace-nowrap">
-        {g.launch.image_id} · {g.launch.instance_type || "default"}
-      </span>
+      <CellText mono max="18rem">
+        {`${g.launch.image_id} · ${g.launch.instance_type || "default"}`}
+      </CellText>
     ),
     value: (g) => `${g.launch.image_id} ${g.launch.instance_type}`,
     hideBelow: "lg",

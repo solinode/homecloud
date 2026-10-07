@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { TerminalPane, term } from "@/components/console/code-block"
 import { ErrorState } from "@/components/console/error-state"
 import { Section } from "@/components/console/section"
 import { seg } from "@/lib/api"
@@ -24,13 +25,25 @@ export function InstanceConsoleOutput({ instance }: { instance: Instance }) {
   const [auto, setAuto] = useState(true)
   const [timestamps, setTimestamps] = useState(false)
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
-  const preRef = useRef<HTMLPreElement>(null)
+  const preRef = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
 
   const { data, error, isLoading, isValidating, mutate } = useApi<ConsoleOutput>(`${INSTANCES_PATH}/${seg(instance.id)}/console-output`, {
     query: { tail },
     refreshInterval: auto ? 5000 : 0,
   })
+
+  // Track whether the user scrolled away from the bottom (TerminalPane forwards its ref to the scrolling body).
+  const hasError = !!error
+  useEffect(() => {
+    const el = preRef.current
+    if (!el) return
+    const onScroll = () => {
+      stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    }
+    el.addEventListener("scroll", onScroll)
+    return () => el.removeEventListener("scroll", onScroll)
+  }, [hasError])
 
   useEffect(() => {
     if (data) setFetchedAt(Date.now())
@@ -100,24 +113,22 @@ export function InstanceConsoleOutput({ instance }: { instance: Instance }) {
         <ErrorState error={error} onRetry={() => mutate()} />
       ) : (
         <div className="flex flex-col gap-2">
-          <pre
+          <TerminalPane
             ref={preRef}
-            onScroll={(e) => {
-              const el = e.currentTarget
-              stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-            }}
-            className="h-[460px] overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-zinc-100"
+            title={`${instance.id} · ${isVMInstance(instance) ? "serial console" : "container log"}`}
+            copyValue={text}
+            height="460px"
           >
             {isLoading && !data ? (
-              <span className="text-zinc-500">Loading console output...</span>
+              <span className={term.muted}>Loading console output...</span>
             ) : text ? (
-              text
+              <div className="break-words whitespace-pre-wrap">{text}</div>
             ) : (
-              <span className="text-zinc-500">
+              <span className={term.muted}>
                 {instance.state === "terminated" ? "The instance is terminated; its console output is gone." : "No output yet."}
               </span>
             )}
-          </pre>
+          </TerminalPane>
           <p className="text-muted-foreground text-xs">
             {fetchedAt ? `Last updated ${formatTime(fetchedAt)}` : ""}
             {auto ? " · refreshing every 5 seconds" : ""}

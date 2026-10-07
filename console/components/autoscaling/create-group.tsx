@@ -3,12 +3,14 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { ExternalLink, Info, Loader2, Plus, Scaling, X } from "lucide-react"
+import { AlertTriangle, ExternalLink, Info, Loader2, Plus, Scaling, X } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Switch } from "@/components/ui/switch"
@@ -17,6 +19,7 @@ import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { Tag } from "@/components/console/tag"
 import { InstanceTypeSelect } from "@/components/ec2/instance-actions"
 import { ruleSummary } from "@/components/ec2/launch-wizard"
 import { FILE_SYSTEMS_PATH, fsLabel } from "@/components/efs/common"
@@ -221,7 +224,9 @@ export function CreateGroup() {
 
               <div className="flex flex-col gap-2">
                 <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <span className="text-sm font-medium">Security groups</span>
+                  <span id="asg-sg-label" className="text-[13px] font-medium">
+                    Security groups
+                  </span>
                   <Link href="/vpc/security-groups/" className="text-primary inline-flex items-center gap-1 text-sm hover:underline">
                     Manage security groups <ExternalLink className="size-3.5" />
                   </Link>
@@ -233,11 +238,11 @@ export function CreateGroup() {
                 ) : groups.length === 0 ? (
                   <p className="text-muted-foreground text-sm">This VPC has no security groups; the default group is used.</p>
                 ) : (
-                  <div className="divide-y rounded-md border">
+                  <div className="divide-y overflow-hidden rounded-lg border" role="group" aria-labelledby="asg-sg-label">
                     {groups.map((g) => {
                       const checked = sgIds.includes(g.id)
                       return (
-                        <label key={g.id} className={cn("flex cursor-pointer items-start gap-3 px-3 py-2", checked && "bg-primary/5 dark:bg-primary/10")}>
+                        <label key={g.id} className={cn("flex cursor-pointer items-start gap-3 px-3 py-2 transition-colors", checked ? "bg-brand-soft" : "hover:bg-muted/50")}>
                           <Checkbox className="mt-0.5" checked={checked} onCheckedChange={(v) => setSgIds(v ? [...sgIds, g.id] : sgIds.filter((x) => x !== g.id))} />
                           <span className="flex min-w-0 flex-col gap-0.5 text-sm">
                             <span>
@@ -247,11 +252,7 @@ export function CreateGroup() {
                               {g.ingress.length === 0 ? (
                                 <span className="text-muted-foreground text-xs">No inbound rules</span>
                               ) : (
-                                g.ingress.map((r) => (
-                                  <span key={r.id} className="bg-muted rounded border px-1.5 py-0.5 font-mono text-[11px]">
-                                    {ruleSummary(r)}
-                                  </span>
-                                ))
+                                g.ingress.map((r) => <Tag key={r.id}>{ruleSummary(r)}</Tag>)
                               )}
                             </span>
                           </span>
@@ -275,8 +276,8 @@ export function CreateGroup() {
               </Field>
 
               <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium">
-                  EFS file systems <span className="text-muted-foreground font-normal">- optional</span>
+                <span className="text-[13px] font-medium">
+                  EFS file systems <span className="text-faint ml-1.5 text-xs font-normal">optional</span>
                 </span>
                 {fileSystems.data?.length === 0 && <p className="text-muted-foreground text-sm">You have no file systems.</p>}
                 {fsRows.map((f, i) => (
@@ -357,9 +358,9 @@ export function CreateGroup() {
                 ) : vpcSubnets.length === 0 ? (
                   <p className="text-muted-foreground text-sm">This VPC has no subnets.</p>
                 ) : (
-                  <div className="divide-y rounded-md border">
+                  <div className="divide-y overflow-hidden rounded-lg border">
                     {vpcSubnets.map((s) => (
-                      <label key={s.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm">
+                      <label key={s.id} className={cn("flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-sm transition-colors", subnetIds.includes(s.id) ? "bg-brand-soft" : "hover:bg-muted/50")}>
                         <Checkbox checked={subnetIds.includes(s.id)} onCheckedChange={(v) => setSubnetIds(v ? [...subnetIds, s.id] : subnetIds.filter((x) => x !== s.id))} />
                         <span className="font-medium">{s.name || s.id}</span>
                         <span className="text-muted-foreground font-mono text-xs">
@@ -387,9 +388,9 @@ export function CreateGroup() {
             ) : vpcTgs.length === 0 ? (
               <p className="text-muted-foreground text-sm">No target groups in this VPC. The group can run without a load balancer.</p>
             ) : (
-              <div className="divide-y rounded-md border">
+              <div className="divide-y overflow-hidden rounded-lg border">
                 {vpcTgs.map((t) => (
-                  <label key={t.name} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm">
+                  <label key={t.name} className={cn("flex cursor-pointer flex-wrap items-center gap-x-3 gap-y-0.5 px-3 py-2 text-sm transition-colors", tgNames.includes(t.name) ? "bg-brand-soft" : "hover:bg-muted/50")}>
                     <Checkbox checked={tgNames.includes(t.name)} onCheckedChange={(v) => setTgNames(v ? [...tgNames, t.name] : tgNames.filter((x) => x !== t.name))} />
                     <span className="font-medium">{t.name}</span>
                     <span className="text-muted-foreground font-mono text-xs">
@@ -419,10 +420,12 @@ export function CreateGroup() {
 
           <Section title="Scaling policy" description="Optional target tracking: adjust the desired capacity to keep a metric near a target.">
             <div className="flex flex-col gap-3">
-              <label className="flex items-center gap-3 text-sm">
-                <Switch checked={scaling} onCheckedChange={setScaling} />
-                Target tracking scaling policy
-              </label>
+              <div className="flex items-center gap-3">
+                <Switch id="asg-scaling" checked={scaling} onCheckedChange={setScaling} />
+                <Label htmlFor="asg-scaling" className="text-sm font-normal">
+                  Target tracking scaling policy
+                </Label>
+              </div>
               {scaling && (
                 <PolicyFields draft={policy} onChange={setPolicy} errors={{ target: err("poltarget"), cooldown: err("polcooldown") }} idPrefix="asg-pol" />
               )}
@@ -451,14 +454,19 @@ export function CreateGroup() {
                 <SummaryItem label="Target groups">{tgNames.length ? tgNames.join(", ") : "None"}</SummaryItem>
                 <SummaryItem label="Scaling">{scaling ? `${metricLabel(policy.metric)} at ${policy.target || "?"}%` : "Manual (fixed desired capacity)"}</SummaryItem>
               </dl>
-              {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
-              <div className="flex flex-col gap-2 border-t pt-4">
-                <Button type="submit" disabled={pending}>
-                  {pending ? <Loader2 className="animate-spin" /> : <Scaling />}
-                  Create Auto Scaling group
-                </Button>
+              {submitted && !valid && (
+                <Alert variant="destructive">
+                  <AlertTriangle />
+                  <AlertDescription>Some settings need attention. Check the highlighted fields.</AlertDescription>
+                </Alert>
+              )}
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
                 <Button type="button" variant="outline" asChild>
                   <Link href="/ec2/autoscaling/">Cancel</Link>
+                </Button>
+                <Button type="submit" disabled={pending}>
+                  {pending ? <Loader2 className="animate-spin" /> : <Scaling />}
+                  Create group
                 </Button>
               </div>
             </div>
@@ -471,8 +479,8 @@ export function CreateGroup() {
 
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
-    <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+    <div className="min-w-0">
+      <dt className="text-faint mb-0.5 text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )

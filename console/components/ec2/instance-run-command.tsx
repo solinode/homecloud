@@ -7,7 +7,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
-import { CopyButton } from "@/components/console/copy-button"
+import { CodeBlock, term } from "@/components/console/code-block"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { Section } from "@/components/console/section"
@@ -140,7 +140,7 @@ export function InstanceRunCommand({ instance }: { instance: Instance }) {
             }
           >
             <div className="flex flex-col gap-3">
-              <OutputBlock label="Command" text={shown.command} />
+              <OutputBlock label="Command" text={shown.command} prompt />
               {shown.error && <OutputBlock label="Error" text={shown.error} tone="err" />}
               {shown.result && (
                 <>
@@ -166,7 +166,7 @@ export function InstanceRunCommand({ instance }: { instance: Instance }) {
                     setCurrent(r.key)
                     setCommand(r.command)
                   }}
-                  className={cn("hover:bg-muted/50 flex w-full flex-col gap-1 px-4 py-2 text-left", r.key === current && "bg-primary/5 dark:bg-primary/10")}
+                  className={cn("flex w-full flex-col gap-1 px-4 py-2 text-left transition-colors", r.key === current ? "bg-brand-soft" : "hover:bg-muted/50")}
                 >
                   <span className="truncate font-mono text-xs">{r.command.split("\n")[0]}</span>
                   <span className="text-muted-foreground flex items-center gap-2 text-xs">
@@ -187,21 +187,19 @@ export function InstanceRunCommand({ instance }: { instance: Instance }) {
   )
 }
 
-function OutputBlock({ label, text, tone }: { label: string; text: string; tone?: "err" }) {
+function OutputBlock({ label, text, tone, prompt }: { label: string; text: string; tone?: "err"; prompt?: boolean }) {
   return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <span className="text-muted-foreground text-xs font-medium">{label}</span>
-        {text && <CopyButton value={text} label={`Copy ${label}`} />}
-      </div>
-      <pre
-        className={cn(
-          "max-h-80 overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap",
-          tone === "err" ? "text-red-300" : "text-zinc-100",
-        )}
-      >
-        {text || <span className="text-zinc-500">(empty)</span>}
-      </pre>
-    </div>
+    <CodeBlock
+      title={label}
+      code={text}
+      copyLabel={`Copy ${label}`}
+      noCopy={!text}
+      prompt={prompt}
+      wrap
+      maxHeight="20rem"
+      tone={tone === "err" ? "danger" : undefined}
+    >
+      {text ? undefined : <span className={term.muted}>(empty)</span>}
+    </CodeBlock>
   )
 }

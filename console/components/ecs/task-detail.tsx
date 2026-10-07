@@ -1,6 +1,6 @@
 "use client"
 
-import { useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { AlertCircle, ArrowLeft, Info, Loader2, RefreshCw, ScrollText, Square } from "lucide-react"
 
@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { TerminalPane, term } from "@/components/console/code-block"
 import { CopyableText } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
@@ -111,7 +112,7 @@ export function TaskDetail() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating}>
-              {isValidating ? <Loader2 className="animate-spin" /> : null}
+              <RefreshCw className={cn(isValidating && "animate-spin")} />
               Refresh
             </Button>
             <Button variant="outline" size="sm" onClick={() => setStopping(true)} disabled={stopped}>
@@ -122,7 +123,7 @@ export function TaskDetail() {
       />
 
       {task.stop_reason && (
-        <Alert variant={userStop || task.exit_code === 0 ? "default" : "destructive"}>
+        <Alert variant={userStop || task.exit_code === 0 ? "info" : "destructive"}>
           {userStop || task.exit_code === 0 ? <Info /> : <AlertCircle />}
           <AlertTitle>Stopped reason</AlertTitle>
           <AlertDescription>
@@ -284,19 +285,22 @@ function TaskLogs({ task }: { task: EcsTask }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [logs.data])
 
-  const onScroll = () => {
+  // TerminalPane forwards its ref to the scrolling body; track whether the user scrolled up.
+  const hasLines = lines.length > 0
+  useEffect(() => {
     const el = scroller.current
-    if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
-  }
+    if (!el) return
+    const onScroll = () => setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
+    el.addEventListener("scroll", onScroll)
+    return () => el.removeEventListener("scroll", onScroll)
+  }, [hasLines, logs.error])
 
   return (
-    <div className="bg-card flex flex-col rounded-lg border shadow-xs">
-      <div className="flex flex-col gap-2 border-b p-3 md:flex-row md:flex-wrap md:items-center">
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold">Logs</h2>
-          <p className="text-muted-foreground text-xs">Container stdout and stderr</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 md:ml-auto">
+    <Section
+      title="Logs"
+      description="Container stdout and stderr"
+      actions={
+        <>
           <Select value={String(tail)} onValueChange={(v) => v && setTail(Number(v))}>
             <SelectTrigger size="sm" aria-label="Number of lines">
               <SelectValue />
@@ -324,14 +328,13 @@ function TaskLogs({ task }: { task: EcsTask }) {
           <Button variant="outline" size="sm" onClick={() => logs.mutate()} disabled={logs.isValidating}>
             <RefreshCw className={cn(logs.isValidating && "animate-spin")} /> Refresh
           </Button>
-        </div>
-      </div>
+        </>
+      }
+    >
       {logs.error ? (
-        <div className="p-4">
-          <ErrorState error={logs.error} onRetry={() => logs.mutate()} />
-        </div>
+        <ErrorState error={logs.error} onRetry={() => logs.mutate()} />
       ) : !logs.data ? (
-        <div className="text-muted-foreground flex items-center gap-2 p-4 text-sm">
+        <div className="text-muted-foreground flex items-center gap-2 text-sm">
           <Loader2 className="size-4 animate-spin" /> Loading logs...
         </div>
       ) : lines.length === 0 ? (
@@ -343,19 +346,25 @@ function TaskLogs({ task }: { task: EcsTask }) {
           }
         />
       ) : (
-        <div ref={scroller} onScroll={onScroll} className="bg-muted/20 max-h-[60vh] overflow-auto py-1">
+        <TerminalPane
+          ref={scroller}
+          title={`${shortId(task.id)} · ${lines.length} lines`}
+          copyValue={logs.data.output ?? ""}
+          height="min(60vh, 36rem)"
+          bodyClassName="px-0 py-1"
+        >
           {lines.map((l, i) => {
             const [ts, msg] = splitLine(l)
             return (
-              <div key={i} className="hover:bg-muted/50 flex gap-3 px-3 font-mono text-[12.5px] leading-5">
-                {ts && <span className="text-muted-foreground shrink-0 select-none">{ts}</span>}
+              <div key={i} className="flex gap-3 px-4 hover:bg-white/5">
+                {ts && <span className={cn(term.muted, "shrink-0 select-none")}>{ts}</span>}
                 <span className={cn("min-w-0", wrap ? "break-all whitespace-pre-wrap" : "whitespace-pre")}>{msg}</span>
               </div>
             )
           })}
-        </div>
+        </TerminalPane>
       )}
-    </div>
+    </Section>
   )
 }
 

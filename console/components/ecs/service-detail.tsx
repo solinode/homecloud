@@ -3,20 +3,23 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, History, ListChecks, Loader2, Pencil, Square, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, History, ListChecks, Loader2, Pencil, RefreshCw, Square, Trash2 } from "lucide-react"
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ActionsMenu } from "@/components/console/actions-menu"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TagList } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -24,6 +27,7 @@ import { ApiError, seg } from "@/lib/api"
 import { formatDate, formatMemoryMB } from "@/lib/format"
 import { useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { EcsService, EcsTask, EcsTaskDefinition } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import {
   HealthBadge,
   SERVICES_PATH,
@@ -41,7 +45,6 @@ import {
   type TargetGroupTarget,
 } from "./common"
 import { DeleteServiceDialog, StopTaskDialog, UpdateServiceDialog } from "./dialogs"
-import { TaskCounts } from "./services-list"
 
 const TABS = ["tasks", "events", "deployments", "configuration"] as const
 type Tab = (typeof TABS)[number]
@@ -104,12 +107,17 @@ export function ServiceDetail() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating}>
-              {isValidating ? <Loader2 className="animate-spin" /> : null}
+              <RefreshCw className={cn(isValidating && "animate-spin")} />
               Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setDeleting(true)} disabled={!active}>
-              <Trash2 /> Delete
-            </Button>
+            <ActionsMenu
+              disabled={!active}
+              items={[
+                { label: "Update service", icon: <Pencil />, onSelect: () => setUpdating(true) },
+                { separator: true },
+                { label: "Delete service", icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(true) },
+              ]}
+            />
             <Button size="sm" onClick={() => setUpdating(true)} disabled={!active}>
               <Pencil /> Update service
             </Button>
@@ -118,35 +126,48 @@ export function ServiceDetail() {
       />
 
       {svc.status === "DRAINING" ? (
-        <p className="text-muted-foreground flex items-center gap-2 text-sm">
-          <Loader2 className="size-4 animate-spin" /> The service is being deleted. It disappears once all of its tasks have stopped.
-        </p>
+        <Alert variant="warning">
+          <Loader2 className="animate-spin" />
+          <AlertTitle>Deleting</AlertTitle>
+          <AlertDescription>The service is being deleted. It disappears once all of its tasks have stopped.</AlertDescription>
+        </Alert>
       ) : inProgress ? (
-        <p className="text-muted-foreground flex items-center gap-2 text-sm">
-          <Loader2 className="size-4 animate-spin" /> A deployment is in progress. This page refreshes automatically.
-        </p>
+        <Alert variant="info">
+          <Loader2 className="animate-spin" />
+          <AlertTitle>Deployment in progress</AlertTitle>
+          <AlertDescription>This page refreshes automatically.</AlertDescription>
+        </Alert>
       ) : null}
 
-      <Section>
-        <KeyValueGrid
-          columns={4}
-          items={[
-            { label: "Status", value: <ServiceStatusBadge status={svc.status} /> },
-            { label: "Tasks", value: <TaskCounts s={svc} /> },
-            { label: "Task definition", value: <TaskDefLink value={svc.task_definition} /> },
-            {
-              label: "Target group",
-              value: svc.load_balancer ? (
-                <Link href={targetGroupHref(svc.load_balancer.target_group)} className="text-primary hover:underline">
-                  {svc.load_balancer.target_group}
-                </Link>
-              ) : (
-                "None"
-              ),
-            },
-          ]}
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatTile
+          label="Running tasks"
+          value={svc.running_count}
+          unit={`/ ${svc.desired_count}`}
+          tone={svc.running_count === svc.desired_count && svc.pending_count === 0 ? "success" : "warning"}
+          caption={`${svc.desired_count} desired`}
         />
-      </Section>
+        <StatTile label="Pending tasks" value={svc.pending_count} caption="Provisioning or starting" />
+        <StatTile
+          label="Task definition"
+          value={parseTdKey(svc.task_definition).revision || "-"}
+          unit="rev"
+          caption={<TaskDefLink value={svc.task_definition} />}
+        />
+        <StatTile
+          label="Load balancing"
+          value={svc.load_balancer ? "On" : "Off"}
+          caption={
+            svc.load_balancer ? (
+              <Link href={targetGroupHref(svc.load_balancer.target_group)} className="text-primary hover:underline">
+                {svc.load_balancer.target_group}:{svc.load_balancer.container_port}
+              </Link>
+            ) : (
+              "No target group"
+            )
+          }
+        />
+      </div>
 
       <Tabs value={tab} onValueChange={(v) => setParam("tab", v === "tasks" ? null : v)}>
         <TabsList>
@@ -191,9 +212,9 @@ function taskColumns(health: Map<string, TargetGroupTarget> | null): Column<EcsT
       id: "id",
       header: "Task",
       cell: (t) => (
-        <Link href={taskHref(t.id)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] hover:underline" title={t.id}>
+        <CellLink href={taskHref(t.id)} mono title={t.id}>
           {shortId(t.id)}
-        </Link>
+        </CellLink>
       ),
       value: (t) => t.id,
     },
@@ -212,7 +233,7 @@ function taskColumns(health: Map<string, TargetGroupTarget> | null): Column<EcsT
     {
       id: "ip",
       header: "Private IP",
-      cell: (t) => <span className="font-mono text-[13px]">{t.private_ip || "-"}</span>,
+      cell: (t) => <CellText mono>{t.private_ip}</CellText>,
       value: (t) => t.private_ip,
       hideBelow: "sm",
     },
@@ -348,52 +369,46 @@ function DeploymentsTab({ svc }: { svc: EcsService }) {
   const rolling = deployments.length > 1
 
   return (
-    <Section
+    <DataTable
       title="Deployments"
-      flush
       description="Derived from the revision each running task uses. The primary deployment is the service's current task definition."
-    >
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 border-b">
-              <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Deployment</th>
-              <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Task definition</th>
-              <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Running</th>
-              <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Pending</th>
-              <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Rollout</th>
-            </tr>
-          </thead>
-          <tbody>
-            {deployments.map((d) => {
-              const done = d.primary && !rolling && d.running === svc.desired_count && d.pending === 0
-              return (
-                <tr key={d.key} className="border-b last:border-0">
-                  <td className="px-4 py-2 font-medium">{d.primary ? "Primary" : parseTdKey(d.key).redeploy ? "Replaced (forced)" : "Active"}</td>
-                  <td className="px-3 py-2">
-                    <TaskDefLink value={d.key} />
-                  </td>
-                  <td className="px-3 py-2 tabular-nums">
-                    {d.running}
-                    {d.primary && <span className="text-muted-foreground"> / {svc.desired_count}</span>}
-                  </td>
-                  <td className="px-3 py-2 tabular-nums">{d.pending}</td>
-                  <td className="px-4 py-2">
-                    {!d.primary ? (
-                      <StatusBadge status="stopping" label="Draining" />
-                    ) : done ? (
-                      <StatusBadge status="completed" tone="success" label="Completed" />
-                    ) : (
-                      <StatusBadge status="updating" label="In progress" />
-                    )}
-                  </td>
-                </tr>
-              )
-            })}
-          </tbody>
-        </table>
-      </div>
-    </Section>
+      data={deployments}
+      rowId={(d) => d.key}
+      noSearch
+      columns={[
+        {
+          id: "deployment",
+          header: "Deployment",
+          cell: (d) => <span className="font-medium whitespace-nowrap">{d.primary ? "Primary" : parseTdKey(d.key).redeploy ? "Replaced (forced)" : "Active"}</span>,
+        },
+        { id: "td", header: "Task definition", cell: (d) => <TaskDefLink value={d.key} /> },
+        {
+          id: "running",
+          header: "Running",
+          cell: (d) => (
+            <span className="tabular-nums">
+              {d.running}
+              {d.primary && <span className="text-muted-foreground"> / {svc.desired_count}</span>}
+            </span>
+          ),
+        },
+        { id: "pending", header: "Pending", cell: (d) => <span className="tabular-nums">{d.pending}</span> },
+        {
+          id: "rollout",
+          header: "Rollout",
+          cell: (d) => {
+            const done = d.primary && !rolling && d.running === svc.desired_count && d.pending === 0
+            return !d.primary ? (
+              <StatusBadge status="stopping" label="Draining" />
+            ) : done ? (
+              <StatusBadge status="completed" tone="success" label="Completed" />
+            ) : (
+              <StatusBadge status="updating" label="In progress" />
+            )
+          },
+        },
+      ]}
+    />
   )
 }
 

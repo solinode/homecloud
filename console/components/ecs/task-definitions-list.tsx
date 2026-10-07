@@ -7,7 +7,7 @@ import { ChevronDown, ChevronRight, FileBox, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
@@ -48,7 +48,9 @@ export function TaskDefinitionsList() {
       cell: (r) => (
         <span className="flex items-center gap-1.5">
           {open.includes(r.family) ? <ChevronDown className="text-muted-foreground size-4" /> : <ChevronRight className="text-muted-foreground size-4" />}
-          <span className="font-mono text-[13px] font-medium">{r.family}</span>
+          <CellText mono className="font-medium" max="18rem">
+            {r.family}
+          </CellText>
         </span>
       ),
       value: (r) => r.family,
@@ -57,13 +59,9 @@ export function TaskDefinitionsList() {
       id: "latest",
       header: "Latest revision",
       cell: (r) => (
-        <Link
-          href={taskDefHref(r.family, r.latest.revision)}
-          onClick={(e) => e.stopPropagation()}
-          className="text-primary font-mono text-[13px] whitespace-nowrap hover:underline"
-        >
+        <CellLink href={taskDefHref(r.family, r.latest.revision)} mono>
           {tdKey(r.latest)}
-        </Link>
+        </CellLink>
       ),
       value: (r) => r.latest.revision,
     },
@@ -88,9 +86,9 @@ export function TaskDefinitionsList() {
       id: "image",
       header: "Image",
       cell: (r) => (
-        <span className="text-muted-foreground block max-w-80 truncate font-mono text-xs" title={r.latest.image}>
+        <CellText mono muted max="20rem">
           {r.latest.image}
-        </span>
+        </CellText>
       ),
       value: (r) => r.latest.image,
       hideBelow: "md",
@@ -167,10 +165,10 @@ export function TaskDefinitionsList() {
 
 function Revisions({ revisions, onDeregister }: { revisions: EcsTaskDefinition[]; onDeregister: (td: EcsTaskDefinition) => void }) {
   return (
-    <div className="bg-card overflow-x-auto rounded-md border">
+    <div className="bg-card overflow-x-auto rounded-lg border">
       <table className="w-full text-sm">
         <thead>
-          <tr className="bg-muted/40 border-b">
+          <tr className="bg-muted/60 border-b">
             <th className="text-muted-foreground px-3 py-1.5 text-left text-xs font-semibold">Revision</th>
             <th className="text-muted-foreground px-3 py-1.5 text-left text-xs font-semibold">Status</th>
             <th className="text-muted-foreground hidden px-3 py-1.5 text-left text-xs font-semibold md:table-cell">Image</th>
@@ -182,9 +180,9 @@ function Revisions({ revisions, onDeregister }: { revisions: EcsTaskDefinition[]
           {revisions.map((td) => (
             <tr key={td.revision} className="border-b last:border-0">
               <td className="px-3 py-1.5">
-                <Link href={taskDefHref(td.family, td.revision)} className="text-primary font-mono text-[13px] hover:underline">
+                <CellLink href={taskDefHref(td.family, td.revision)} mono>
                   {tdKey(td)}
-                </Link>
+                </CellLink>
               </td>
               <td className="px-3 py-1.5">
                 <StatusBadge status={td.status.toLowerCase()} />

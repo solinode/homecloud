@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, ArrowLeft, Info, Loader2, TerminalSquare } from "lucide-react"
+import { AlertCircle, ArrowLeft, HardDrive, Info, Loader2, RefreshCw, TerminalSquare } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -11,7 +11,9 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyableText } from "@/components/console/copy-button"
+import { CellLink, CellText, DataTable } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
@@ -27,6 +29,7 @@ import { formatDate, formatMemoryMB } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import { ASG_GROUP_TAG } from "@/lib/types"
 import type { Instance } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { INSTANCES_PATH, InstanceKindBadge, PublicPorts, instanceLabel, isVMInstance, isTransitional, pollInterval, useInstanceActions } from "./instance-actions"
 import { instanceProfileHref } from "@/components/iam/common"
 import { InstanceConsoleOutput } from "./instance-console-output"
@@ -120,14 +123,14 @@ export function InstanceDetail() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating} aria-label="Refresh">
-              {isValidating ? <Loader2 className="animate-spin" /> : null}
+              <RefreshCw className={cn(isValidating && "animate-spin")} />
               Refresh
-            </Button>
-            <Button variant="outline" size="sm" disabled={s !== "running"} onClick={() => setParam("tab", "connect")}>
-              <TerminalSquare /> Connect
             </Button>
             <ActionsMenu label="Instance state" items={stateItems} />
             <ActionsMenu items={actionItems} />
+            <Button size="sm" disabled={s !== "running"} onClick={() => setParam("tab", "connect")}>
+              <TerminalSquare /> Connect
+            </Button>
           </>
         }
       />
@@ -346,62 +349,52 @@ function DetailsTab({ inst }: { inst: Instance }) {
         />
       </Section>
 
-      <Section title="Storage" flush>
-        {inst.volumes?.length ? (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b">
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Volume ID</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Mount path</th>
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Delete on termination</th>
-                </tr>
-              </thead>
-              <tbody>
-                {inst.volumes.map((v) => (
-                  <tr key={v.volume_id} className="border-b last:border-0">
-                    <td className="px-4 py-2">
-                      <Link href="/ec2/volumes/" className="text-primary font-mono text-[13px] hover:underline">
-                        {v.volume_id}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2 font-mono text-[13px]">{v.mount_path}</td>
-                    <td className="px-4 py-2">{v.delete_on_termination ? "Yes" : "No"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        ) : (
-          <p className="text-muted-foreground p-4 text-sm">No additional volumes. The instance uses only its image&apos;s root filesystem.</p>
-        )}
-        {inst.file_systems && inst.file_systems.length > 0 && (
-          <div className="overflow-x-auto border-t">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b">
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">File system (EFS)</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Mount path</th>
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Access</th>
-                </tr>
-              </thead>
-              <tbody>
-                {inst.file_systems.map((m) => (
-                  <tr key={`${m.file_system_id}:${m.mount_path}`} className="border-b last:border-0">
-                    <td className="px-4 py-2">
-                      <Link href={`/efs/file-system/?id=${encodeURIComponent(m.file_system_id)}`} className="text-primary font-mono text-[13px] hover:underline">
-                        {m.file_system_id}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2 font-mono text-[13px]">{m.mount_path}</td>
-                    <td className="px-4 py-2">{m.read_only ? "Read-only" : "Read/write"}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Section>
+      <DataTable
+        title="Storage"
+        data={inst.volumes ?? []}
+        rowId={(v) => v.volume_id}
+        noSearch
+        columns={[
+          {
+            id: "volume",
+            header: "Volume ID",
+            value: (v) => v.volume_id,
+            cell: (v) => (
+              <CellLink href="/ec2/volumes/" mono>
+                {v.volume_id}
+              </CellLink>
+            ),
+          },
+          { id: "mount", header: "Mount path", value: (v) => v.mount_path, cell: (v) => <CellText mono>{v.mount_path}</CellText> },
+          { id: "del", header: "Delete on termination", value: (v) => (v.delete_on_termination ? "Yes" : "No"), cell: (v) => (v.delete_on_termination ? "Yes" : "No") },
+        ]}
+        empty={
+          <EmptyState icon={HardDrive} title="No additional volumes" description="The instance uses only its image's root filesystem." className="py-10" />
+        }
+      />
+
+      {inst.file_systems && inst.file_systems.length > 0 && (
+        <DataTable
+          title="File systems (EFS)"
+          data={inst.file_systems}
+          rowId={(m) => `${m.file_system_id}:${m.mount_path}`}
+          noSearch
+          columns={[
+            {
+              id: "fs",
+              header: "File system",
+              value: (m) => m.file_system_id,
+              cell: (m) => (
+                <CellLink href={`/efs/file-system/?id=${encodeURIComponent(m.file_system_id)}`} mono>
+                  {m.file_system_id}
+                </CellLink>
+              ),
+            },
+            { id: "mount", header: "Mount path", value: (m) => m.mount_path, cell: (m) => <CellText mono>{m.mount_path}</CellText> },
+            { id: "access", header: "Access", value: (m) => (m.read_only ? "Read-only" : "Read/write"), cell: (m) => (m.read_only ? "Read-only" : "Read/write") },
+          ]}
+        />
+      )}
 
       <Section title="Tags">
         <TagList tags={inst.tags} />
@@ -409,7 +402,7 @@ function DetailsTab({ inst }: { inst: Instance }) {
 
       <Section title="User data">
         {inst.user_data ? (
-          <pre className="bg-muted/50 max-h-80 overflow-auto rounded-md border p-3 font-mono text-[12.5px] whitespace-pre-wrap">{inst.user_data}</pre>
+          <CodeBlock code={inst.user_data} title="user-data" wrap maxHeight="20rem" />
         ) : (
           <p className="text-muted-foreground text-sm">No user data.</p>
         )}
