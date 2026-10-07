@@ -30,6 +30,28 @@ func jsonOf(t *testing.T, s string) map[string]any {
 	return m
 }
 
+// Terraform's provider waits after every create and update until the table's
+// (and each index's) warm throughput is ACTIVE, and fails when it is missing.
+func TestAWSWarmThroughput(t *testing.T) {
+	h, _ := harness(t)
+	warm := func(m map[string]any) map[string]any { w, _ := m["WarmThroughput"].(map[string]any); return w }
+	td := h.AWSJSON(t, "dynamodb", "create-table", "--table-name", "Warm",
+		"--attribute-definitions", "AttributeName=id,AttributeType=S", "AttributeName=g,AttributeType=S",
+		"--key-schema", "AttributeName=id,KeyType=HASH", "--billing-mode", "PAY_PER_REQUEST",
+		"--global-secondary-indexes", `[{"IndexName":"ByG","KeySchema":[{"AttributeName":"g","KeyType":"HASH"}],"Projection":{"ProjectionType":"ALL"}}]`)["TableDescription"].(map[string]any)
+	if w := warm(td); w["Status"] != "ACTIVE" || w["ReadUnitsPerSecond"] != float64(12000) || w["WriteUnitsPerSecond"] != float64(4000) {
+		t.Fatalf("default warm throughput %v", w)
+	}
+	if w := warm(td["GlobalSecondaryIndexes"].([]any)[0].(map[string]any)); w["Status"] != "ACTIVE" {
+		t.Fatalf("index warm throughput %v", w)
+	}
+	h.AWS(t, "dynamodb", "update-table", "--table-name", "Warm", "--warm-throughput", "ReadUnitsPerSecond=15000,WriteUnitsPerSecond=5000")
+	td = h.AWSJSON(t, "dynamodb", "describe-table", "--table-name", "Warm")["Table"].(map[string]any)
+	if w := warm(td); w["ReadUnitsPerSecond"] != float64(15000) || w["WriteUnitsPerSecond"] != float64(5000) || w["Status"] != "ACTIVE" {
+		t.Fatalf("updated warm throughput %v", w)
+	}
+}
+
 func TestAWSCLI(t *testing.T) {
 	h, _ := harness(t)
 	out := h.AWSJSON(t, "dynamodb", "create-table", "--table-name", "Music",

@@ -78,6 +78,30 @@ type Table struct {
 	SSEKMSKey          string       `json:"sse_kms_key,omitempty"`
 	SSEEnabled         bool         `json:"sse_enabled,omitempty"`
 	Version            int          `json:"storage_version,omitempty"`
+	// Warm is the table's warm throughput (recorded; DescribeTable reports
+	// AWS's defaults for new tables when it was never set).
+	Warm *WarmThroughput `json:"warm_throughput,omitempty"`
+}
+
+// WarmThroughput is the read and write units per second a table is ready for.
+type WarmThroughput struct {
+	ReadUnitsPerSecond  int64 `json:"read_units_per_second,omitempty"`
+	WriteUnitsPerSecond int64 `json:"write_units_per_second,omitempty"`
+}
+
+// warmThroughput is the table's warm throughput, AWS's defaults for a new
+// table (12,000 reads and 4,000 writes per second) where unset.
+func (t *Table) warmThroughput() WarmThroughput {
+	w := WarmThroughput{ReadUnitsPerSecond: 12000, WriteUnitsPerSecond: 4000}
+	if t.Warm != nil {
+		if t.Warm.ReadUnitsPerSecond > 0 {
+			w.ReadUnitsPerSecond = t.Warm.ReadUnitsPerSecond
+		}
+		if t.Warm.WriteUnitsPerSecond > 0 {
+			w.WriteUnitsPerSecond = t.Warm.WriteUnitsPerSecond
+		}
+	}
+	return w
 }
 
 func (t *Table) schema() schema { return schema{PK: t.PartitionKey, SK: t.SortKey} }
