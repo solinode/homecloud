@@ -94,6 +94,7 @@ func TestAWSParameterGroupsAndMetadata(t *testing.T) {
 		{[]string{"delete-db-snapshot", "--db-snapshot-identifier", "nope"}, "DBSnapshotNotFound"},
 		{[]string{"describe-db-subnet-groups", "--db-subnet-group-name", "nope"}, "DBSubnetGroupNotFoundFault"},
 		{[]string{"create-db-instance", "--db-instance-identifier", "x", "--db-instance-class", "db.t3.micro", "--engine", "oracle-ee"}, "InvalidParameterValue"},
+		{[]string{"create-db-instance", "--db-instance-identifier", "x", "--db-instance-class", "db.t3.micro", "--engine", "postgres", "--port", "6000", "--master-user-password", "password123"}, "InvalidParameterValue"},
 		{[]string{"list-tags-for-resource", "--resource-name", "arn:aws:rds:us-east-1:123456789012:db:nope"}, "DBInstanceNotFound"},
 	} {
 		if o, err := h.AWSErr(t, append([]string{"rds"}, c.args...)...); err == nil || !strings.Contains(o, c.code) {
@@ -215,8 +216,9 @@ func TestAWSInstanceLifecycle(t *testing.T) {
 	sg := v.DefaultSecurityGroup(v.Subnets()[0].VpcID)
 
 	// Creation returns immediately in the creating state, with no endpoint yet.
+	// The engine's own port is accepted for a private database (Terraform's rds module sends it).
 	c := h.AWSJSON(t, "rds", "create-db-instance", "--db-instance-identifier", "Orders", "--db-instance-class", "db.t3.micro", "--engine", "postgres",
-		"--engine-version", "17", "--allocated-storage", "20", "--master-username", "app", "--manage-master-user-password", "--db-name", "shop",
+		"--engine-version", "17", "--allocated-storage", "20", "--master-username", "app", "--manage-master-user-password", "--db-name", "shop", "--port", "5432",
 		"--db-subnet-group-name", "apps", "--db-parameter-group-name", "pg17", "--vpc-security-group-ids", sg,
 		"--backup-retention-period", "0", "--tags", "Key=env,Value=qa")["DBInstance"].(map[string]any)
 	if c["DBInstanceIdentifier"] != "orders" || c["DBInstanceStatus"] != "creating" || c["Endpoint"] != nil || c["Engine"] != "postgres" {
