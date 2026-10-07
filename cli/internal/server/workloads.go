@@ -17,9 +17,15 @@ import (
 //     to. It exists only inside the host; nothing outside can route to it.
 //   - Docker Desktop and OrbStack (macOS, Windows): host.docker.internal
 //     reaches the host's loopback.
+//   - HomeCloud in a container (the official image): every address of the
+//     container. Only the API port is published; this one is reached only
+//     over the Docker networks HomeCloud shares with its workloads.
 //
 // The port is chosen by the kernel. ok is false when no safe address exists.
-func workloadListenAddr(goos, bridgeGateway string) (addr string, ok bool) {
+func workloadListenAddr(goos, bridgeGateway string, containerized bool) (addr string, ok bool) {
+	if containerized {
+		return ":0", true
+	}
 	if goos == "linux" {
 		if bridgeGateway == "" {
 			return "", false

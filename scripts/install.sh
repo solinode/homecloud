@@ -19,14 +19,16 @@ case "$arch" in
   *) echo "Unsupported architecture: $arch" >&2; exit 1 ;;
 esac
 
+# The server needs Docker; the CLI alone (talking to a server elsewhere) does not.
+no_docker=
 if ! command -v docker >/dev/null 2>&1; then
-  echo "HomeCloud runs every service on Docker, which is not installed."
+  no_docker=1
+  echo "Note: Docker is not installed. The homecloud CLI works without it, but 'homecloud serve' runs every service on Docker."
   if [ "$os" = darwin ]; then
-    echo "Install Docker Desktop or OrbStack, start it, then re-run this script."
+    echo "      Install Docker Desktop or OrbStack and start it before running the server."
   else
-    echo "Install it with your package manager (e.g. 'curl -fsSL https://get.docker.com | sh'), then re-run this script."
+    echo "      Install it with your package manager (e.g. 'curl -fsSL https://get.docker.com | sh') before running the server."
   fi
-  exit 1
 fi
 
 version="${HOMECLOUD_VERSION:-}"
@@ -57,5 +59,9 @@ fi
 
 echo "Installed $("$INSTALL_DIR/homecloud" version)"
 echo
-echo "Start your cloud with:   homecloud serve"
+if [ -n "$no_docker" ]; then
+  echo "Install Docker, then start your cloud with:   homecloud serve"
+else
+  echo "Start your cloud with:   homecloud serve"
+fi
 echo "Then open:               http://127.0.0.1:8080"

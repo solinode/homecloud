@@ -155,6 +155,14 @@ func (s *Service) imdsConfig() string {
 	if api == "" {
 		api = "http://" + strings.Split(runtime.HostAlias, ":")[0] + ":8080"
 	}
+	if s.env.Docker.Self() != "" {
+		// HomeCloud runs in a container: name its current address on the default
+		// bridge, where the helper runs (it changes when HomeCloud restarts, and
+		// the helper's configuration is refreshed).
+		if ip, err := s.env.Docker.SelfIP(""); err == nil {
+			api = strings.Replace(api, runtime.HostAliasName, ip, 1)
+		}
+	}
 	return fmt.Sprintf(`worker_processes 1;
 error_log /dev/stderr warn;
 events { worker_connections 512; }

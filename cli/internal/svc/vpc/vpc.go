@@ -11,6 +11,7 @@ package vpc
 import (
 	"context"
 	"fmt"
+	"log"
 	"net/http"
 	"net/netip"
 	"slices"
@@ -204,13 +205,19 @@ func (s *Service) overlapsAny(p netip.Prefix, taken map[string]string) string {
 }
 
 func (s *Service) ensureNetwork(v VPC) error {
-	if _, err := s.env.Docker.C.NetworkInfo(v.Network); err == nil {
-		return nil
+	if _, err := s.env.Docker.C.NetworkInfo(v.Network); err != nil {
+		p := netip.MustParsePrefix(v.CIDR)
+		if _, err := s.env.Docker.CreateNetwork(v.Network, p.String(), p.Addr().Next().String(), !v.InternetAccess,
+			runtime.Labels("vpc", v.ID, nil)); err != nil {
+			return err
+		}
 	}
-	p := netip.MustParsePrefix(v.CIDR)
-	_, err := s.env.Docker.CreateNetwork(v.Network, p.String(), p.Addr().Next().String(), !v.InternetAccess,
-		runtime.Labels("vpc", v.ID, nil))
-	return err
+	// When HomeCloud runs in a container, it joins every VPC at a reserved
+	// address so the VPC's workloads reach its API (runtime/self.go).
+	if err := s.env.Docker.ConnectSelf(v.Network, APIAddress(v.CIDR)); err != nil {
+		log.Printf("vpc: attach HomeCloud to %s: %v", v.ID, err)
+	}
+	return nil
 }
 
 func (s *Service) createVPC(name string, cidr netip.Prefix, internet, def bool) (VPC, error) {
@@ -284,6 +291,7 @@ func (s *Service) allocate(sn Subnet, owner string) (string, error) {
 	used := map[string]bool{}
 	if v, err := store.Get[VPC](s.env.Store, cVPCs, sn.VpcID); err == nil {
 		used[MetadataAddress(v.CIDR)] = true // the instance metadata service's next hop
+		used[APIAddress(v.CIDR)] = true      // HomeCloud itself, when it runs in a container
 	}
 	for _, a := range store.List[allocation](s.env.Store, cIPs) {
 		used[a.IP] = true
@@ -444,6 +452,17 @@ func MetadataAddress(cidr string) string {
 
 // S3Address is where the shared S3 endpoint (s3.internal) sits in a VPC: base plus three.
 func S3Address(cidr string) string { return reserved(cidr, 3) }
+
+// APIAddress is HomeCloud's own address in a VPC when it runs in a container
+// (the official image): the third-to-last address of the VPC CIDR, which the
+// allocator never hands out.
+func APIAddress(cidr string) string {
+	p, err := netip.ParsePrefix(cidr)
+	if err != nil {
+		return ""
+	}
+	return lastAddr(p).Prev().Prev().String()
+}
 
 func reserved(cidr string, n int) string {
 	p, err := netip.ParsePrefix(cidr)
@@ -627,7 +646,7 @@ func (s *Service) detachInfra(network string) {
 		return
 	}
 	for cid := range info.Containers {
-		if c, err := s.env.Docker.Inspect(cid); err == nil && infra(c) {
+		if c, err := s.env.Docker.Inspect(cid); err == nil && (infra(c) || c.ID == s.env.Docker.Self()) {
 			_ = s.env.Docker.C.DisconnectNetwork(network, docker.NetworkConnectionOptions{Container: cid, Force: true})
 		}
 	}

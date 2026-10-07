@@ -646,9 +646,10 @@ func (s *Service) test(c *httpx.Ctx) (any, error) {
 	if err := c.Bind(&in); err != nil {
 		return nil, err
 	}
+	server := s.env.Docker.DialAddr(containerName, 53, fmt.Sprintf("127.0.0.1:%d", s.env.Cfg.DNSPort))
 	r := &net.Resolver{PreferGo: true, Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
 		var d net.Dialer
-		return d.DialContext(ctx, network, fmt.Sprintf("127.0.0.1:%d", s.env.Cfg.DNSPort))
+		return d.DialContext(ctx, network, server)
 	}}
 	ctx, cancel := context.WithTimeout(c.R.Context(), 3*time.Second)
 	defer cancel()

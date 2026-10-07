@@ -77,6 +77,12 @@ func TestRulesetExternalPortsAndLoopbackRule(t *testing.T) {
 		"-A HC-SG-IN -s 10.5.0.1 -p tcp -m tcp --dport 8080 -j ACCEPT",
 		"-A HC-SG-IN ! -s 10.5.0.0/16 -p tcp -m tcp --dport 8080 -j ACCEPT",
 	)
+	if strings.Contains(got, "10.5.255.253") {
+		t.Errorf("HomeCloud's container address is trusted although HomeCloud runs on the host:\n%s", got)
+	}
+	// HomeCloud in a container dials external ports from its reserved address.
+	f.api = APIAddress(f.vpc.CIDR)
+	has(t, f.ruleset(m), "-A HC-SG-IN -p tcp -m tcp --dport 5432 -s 10.5.255.253 -j ACCEPT")
 }
 
 func TestRulesetEgress(t *testing.T) {

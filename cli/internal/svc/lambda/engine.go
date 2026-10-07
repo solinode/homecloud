@@ -54,7 +54,7 @@ type execEnv struct {
 	vpcID, ip string
 	groups    []string
 	inVPC     bool
-	port      int    // host port of the emulator (0: reach it with docker exec)
+	addr      string // where HomeCloud reaches the emulator, host:port ("": with docker exec)
 	stream    string // CloudWatch log stream
 	busy      bool
 	used      bool // has served an invocation (the first one is a cold start)
@@ -580,7 +580,9 @@ func (s *Service) startEnv(ctx context.Context, f Function, slot int) (*execEnv,
 	lctx, stop := context.WithCancel(context.Background())
 	e.stop = stop
 	go s.follow(lctx, e)
-	e.port = s.env.Docker.HostPort(id, riePort)
+	if port := s.env.Docker.HostPort(id, riePort); port > 0 {
+		e.addr = s.env.Docker.DialAddr(id, riePort, fmt.Sprintf("127.0.0.1:%d", port))
+	}
 	if err := s.waitReady(ctx, e); err != nil {
 		return fail(err)
 	}
@@ -598,8 +600,8 @@ func (s *Service) follow(ctx context.Context, e *execEnv) {
 
 var rieClient = &http.Client{Transport: &http.Transport{MaxIdleConnsPerHost: 4, IdleConnTimeout: time.Minute}}
 
-func invokeURL(port int) string {
-	return fmt.Sprintf("http://127.0.0.1:%d/2015-03-31/functions/function/invocations", port)
+func invokeURL(addr string) string {
+	return "http://" + addr + "/2015-03-31/functions/function/invocations"
 }
 
 // waitReady waits for the emulator to accept requests.
@@ -609,8 +611,8 @@ func (s *Service) waitReady(ctx context.Context, e *execEnv) error {
 		if st := s.env.Docker.State(e.id); st != "running" {
 			return core.Errf(http.StatusBadGateway, "ServiceException", "execution environment exited during startup: %s", tail(e.logs.text(), 1024))
 		}
-		if e.port > 0 {
-			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, fmt.Sprintf("http://127.0.0.1:%d/", e.port), nil)
+		if e.addr != "" {
+			req, _ := http.NewRequestWithContext(ctx, http.MethodGet, "http://"+e.addr+"/", nil)
 			if resp, err := rieClient.Do(req); err == nil {
 				io.Copy(io.Discard, resp.Body)
 				resp.Body.Close()
@@ -634,8 +636,8 @@ func (s *Service) waitReady(ctx context.Context, e *execEnv) error {
 // post sends one invocation to the environment's emulator and returns its
 // response body.
 func (s *Service) post(ctx context.Context, e *execEnv, reqID, clientCtx string, payload []byte) ([]byte, error) {
-	if e.port > 0 {
-		req, err := http.NewRequestWithContext(ctx, http.MethodPost, invokeURL(e.port), bytes.NewReader(payload))
+	if e.addr != "" {
+		req, err := http.NewRequestWithContext(ctx, http.MethodPost, invokeURL(e.addr), bytes.NewReader(payload))
 		if err != nil {
 			return nil, err
 		}
