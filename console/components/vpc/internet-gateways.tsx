@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { FormDialog } from "@/components/console/form-dialog"
@@ -41,9 +41,13 @@ export function InternetGateways() {
   }
 
   const columns: Column<InternetGateway>[] = [
-    { id: "name", header: "Name", cell: (g) => g.tags?.Name || <span className="text-muted-foreground">-</span>, value: (g) => g.tags?.Name },
-    { id: "id", header: "Internet gateway ID", cell: (g) => <span className="font-mono text-[13px] font-medium">{g.id}</span>, value: (g) => g.id },
-    { id: "state", header: "State", cell: (g) => <StatusBadge status={g.vpc_id ? "attached" : "detached"} />, value: (g) => (g.vpc_id ? "attached" : "detached") },
+    { id: "name", header: "Name", cell: (g) => <CellText>{g.tags?.Name}</CellText>, value: (g) => g.tags?.Name },
+    { id: "id", header: "Internet gateway ID", cell: (g) => <CellText mono className="font-medium">{g.id}</CellText>, value: (g) => g.id },
+    {
+      id: "state",
+      header: "State",
+      cell: (g) => <StatusBadge status={g.vpc_id ? "attached" : "detached"} tone={g.vpc_id ? "success" : "neutral"} />, value: (g) => (g.vpc_id ? "attached" : "detached"),
+    },
     {
       id: "vpc",
       header: "VPC ID",
@@ -88,7 +92,18 @@ export function InternetGateways() {
             </Button>
           </>
         }
-        empty={<EmptyState icon={Globe} title="No internet gateways" description="Create one and attach it to a VPC." />}
+        empty={
+          <EmptyState
+            icon={Globe}
+            title="No internet gateways"
+            description="Create one and attach it to a VPC."
+            action={
+              <Button size="sm" onClick={() => open("create")}>
+                <Plus /> Create internet gateway
+              </Button>
+            }
+          />
+        }
       />
       {dialog === "create" && (
         <FormDialog

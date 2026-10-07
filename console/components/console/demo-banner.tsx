@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect } from "react"
-import { FlaskConical, RotateCcw } from "lucide-react"
+import { ArrowRight, RotateCcw } from "lucide-react"
 import { toast } from "sonner"
 
 import { DEMO, DEMO_UNAVAILABLE_HREF, loadDemo } from "@/lib/api"
@@ -35,23 +35,25 @@ export function DemoBanner() {
   return (
     <div
       role="note"
-      className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1 bg-gradient-to-r from-violet-600 via-indigo-600 to-cyan-600 px-3 py-1.5 text-center text-xs text-white"
+      className="bg-brand-soft border-brand-line/60 text-muted-foreground relative z-50 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 border-b px-3 py-1.5 text-center text-xs"
     >
-      <FlaskConical className="size-3.5 shrink-0" aria-hidden />
-      <span>
-        <strong className="font-semibold">Demo</strong> — sample data, nothing is real.{" "}
-        <a href={INSTALL_URL} className="font-semibold underline underline-offset-2 hover:text-white/80">
-          Install HomeCloud to run your own cloud
-        </a>
+      <span className="bg-brand-soft text-primary border-brand-line rounded-full border px-2 py-px font-mono text-[10px] font-semibold tracking-[0.08em] uppercase">
+        Demo
       </span>
-      <span className="hidden text-white/50 sm:inline">|</span>
-      <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-white/80">
+      <span>Sample data in your browser, nothing is real.</span>
+      <a href={INSTALL_URL} className="text-foreground group inline-flex items-center gap-1 font-medium hover:underline hover:underline-offset-2">
+        Install HomeCloud <ArrowRight className="size-3 transition-transform group-hover:translate-x-0.5" aria-hidden />
+      </a>
+      <span className="text-faint hidden sm:inline" aria-hidden>
+        ·
+      </span>
+      <a href={GITHUB_URL} target="_blank" rel="noreferrer" className="hover:text-foreground hidden sm:inline">
         GitHub
       </a>
       <button
         type="button"
         onClick={reset}
-        className="inline-flex items-center gap-1 rounded border border-white/40 px-1.5 py-0.5 hover:bg-white/15"
+        className="hover:text-foreground hover:bg-background/40 inline-flex items-center gap-1 rounded border border-transparent px-1.5 py-0.5 hover:border-border"
         title="Discard every change you made and restore the sample data"
       >
         <RotateCcw className="size-3" aria-hidden />

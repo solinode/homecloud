@@ -1,12 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Loader2, Network, Plus } from "lucide-react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -15,10 +13,11 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
+import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
@@ -28,13 +27,7 @@ import { APIGW_PATH, APIS_PATH, DeleteApiDialog, apiHref, routePathError } from 
 import { RouteFields, type RouteDraft } from "./route-dialog"
 
 export function CorsBadge({ cors }: { cors: boolean }) {
-  return cors ? (
-    <Badge variant="secondary" className="font-normal">
-      Enabled
-    </Badge>
-  ) : (
-    <span className="text-muted-foreground text-sm">Off</span>
-  )
+  return cors ? <StatusBadge status="enabled" /> : <span className="text-muted-foreground text-sm">Off</span>
 }
 
 export function ApiList() {
@@ -50,13 +43,9 @@ export function ApiList() {
       id: "name",
       header: "Name",
       value: (a) => a.name,
-      cell: (a) => (
-        <Link href={apiHref(a.id)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-          {a.name}
-        </Link>
-      ),
+      cell: (a) => <CellLink href={apiHref(a.id)}>{a.name}</CellLink>,
     },
-    { id: "id", header: "API ID", value: (a) => a.id, cell: (a) => <span className="font-mono text-[13px]">{a.id}</span>, hideBelow: "sm" },
+    { id: "id", header: "API ID", value: (a) => a.id, cell: (a) => <CellText mono>{a.id}</CellText>, hideBelow: "sm" },
     {
       id: "endpoint",
       header: "Invoke URL",

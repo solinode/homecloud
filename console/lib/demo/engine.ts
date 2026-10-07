@@ -229,7 +229,9 @@ export async function dispatch(
 ): Promise<DemoResult> {
   // a tiny latency so spinners and skeletons flash like a real (fast) server
   await new Promise((r) => setTimeout(r, 25 + Math.random() * 60))
-  const path = fullPath.split("?")[0]
+  const [path, qs] = fullPath.split("?")
+  // useApi keys carry their query in the path ("/x?limit=10"): merge it in.
+  if (qs) query = { ...Object.fromEntries(new URLSearchParams(qs)), ...query }
   const m = router.match(method, path)
   if (!m) {
     console.error(`[demo] missing route: ${method} ${path}`)

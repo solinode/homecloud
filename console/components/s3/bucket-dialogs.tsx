@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation"
 import { AlertTriangle, CheckCircle2, Circle, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -71,7 +72,11 @@ export function CreateBucketDialog({ open, onOpenChange }: { open: boolean; onOp
             <DialogDescription>Buckets are containers for objects stored in HomeCloud S3.</DialogDescription>
           </DialogHeader>
 
-          <Field label="Bucket name" htmlFor="bucket-name">
+          <Field
+            label="Bucket name"
+            htmlFor="bucket-name"
+            help="Bucket names are unique on this HomeCloud and cannot be changed later."
+          >
             <Input
               id="bucket-name"
               autoFocus
@@ -83,13 +88,13 @@ export function CreateBucketDialog({ open, onOpenChange }: { open: boolean; onOp
               placeholder="my-bucket"
               aria-invalid={touched && !valid}
             />
-            <ul className="mt-1 flex flex-col gap-1 text-xs">
+            <ul className="mt-1 flex flex-col gap-1 text-xs" aria-live="polite">
               {checks.map((c) => (
                 <li
                   key={c.label}
                   className={cn(
                     "flex items-center gap-1.5",
-                    c.ok ? "text-emerald-600 dark:text-emerald-400" : touched || name ? "text-destructive" : "text-muted-foreground",
+                    c.ok ? "text-success" : touched || name ? "text-destructive" : "text-muted-foreground",
                   )}
                 >
                   {c.ok ? <CheckCircle2 className="size-3.5" /> : <Circle className="size-3.5" />}
@@ -120,10 +125,10 @@ export function CreateBucketDialog({ open, onOpenChange }: { open: boolean; onOp
               <Switch id="bucket-block" checked={blockPublic} onCheckedChange={setBlockPublic} />
             </div>
             {!blockPublic && (
-              <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                Objects in this bucket will be publicly readable by anyone who can reach the S3 endpoint.
-              </div>
+              <Alert variant="warning">
+                <AlertTriangle />
+                <AlertDescription>Objects in this bucket will be publicly readable by anyone who can reach the S3 endpoint.</AlertDescription>
+              </Alert>
             )}
           </div>
 
@@ -213,10 +218,10 @@ export function DeleteBucketDialog({
         </div>
       </div>
       {apiError && (
-        <div className="border-destructive/30 bg-destructive/5 text-destructive flex items-start gap-2 rounded-md border p-3 text-sm">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>{apiError}</span>
-        </div>
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertDescription>{apiError}</AlertDescription>
+        </Alert>
       )}
     </ConfirmDialog>
   )

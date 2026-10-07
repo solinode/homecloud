@@ -6,14 +6,14 @@ import { Rocket } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { PageHeader } from "@/components/console/page-header"
 import { formatMemoryMB } from "@/lib/format"
 import type { InstanceType } from "@/lib/types"
 import { groupByFamily, useInstanceTypes } from "./instance-actions"
 
 const columns: Column<InstanceType>[] = [
-  { id: "name", header: "Instance type", cell: (t) => <span className="font-mono text-[13px] font-medium">{t.name}</span>, value: (t) => t.name },
+  { id: "name", header: "Instance type", cell: (t) => <CellText mono className="font-medium">{t.name}</CellText>, value: (t) => t.name },
   { id: "family", header: "Family", cell: (t) => t.family, value: (t) => t.family },
   { id: "vcpus", header: "vCPUs", cell: (t) => <span className="tabular-nums">{t.vcpus}</span>, value: (t) => t.vcpus },
   { id: "memory", header: "Memory", cell: (t) => <span className="tabular-nums">{formatMemoryMB(t.memory_mb)}</span>, value: (t) => t.memory_mb },

@@ -4,6 +4,7 @@ import { AlertTriangle } from "lucide-react"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { formatDate } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
 import type { Certificate, LoadBalancer } from "@/lib/types"
@@ -38,7 +39,11 @@ export function CertStatusBadge({ cert }: { cert: Pick<Certificate, "status" | "
 }
 
 export function CertTypeLabel({ type }: { type: string }) {
-  return <span>{type === "PRIVATE" ? "HomeCloud private CA" : type === "IMPORTED" ? "Imported" : type}</span>
+  return (
+    <Tag accent={type === "PRIVATE" ? "brand" : type === "IMPORTED" ? "info" : "neutral"} mono={false}>
+      {type === "PRIVATE" ? "HomeCloud private CA" : type === "IMPORTED" ? "Imported" : type}
+    </Tag>
+  )
 }
 
 /** ExpiryCell shows the expiry date with a warning under 30 days. */
@@ -47,7 +52,7 @@ export function ExpiryCell({ cert, withDate = true }: { cert: Pick<Certificate, 
   const expired = isExpired(cert)
   const soon = !expired && d < EXPIRY_WARNING_DAYS
   return (
-    <span className={cn("inline-flex flex-wrap items-center gap-1", expired && "text-destructive", soon && "text-amber-700 dark:text-amber-400")}>
+    <span className={cn("inline-flex flex-wrap items-center gap-1", expired && "text-destructive", soon && "text-warning")}>
       {(expired || soon) && <AlertTriangle className="size-3.5 shrink-0" />}
       {withDate && <span className="whitespace-nowrap">{formatDate(cert.not_after, false)}</span>}
       <span className={cn("text-xs whitespace-nowrap", !expired && !soon && "text-muted-foreground")}>

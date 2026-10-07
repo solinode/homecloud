@@ -3,13 +3,16 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, Check, EyeOff, KeyRound, Loader2, Pencil, RefreshCw, RotateCcw, Trash2, X } from "lucide-react"
+import { AlertTriangle, Check, EyeOff, History, KeyRound, Loader2, Pencil, RefreshCw, RotateCcw, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
+import { CodeBlock, term } from "@/components/console/code-block"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -17,13 +20,13 @@ import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag, type TagAccent } from "@/components/console/tag"
 import { TagList, TagsEditor, tagsToRows, type TagRow } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
-import { CodeBlock } from "@/components/s3/common"
 import { api, apiUrl, errorMessage, seg } from "@/lib/api"
 import { formatDate } from "@/lib/format"
 import { revalidate, useAction, useApi, useQueryParam } from "@/lib/hooks"
-import type { Secret, SecretValue } from "@/lib/types"
+import type { Secret, SecretValue, SecretVersion } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
 import { useKmsKeys } from "@/components/kms/shared"
@@ -34,12 +37,17 @@ import { ResourcePolicySection, RotationSection } from "./rotation"
 import { ManagedBadge } from "./secret-list"
 import { draftError, draftFromValue, draftValue, ModeToggle, parseKeyValue, SecretValueEditor, type SecretDraft, type SecretMode } from "./value-editor"
 
+/** STAGE_ACCENT tints staging-label tags. */
+const STAGE_ACCENT: Record<string, TagAccent> = { AWSCURRENT: "success", AWSPENDING: "info", AWSPREVIOUS: "neutral" }
+
 function StageBadges({ stages }: { stages: string[] }) {
   if (!stages.length) return <span className="text-muted-foreground">-</span>
   return (
     <div className="flex flex-wrap gap-1">
       {stages.map((s) => (
-        <StatusBadge key={s} status={s} label={s} tone={s === "AWSCURRENT" ? "success" : s === "AWSPENDING" ? "info" : "neutral"} className="font-mono normal-case" />
+        <Tag key={s} accent={STAGE_ACCENT[s] ?? "neutral"}>
+          {s}
+        </Tag>
       ))}
     </div>
   )
@@ -98,37 +106,30 @@ function DescriptionField({ secret, onSaved }: { secret: Secret; onSaved: () => 
 function ValueView({ value, mode }: { value: SecretValue; mode: SecretMode }) {
   const rows = parseKeyValue(value.value)
   if (mode === "kv" && rows) {
+    let json = value.value
+    try {
+      json = JSON.stringify(JSON.parse(value.value), null, 2)
+    } catch {
+      // keep as-is
+    }
     return (
-      <div className="overflow-x-auto rounded-md border">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-              <th className="px-3 py-2 font-semibold">Secret key</th>
-              <th className="px-3 py-2 font-semibold">Secret value</th>
-            </tr>
-          </thead>
-          <tbody>
+      <CodeBlock title={`${rows.length} key/value pair${rows.length === 1 ? "" : "s"}`} code={json} copyLabel="Copy JSON" maxHeight="24rem">
+        {rows.length === 0 ? (
+          <div className={term.muted}>Empty JSON object</div>
+        ) : (
+          <div className="grid grid-cols-1 gap-x-6 gap-y-1.5 sm:grid-cols-[minmax(8rem,max-content)_minmax(0,1fr)]">
             {rows.map((r) => (
-              <tr key={r.key} className="border-b last:border-0">
-                <td className="px-3 py-2 align-top font-mono text-[13px] font-medium">{r.key}</td>
-                <td className="px-3 py-2">
-                  <span className="flex items-start gap-1">
-                    <span className="min-w-0 font-mono text-[13px] break-all whitespace-pre-wrap">{r.value}</span>
-                    <CopyButton value={r.value} label={`Copy ${r.key}`} />
-                  </span>
-                </td>
-              </tr>
+              <div key={r.key} className="contents">
+                <div className="text-code-blue font-medium break-all whitespace-pre-wrap">{r.key}</div>
+                <div className="flex min-w-0 items-start gap-1 pb-1.5 sm:pb-0">
+                  <span className="min-w-0 flex-1 break-all whitespace-pre-wrap">{r.value}</span>
+                  <CopyButton value={r.value} label={`Copy ${r.key}`} className="text-code-muted hover:bg-white/10 hover:text-white" />
+                </div>
+              </div>
             ))}
-            {rows.length === 0 && (
-              <tr>
-                <td colSpan={2} className="text-muted-foreground px-3 py-2">
-                  Empty JSON object
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          </div>
+        )}
+      </CodeBlock>
     )
   }
   let text = value.value
@@ -139,7 +140,7 @@ function ValueView({ value, mode }: { value: SecretValue; mode: SecretMode }) {
       // keep as-is
     }
   }
-  return <CodeBlock code={text} className="max-h-96 overflow-y-auto" />
+  return <CodeBlock title="Plaintext" code={text} wrap maxHeight="24rem" />
 }
 
 function SecretValueSection({ secret, onChanged, viewVersion, onViewVersionDone }: { secret: Secret; onChanged: () => void; viewVersion: string | null; onViewVersionDone: () => void }) {
@@ -258,7 +259,7 @@ function SecretValueSection({ secret, onChanged, viewVersion, onViewVersionDone 
             <span className="text-foreground font-mono">{value.version_id}</span>
             <StageBadges stages={value.stages} />
             {!isCurrent && (
-              <button type="button" className="text-primary hover:underline" onClick={() => retrieve()}>
+              <button type="button" className="text-primary underline-offset-2 hover:underline" onClick={() => retrieve()}>
                 Show current version
               </button>
             )}
@@ -340,67 +341,68 @@ function VersionsSection({ secret, viewVersion, onView, onChanged }: { secret: S
     if (r !== undefined) onChanged()
   }
   const customKeys = secret.versions.some((v) => v.kms_key) || !!secret.kms_key_id
+  const columns: Column<SecretVersion>[] = [
+    {
+      id: "id",
+      header: "Version ID",
+      cell: (v) => (
+        <div className="min-w-0 max-w-[14rem] sm:max-w-[22rem]">
+          <CopyableText value={v.id} className="truncate" />
+          <div className="mt-1 sm:hidden">
+            <StageBadges stages={v.stages} />
+          </div>
+        </div>
+      ),
+      value: (v) => v.id,
+    },
+    { id: "stages", header: "Staging labels", cell: (v) => <StageBadges stages={v.stages} />, value: (v) => v.stages.join(" "), sortable: false, hideBelow: "sm" },
+    ...(customKeys
+      ? [
+          {
+            id: "key",
+            header: "Encryption key",
+            // A rotation's AWSPENDING placeholder has no value (and so no key) until the function stores one.
+            cell: (v: SecretVersion) => (!v.kms_key && secret.kms_key_id ? <span className="text-muted-foreground">-</span> : <SecretKeyRef arn={v.kms_key} keys={keys.data} />),
+            hideBelow: "lg" as const,
+          },
+        ]
+      : []),
+    { id: "created", header: "Created", cell: (v) => <CellText>{formatDate(v.created_at)}</CellText>, value: (v) => v.created_at, hideBelow: "sm" },
+    {
+      id: "accessed",
+      header: "Last retrieved",
+      cell: (v) => (v.last_accessed ? <TimeAgo value={v.last_accessed} /> : <span className="text-muted-foreground">Never</span>),
+      value: (v) => v.last_accessed ?? "",
+      hideBelow: "md",
+    },
+    {
+      id: "actions",
+      header: "",
+      className: "text-right whitespace-nowrap",
+      cell: (v) => (
+        <>
+          {!v.stages.includes("AWSCURRENT") && !(v.stages.length === 1 && v.stages[0] === "AWSPENDING") && (
+            <Button variant="ghost" size="sm" className="mr-1" disabled={!!secret.deletion_date || pending} onClick={() => makeCurrent(v.id)} title="Move the AWSCURRENT label to this version">
+              Make current
+            </Button>
+          )}
+          <Button variant="outline" size="sm" disabled={!!secret.deletion_date || viewVersion === v.id} onClick={() => onView(v.id)}>
+            Retrieve
+          </Button>
+        </>
+      ),
+    },
+  ]
   return (
-    <Section
-      title={`Versions (${secret.versions.length})`}
+    <DataTable
+      title="Versions"
       description="Staging labels mark the current (AWSCURRENT), previous (AWSPREVIOUS) and rotating (AWSPENDING) versions. Up to 100 versions are kept; the oldest unlabelled ones are removed first."
-      flush
-    >
-      <div className="overflow-x-auto">
-        <table className="w-full text-sm">
-          <thead>
-            <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-              <th className="px-4 py-2 font-semibold">Version ID</th>
-              <th className="hidden px-3 py-2 font-semibold sm:table-cell">Staging labels</th>
-              {customKeys && <th className="hidden px-3 py-2 font-semibold lg:table-cell">Encryption key</th>}
-              <th className="hidden px-3 py-2 font-semibold sm:table-cell">Created</th>
-              <th className="hidden px-3 py-2 font-semibold md:table-cell">Last retrieved</th>
-              <th className="px-4 py-2" />
-            </tr>
-          </thead>
-          <tbody>
-            {secret.versions.map((v) => (
-              <tr key={v.id} className="border-b last:border-0">
-                <td className="max-w-[14rem] px-4 py-2 sm:max-w-none">
-                  <CopyableText value={v.id} className="break-all" />
-                  <div className="mt-1 sm:hidden">
-                    <StageBadges stages={v.stages} />
-                  </div>
-                </td>
-                <td className="hidden px-3 py-2 sm:table-cell">
-                  <StageBadges stages={v.stages} />
-                </td>
-                {customKeys && (
-                  <td className="hidden px-3 py-2 lg:table-cell">
-                    {/* A rotation's AWSPENDING placeholder has no value (and so no key) until the function stores one. */}
-                    {!v.kms_key && secret.kms_key_id ? <span className="text-muted-foreground">-</span> : <SecretKeyRef arn={v.kms_key} keys={keys.data} />}
-                  </td>
-                )}
-                <td className="hidden px-3 py-2 whitespace-nowrap sm:table-cell">{formatDate(v.created_at)}</td>
-                <td className="hidden px-3 py-2 whitespace-nowrap md:table-cell">{v.last_accessed ? <TimeAgo value={v.last_accessed} /> : <span className="text-muted-foreground">Never</span>}</td>
-                <td className="px-4 py-2 text-right whitespace-nowrap">
-                  {!v.stages.includes("AWSCURRENT") && !(v.stages.length === 1 && v.stages[0] === "AWSPENDING") && (
-                    <Button variant="ghost" size="sm" className="mr-1" disabled={!!secret.deletion_date || pending} onClick={() => makeCurrent(v.id)} title="Move the AWSCURRENT label to this version">
-                      Make current
-                    </Button>
-                  )}
-                  <Button variant="outline" size="sm" disabled={!!secret.deletion_date || viewVersion === v.id} onClick={() => onView(v.id)}>
-                    Retrieve
-                  </Button>
-                </td>
-              </tr>
-            ))}
-            {secret.versions.length === 0 && (
-              <tr>
-                <td colSpan={6} className="text-muted-foreground px-4 py-3">
-                  No versions yet.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
-    </Section>
+      data={secret.versions}
+      columns={columns}
+      rowId={(v) => v.id}
+      noSearch
+      empty={<EmptyState icon={History} title="No versions yet" description="Store a value to create the first version." />}
+    />
   )
 }
 
@@ -460,6 +462,12 @@ export function SecretDetail() {
     if (ok) refresh()
   }
 
+  const menu: ActionItem[] = [
+    secret.deletion_date
+      ? { label: "Cancel deletion", icon: <RotateCcw />, onSelect: restore, disabled: restoring }
+      : { label: "Delete secret", icon: <Trash2 />, destructive: true, onSelect: () => setDeleteOpen(true) },
+  ]
+
   const curl = `curl -H "Authorization: Bearer $TOKEN" \\\n  ${origin}/api/v1/secrets/${seg(secret.name)}/value`
 
   return (
@@ -467,11 +475,10 @@ export function SecretDetail() {
       <PageHeader
         title={<span className="break-all">{secret.name}</span>}
         breadcrumbs={crumbs}
-        className="mb-1"
         badge={
           <>
+            {secret.deletion_date ? <StatusBadge status="scheduled for deletion" label="Scheduled for deletion" tone="danger" /> : <StatusBadge status="active" />}
             {secret.managed_by && <ManagedBadge by={secret.managed_by} />}
-            {secret.deletion_date && <StatusBadge status="scheduled for deletion" label="Scheduled for deletion" tone="danger" />}
           </>
         }
         actions={
@@ -479,13 +486,10 @@ export function SecretDetail() {
             <Button variant="outline" size="sm" onClick={refresh} aria-label="Refresh">
               <RefreshCw className={cn(isValidating && "animate-spin")} />
             </Button>
-            {secret.deletion_date ? (
+            <ActionsMenu label="Secret actions" items={menu} />
+            {secret.deletion_date && (
               <Button size="sm" onClick={restore} disabled={restoring}>
                 {restoring ? <Loader2 className="animate-spin" /> : <RotateCcw />} Cancel deletion
-              </Button>
-            ) : (
-              <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)} className="text-destructive hover:text-destructive">
-                <Trash2 /> Delete
               </Button>
             )}
           </>
@@ -493,7 +497,7 @@ export function SecretDetail() {
       />
 
       {secret.deletion_date && (
-        <Alert variant="destructive" className="border-destructive/40 bg-destructive/5">
+        <Alert variant="destructive">
           <AlertTriangle />
           <AlertTitle>This secret is scheduled for deletion on {formatDate(secret.deletion_date)}</AlertTitle>
           <AlertDescription>

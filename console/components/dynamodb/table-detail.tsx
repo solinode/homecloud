@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, Loader2, Plus, ShieldCheck, ShieldOff, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, Database, HardDrive, ListTree, Loader2, Plus, RefreshCw, Search, Settings2, ShieldCheck, ShieldOff, Trash2, Waves } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -12,8 +12,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
@@ -21,6 +23,7 @@ import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TagList, TagsEditor, rowsToTags, tagsToRows, type TagRow } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -28,16 +31,15 @@ import { ApiError, api, errorMessage, seg } from "@/lib/api"
 import { formatBytes, formatDate, formatNumber } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { DynamoTable, StreamViewType, TableIndex, UpdateTableInput } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import {
   DELETION_PROTECTED_MESSAGE,
+  KeyAttr,
   KeySchema,
   STREAM_VIEW_TYPES,
   StreamViewTypeSelect,
   TABLES_PATH,
   allIndexes,
   indexes,
-  keyLabel,
   localIndexes,
   projectionLabel,
   streamViewLabel,
@@ -104,11 +106,19 @@ export function TableDetail() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating}>
-              {isValidating && <Loader2 className="animate-spin" />}
+              {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setDeleting(true)}>
-              <Trash2 /> Delete
+            <ActionsMenu
+              items={[
+                { label: "Manage indexes", icon: <ListTree />, onSelect: () => setParam("tab", "indexes") },
+                { label: "Edit settings", icon: <Settings2 />, onSelect: () => setParam("tab", "settings") },
+                { separator: true },
+                { label: "Delete table", icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(true) },
+              ]}
+            />
+            <Button size="sm" onClick={() => setParam("tab", null)} disabled={tab === "items"}>
+              <Search /> Explore items
             </Button>
           </>
         }
@@ -154,12 +164,29 @@ function OverviewTab({ table }: { table: DynamoTable }) {
   const all = allIndexes(table)
   return (
     <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-4">
+        <StatTile label="Items" value={formatNumber(table.item_count)} icon={<Database />} caption="Approximate item count" />
+        <StatTile label="Table size" value={formatBytes(table.size_bytes)} icon={<HardDrive />} caption="Stored item bytes" />
+        <StatTile
+          label="Secondary indexes"
+          value={all.length}
+          icon={<ListTree />}
+          caption={`${indexes(table).length} global · ${localIndexes(table).length} local`}
+        />
+        <StatTile
+          label="Stream"
+          value={table.stream_arn ? "On" : "Off"}
+          tone={table.stream_arn ? "success" : "neutral"}
+          icon={<Waves />}
+          caption={table.stream_arn ? streamViewLabel(table.stream_view_type) : "Item changes are not recorded"}
+        />
+      </div>
       <Section title="General information">
         <KeyValueGrid
           columns={3}
           items={[
-            { label: "Partition key", value: keyLabel(table.partition_key) },
-            { label: "Sort key", value: table.sort_key ? keyLabel(table.sort_key) : "" },
+            { label: "Partition key", value: <KeyAttr k={table.partition_key} /> },
+            { label: "Sort key", value: table.sort_key ? <KeyAttr k={table.sort_key} /> : "" },
             { label: "Table status", value: <StatusBadge status={table.status} /> },
             { label: "Item count", value: formatNumber(table.item_count) },
             { label: "Table size", value: formatBytes(table.size_bytes) },
@@ -181,7 +208,7 @@ function OverviewTab({ table }: { table: DynamoTable }) {
               label: "Deletion protection",
               value: table.deletion_protection ? (
                 <span className="inline-flex items-center gap-1">
-                  <ShieldCheck className="size-3.5 text-emerald-600 dark:text-emerald-400" /> On
+                  <ShieldCheck className="text-success size-3.5" /> On
                 </span>
               ) : (
                 "Off"
@@ -207,41 +234,42 @@ function IndexesTab({ table }: { table: DynamoTable }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <Section
-        title={`Global secondary indexes (${gsis.length})`}
+      <DataTable
+        title="Global secondary indexes"
         description="Query items by attributes other than the primary key. A new index is backfilled from existing items when it is created."
+        data={gsis}
+        columns={indexColumns(setRemoving)}
+        rowId={(g) => g.name}
+        noSearch
+        defaultSort={{ id: "name" }}
         actions={
           <Button size="sm" onClick={() => setCreating(true)}>
             <Plus /> Create index
           </Button>
         }
-        flush
-      >
-        {gsis.length ? (
-          <IndexTable indexes={gsis} onDelete={setRemoving} />
-        ) : (
+        empty={
           <EmptyState
+            icon={ListTree}
             title="No secondary indexes"
             description="Create an index to query items by another attribute, for example orders by status."
             action={
-              <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
+              <Button size="sm" onClick={() => setCreating(true)}>
                 <Plus /> Create index
               </Button>
             }
           />
-        )}
-      </Section>
-      <Section
-        title={`Local secondary indexes (${lsis.length})`}
+        }
+      />
+      <DataTable
+        title="Local secondary indexes"
         description="Alternate sort keys within a partition. Local indexes are defined when the table is created and cannot be added or removed later."
-        flush
-      >
-        {lsis.length ? (
-          <IndexTable indexes={lsis} />
-        ) : (
-          <p className="text-muted-foreground px-4 py-6 text-center text-sm">This table has no local secondary indexes.</p>
-        )}
-      </Section>
+        data={lsis}
+        columns={indexColumns()}
+        rowId={(g) => g.name}
+        noSearch
+        defaultSort={{ id: "name" }}
+        empty={<EmptyState icon={ListTree} title="No local secondary indexes" description="Local indexes can only be defined when a table is created." />}
+      />
       <CreateIndexDialog table={table} open={creating} onOpenChange={setCreating} />
       <ConfirmDialog
         open={!!removing}
@@ -260,47 +288,40 @@ function IndexesTab({ table }: { table: DynamoTable }) {
   )
 }
 
-/** IndexTable lists secondary indexes; onDelete adds a delete action per row. */
-function IndexTable({ indexes, onDelete }: { indexes: TableIndex[]; onDelete?: (ix: TableIndex) => void }) {
-  const th = "text-muted-foreground px-3 py-2 text-left text-xs font-semibold whitespace-nowrap"
-  return (
-    <div className="overflow-x-auto">
-      <table className="w-full text-sm">
-        <thead>
-          <tr className="bg-muted/40 border-b">
-            <th className={cn(th, "px-4")}>Name</th>
-            <th className={th}>Status</th>
-            <th className={th}>Partition key</th>
-            <th className={th}>Sort key</th>
-            <th className={th}>Projected attributes</th>
-            {onDelete && <th className="px-4 py-2" />}
-          </tr>
-        </thead>
-        <tbody>
-          {indexes.map((g) => (
-            <tr key={g.name} className="border-b last:border-0">
-              <td className="px-4 py-2 font-medium whitespace-nowrap">{g.name}</td>
-              <td className="px-3 py-2">
-                <StatusBadge status={g.status || "ACTIVE"} />
-              </td>
-              <td className="px-3 py-2 whitespace-nowrap">{keyLabel(g.partition_key)}</td>
-              <td className="px-3 py-2 whitespace-nowrap">{g.sort_key ? keyLabel(g.sort_key) : <span className="text-muted-foreground">-</span>}</td>
-              <td className="max-w-64 truncate px-3 py-2" title={projectionLabel(g.projection)}>
-                {projectionLabel(g.projection)}
-              </td>
-              {onDelete && (
-                <td className="px-4 py-2 text-right">
-                  <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => onDelete(g)}>
-                    <Trash2 /> Delete
-                  </Button>
-                </td>
-              )}
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  )
+/** indexColumns lists secondary index columns; onDelete adds a delete action per row. */
+function indexColumns(onDelete?: (ix: TableIndex) => void): Column<TableIndex>[] {
+  const cols: Column<TableIndex>[] = [
+    { id: "name", header: "Name", cell: (g) => <CellText mono className="font-medium">{g.name}</CellText>, value: (g) => g.name },
+    { id: "status", header: "Status", cell: (g) => <StatusBadge status={g.status || "ACTIVE"} />, value: (g) => g.status || "ACTIVE" },
+    { id: "pk", header: "Partition key", cell: (g) => <KeyAttr k={g.partition_key} />, value: (g) => g.partition_key.name },
+    {
+      id: "sk",
+      header: "Sort key",
+      cell: (g) => (g.sort_key ? <KeyAttr k={g.sort_key} /> : <span className="text-muted-foreground">-</span>),
+      value: (g) => g.sort_key?.name ?? "",
+      hideBelow: "sm",
+    },
+    {
+      id: "projection",
+      header: "Projected attributes",
+      cell: (g) => <CellText max="16rem">{projectionLabel(g.projection)}</CellText>,
+      value: (g) => projectionLabel(g.projection),
+      hideBelow: "md",
+    },
+  ]
+  if (onDelete)
+    cols.push({
+      id: "actions",
+      header: <span className="sr-only">Actions</span>,
+      sortable: false,
+      className: "w-px text-right",
+      cell: (g) => (
+        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => onDelete(g)}>
+          <Trash2 /> Delete
+        </Button>
+      ),
+    })
+  return cols
 }
 
 function CreateIndexDialog({ table, open, onOpenChange }: { table: DynamoTable; open: boolean; onOpenChange: (o: boolean) => void }) {
@@ -545,32 +566,31 @@ function StreamSection({ table }: { table: DynamoTable }) {
           />
         )}
         {history.length > 1 && (
-          <div className="overflow-x-auto rounded-md border">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b">
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Stream label</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">View type</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Created</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Disabled</th>
-                </tr>
-              </thead>
-              <tbody>
-                {history.map((s) => (
-                  <tr key={s.label} className="border-b last:border-0">
-                    <td className="px-3 py-1.5 font-mono text-[13px] whitespace-nowrap">{s.label}</td>
-                    <td className="px-3 py-1.5 whitespace-nowrap">{streamViewLabel(s.view_type)}</td>
-                    <td className="px-3 py-1.5 whitespace-nowrap">
-                      <TimeAgo value={s.created} />
-                    </td>
-                    <td className="px-3 py-1.5 whitespace-nowrap">
-                      {s.disabled ? <TimeAgo value={s.disabled} /> : <span className="text-muted-foreground">Active</span>}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <DataTable
+            title="Stream history"
+            data={history}
+            rowId={(s) => s.label}
+            noSearch
+            className="shadow-none"
+            columns={[
+              { id: "label", header: "Stream label", cell: (s) => <CellText mono>{s.label}</CellText>, value: (s) => s.label },
+              { id: "view", header: "View type", cell: (s) => <CellText>{streamViewLabel(s.view_type)}</CellText>, value: (s) => s.view_type, hideBelow: "sm" },
+              { id: "created", header: "Created", cell: (s) => <TimeAgo value={s.created} />, value: (s) => s.created },
+              {
+                id: "disabled",
+                header: "State",
+                cell: (s) =>
+                  s.disabled ? (
+                    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+                      <StatusBadge status="disabled" /> <TimeAgo value={s.disabled} className="text-muted-foreground" />
+                    </span>
+                  ) : (
+                    <StatusBadge status="active" />
+                  ),
+                value: (s) => s.disabled ?? "",
+              },
+            ]}
+          />
         )}
       </form>
     </Section>
@@ -602,7 +622,7 @@ function DeletionProtectionSection({ table }: { table: DynamoTable }) {
       <div className="flex items-center gap-2">
         <Switch id="del-protect" checked={on} onCheckedChange={toggle} disabled={pending} />
         <Label htmlFor="del-protect" className="inline-flex items-center gap-1.5">
-          {on ? <ShieldCheck className="size-4 text-emerald-600 dark:text-emerald-400" /> : <ShieldOff className="text-muted-foreground size-4" />}
+          {on ? <ShieldCheck className="text-success size-4" /> : <ShieldOff className="text-muted-foreground size-4" />}
           {on ? "On" : "Off"}
         </Label>
         {pending && <Loader2 className="text-muted-foreground size-4 animate-spin" />}

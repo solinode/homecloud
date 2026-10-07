@@ -2,10 +2,14 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { ExternalLink } from "lucide-react"
+import { AlertTriangle, ExternalLink, Info } from "lucide-react"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CopyButton, CopyableText } from "@/components/console/copy-button"
+import { CodeBlock } from "@/components/console/code-block"
+import { CopyableText } from "@/components/console/copy-button"
+import { CellLink } from "@/components/console/data-table"
+import { Tag } from "@/components/console/tag"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { Section } from "@/components/console/section"
 import { useApi } from "@/lib/hooks"
@@ -16,11 +20,7 @@ import { useClients } from "./clients-tab"
 function Snippet({ title, code, note }: { title: string; code: string; note?: React.ReactNode }) {
   return (
     <div className="flex flex-col gap-1.5">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-sm font-medium">{title}</span>
-        <CopyButton value={code} label={`Copy: ${title}`} />
-      </div>
-      <pre className="bg-muted/50 overflow-x-auto rounded-md border p-3 font-mono text-[12px] leading-relaxed">{code}</pre>
+      <CodeBlock title={title} code={code} copyLabel={`Copy: ${title}`} wrap />
       {note && <p className="text-muted-foreground text-xs">{note}</p>}
     </div>
   )
@@ -120,9 +120,17 @@ export function IntegrationTab({ pool }: { pool: UserPool }) {
       >
         <div className="flex flex-col gap-4">
           {clients.data && clients.data.length === 0 && (
-            <p className="text-sm text-amber-700 dark:text-amber-400">Create an app client on the App clients tab; the examples use its ID.</p>
+            <Alert variant="warning">
+              <AlertTriangle />
+              <AlertDescription>Create an app client on the App clients tab; the examples use its ID.</AlertDescription>
+            </Alert>
           )}
-          {!pool.self_sign_up && <p className="text-muted-foreground text-sm">Self sign-up is disabled for this pool, so the sign-up call returns NotAuthorizedException.</p>}
+          {!pool.self_sign_up && (
+            <Alert variant="info">
+              <Info />
+              <AlertDescription>Self sign-up is disabled for this pool, so the sign-up call returns NotAuthorizedException.</AlertDescription>
+            </Alert>
+          )}
           <Snippet
             title="1. Sign up"
             code={signUp}
@@ -160,18 +168,16 @@ export function IntegrationTab({ pool }: { pool: UserPool }) {
           </ol>
           <Snippet title="Call a protected route" code={callApi} />
           <div>
-            <span className="text-muted-foreground text-xs font-medium">APIs using this pool</span>
+            <span className="hc-eyebrow">APIs using this pool</span>
             {protectedApis.length ? (
-              <ul className="mt-1 flex flex-col gap-1">
+              <ul className="mt-2 flex flex-col gap-1.5">
                 {protectedApis.map((a) => (
-                  <li key={a.id}>
-                    <Link href={`/apigateway/api/?id=${encodeURIComponent(a.id)}`} className="text-primary hover:underline">
+                  <li key={a.id} className="flex min-w-0 flex-wrap items-center gap-2">
+                    <CellLink href={`/apigateway/api/?id=${encodeURIComponent(a.id)}`} max="16rem">
                       {a.name}
-                    </Link>{" "}
-                    <span className="text-muted-foreground text-xs">
-                      {(a.routes ?? []).filter((r) => r.authorization === "JWT").length} JWT route(s)
-                      {a.authorizer?.audience ? `, audience ${a.authorizer.audience}` : ""}
-                    </span>
+                    </CellLink>
+                    <Tag>{(a.routes ?? []).filter((r) => r.authorization === "JWT").length} JWT route(s)</Tag>
+                    {a.authorizer?.audience && <span className="text-muted-foreground min-w-0 truncate font-mono text-xs">aud {a.authorizer.audience}</span>}
                   </li>
                 ))}
               </ul>

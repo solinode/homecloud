@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
 import { Plus, ShieldCheck, Trash2, Users } from "lucide-react"
@@ -8,9 +7,10 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -25,7 +25,7 @@ import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks
 import type { IamGroup, IamUser, PolicySummary } from "@/lib/types"
 
 import { AttachPoliciesDialog, PickDialog, runEach } from "./dialogs"
-import { IAM, LINK, PolicyTypeBadge, policyHref, userHref } from "./common"
+import { IAM, PolicyTypeBadge, policyHref, userHref } from "./common"
 import { InlinePoliciesSection } from "./inline-policies-section"
 
 export function GroupDetail() {
@@ -85,11 +85,7 @@ export function GroupDetail() {
       id: "name",
       header: "User name",
       value: (u) => u.name,
-      cell: (u) => (
-        <Link href={userHref(u.name)} className={LINK}>
-          {u.name}
-        </Link>
-      ),
+      cell: (u) => <CellLink href={userHref(u.name)}>{u.name}</CellLink>,
     },
     {
       id: "console",
@@ -112,14 +108,10 @@ export function GroupDetail() {
       id: "name",
       header: "Policy name",
       value: (p) => p.name,
-      cell: (p) => (
-        <Link href={policyHref(p.name)} className={LINK}>
-          {p.name}
-        </Link>
-      ),
+      cell: (p) => <CellLink href={policyHref(p.name)}>{p.name}</CellLink>,
     },
     { id: "type", header: "Type", value: (p) => (p.managed ? "AWS managed" : "Customer managed"), cell: (p) => <PolicyTypeBadge managed={p.managed} /> },
-    { id: "desc", header: "Description", value: (p) => p.description, cell: (p) => <span className="text-muted-foreground">{p.description || "-"}</span>, hideBelow: "md" },
+    { id: "desc", header: "Description", value: (p) => p.description, cell: (p) => <CellText muted>{p.description}</CellText>, hideBelow: "md" },
   ]
 
   return (
@@ -128,9 +120,18 @@ export function GroupDetail() {
         title={group.name}
         breadcrumbs={crumbs}
         actions={
-          <Button variant="outline" size="sm" onClick={() => setConfirmDelete(true)}>
-            <Trash2 /> Delete
-          </Button>
+          <>
+            <ActionsMenu
+              items={[
+                { label: "Attach policies", icon: <ShieldCheck />, onSelect: () => setAttach(true) },
+                { separator: true },
+                { label: "Delete group", icon: <Trash2 />, destructive: true, onSelect: () => setConfirmDelete(true) },
+              ]}
+            />
+            <Button size="sm" onClick={() => setAddUsers(true)}>
+              <Plus /> Add users
+            </Button>
+          </>
         }
       />
       <Section title="Summary">

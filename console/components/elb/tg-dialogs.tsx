@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, Loader2 } from "lucide-react"
+import { AlertCircle, Loader2, Server } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -11,10 +11,13 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
+import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { api, errorMessage, seg } from "@/lib/api"
 import { pluralize } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
@@ -167,8 +170,8 @@ export function CreateTargetGroupDialog({ open, onOpenChange }: { open: boolean;
               </Select>
             </Field>
           </div>
-          <div className="flex flex-col gap-2 rounded-md border p-3">
-            <span className="text-sm font-medium">Health checks</span>
+          <div className="bg-muted/30 flex flex-col gap-3 rounded-lg border p-3">
+            <span className="hc-eyebrow">Health checks</span>
             <HealthCheckFields form={hc} onChange={setHc} errors={{ path: err("path"), interval: err("interval"), healthy: err("healthy"), unhealthy: err("unhealthy") }} idPrefix="tg-hc" />
           </div>
           <DialogFooter>
@@ -298,18 +301,24 @@ export function RegisterTargetsDialog({ tg, onClose }: { tg: TargetGroup | null;
               <AlertDescription>{errorMessage(instances.error)}</AlertDescription>
             </Alert>
           ) : !instances.data ? (
-            <div className="bg-muted/50 h-32 animate-pulse rounded-md border" />
+            <Skeleton className="h-32 w-full rounded-lg" />
           ) : running.length === 0 ? (
-            <p className="text-muted-foreground rounded-md border border-dashed p-6 text-center text-sm">
-              No running instances in this VPC.{" "}
-              <Link href="/ec2/launch/" className="text-primary hover:underline">
-                Launch an instance
-              </Link>
-              .
-            </p>
+            <div className="rounded-lg border border-dashed">
+              <EmptyState
+                icon={Server}
+                title="No running instances in this VPC"
+                description="Targets must be running instances in the target group's VPC."
+                action={
+                  <Button type="button" size="sm" variant="outline" asChild>
+                    <Link href="/ec2/launch/">Launch an instance</Link>
+                  </Button>
+                }
+                className="py-8"
+              />
+            </div>
           ) : (
-            <div className="max-h-72 divide-y overflow-y-auto rounded-md border">
-              <label className="bg-muted/40 flex items-center gap-3 px-3 py-2 text-xs font-semibold">
+            <div className="max-h-72 divide-y overflow-y-auto rounded-lg border">
+              <label className="bg-muted/40 flex items-center gap-3 px-3 py-2 text-xs font-medium">
                 <Checkbox
                   checked={selected.length === running.length ? true : selected.length ? "indeterminate" : false}
                   onCheckedChange={(v) => setSelected(v ? running.map((i) => i.id) : [])}
@@ -320,13 +329,13 @@ export function RegisterTargetsDialog({ tg, onClose }: { tg: TargetGroup | null;
               {running.map((i) => {
                 const checked = selected.includes(i.id)
                 return (
-                  <label key={i.id} className={cn("flex cursor-pointer items-center gap-3 px-3 py-2", checked && "bg-primary/5 dark:bg-primary/10")}>
+                  <label key={i.id} className={cn("flex cursor-pointer items-center gap-3 px-3 py-2", checked ? "bg-brand-soft" : "hover:bg-muted/50")}>
                     <Checkbox checked={checked} onCheckedChange={(v) => setSelected(v ? [...selected, i.id] : selected.filter((x) => x !== i.id))} />
                     <span className="flex min-w-0 flex-1 flex-wrap items-center gap-x-3 gap-y-0.5">
-                      <span className="text-sm font-medium">{i.name || i.id}</span>
+                      <span className="max-w-[14rem] truncate text-sm font-medium whitespace-nowrap" title={i.name || i.id}>{i.name || i.id}</span>
                       <span className="text-muted-foreground font-mono text-xs">{i.id}</span>
                       <span className="text-muted-foreground font-mono text-xs">{i.private_ip}</span>
-                      <span className="text-muted-foreground font-mono text-xs">{i.instance_type}</span>
+                      <Tag>{i.instance_type}</Tag>
                     </span>
                     {registered(i.id) && <StatusBadge status="registered" tone="info" label="Registered" />}
                   </label>

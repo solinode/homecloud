@@ -1,12 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, RefreshCw, Search, X } from "lucide-react"
+import Link from "next/link"
+import { ArrowDown, ArrowUp, ChevronLeft, ChevronRight, ChevronsUpDown, RefreshCw, Rows2, Rows3, Search, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { TableSkeleton } from "@/components/console/loading"
 import { cn } from "@/lib/utils"
@@ -163,25 +165,34 @@ export function DataTable<T>({
 
   const total = count ?? rows.length
   const showHeader = title || actions || onRefresh
+  const [density, toggleDensity] = useDensity()
+  const compact = density === "compact"
+  const colSpan = columns.length + (selection !== "none" ? 1 : 0)
+  // Long pages scroll inside the card so the column header can stay pinned.
+  const pinned = visible.length > 15
+  const first = sorted.length ? page * pageSize + 1 : 0
+  const last = Math.min(sorted.length, (page + 1) * pageSize)
 
   return (
-    <div className={cn("bg-card text-card-foreground rounded-lg border shadow-xs", className)}>
+    <div className={cn("bg-card text-card-foreground overflow-hidden rounded-xl border shadow-xs", className)}>
       {showHeader && (
-        <div className="flex flex-col gap-3 px-4 pt-4 sm:flex-row sm:items-start sm:justify-between">
+        <div className="flex flex-col gap-3 px-5 pt-4 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             {title && (
-              <h2 className="text-base font-semibold">
-                {title}{" "}
-                {data && <span className="text-muted-foreground font-normal">({total})</span>}
+              <h2 className="flex items-center gap-2 text-[15px] font-semibold tracking-[-0.015em]">
+                {title}
+                {data && (
+                  <span className="bg-muted text-muted-foreground rounded-full border px-1.5 py-px font-mono text-[11px] font-medium tabular-nums">{total}</span>
+                )}
               </h2>
             )}
-            {description && <p className="text-muted-foreground mt-0.5 text-sm">{description}</p>}
+            {description && <p className="text-muted-foreground mt-0.5 text-[13px]">{description}</p>}
           </div>
           <div className="flex shrink-0 flex-wrap items-center gap-2">
             {onRefresh && (
               <Tooltip>
                 <TooltipTrigger asChild>
-                  <Button variant="outline" size="icon" className="size-8" onClick={onRefresh} aria-label="Refresh">
+                  <Button variant="outline" size="icon-sm" onClick={onRefresh} aria-label="Refresh">
                     <RefreshCw className={cn(refreshing && "animate-spin")} />
                   </Button>
                 </TooltipTrigger>
@@ -193,10 +204,10 @@ export function DataTable<T>({
         </div>
       )}
       {(!noSearch || filters) && (
-        <div className="flex flex-col gap-2 px-4 pt-3 pb-3 md:flex-row md:items-center">
+        <div className="flex flex-col gap-2 px-5 pt-3 pb-3 md:flex-row md:items-center">
           {!noSearch && (
             <div className="relative w-full md:max-w-sm">
-              <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
+              <Search className="text-faint pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
               <Input
                 value={query}
                 onChange={(e) => {
@@ -219,26 +230,28 @@ export function DataTable<T>({
             </div>
           )}
           {filters && <div className="flex flex-wrap items-center gap-2">{filters}</div>}
-          <div className="text-muted-foreground flex items-center gap-1 text-sm md:ml-auto">
-            {pages > 1 && (
-              <>
-                <Button variant="ghost" size="icon" className="size-7" disabled={page === 0} onClick={() => setPage(page - 1)} aria-label="Previous page">
-                  <ChevronLeft />
+          {rows.length > 0 && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon-sm"
+                  className="hidden md:ml-auto md:inline-flex"
+                  onClick={toggleDensity}
+                  aria-label={compact ? "Comfortable rows" : "Compact rows"}
+                  aria-pressed={compact}
+                >
+                  {compact ? <Rows3 /> : <Rows2 />}
                 </Button>
-                <span className="tabular-nums">
-                  {page + 1} / {pages}
-                </span>
-                <Button variant="ghost" size="icon" className="size-7" disabled={page >= pages - 1} onClick={() => setPage(page + 1)} aria-label="Next page">
-                  <ChevronRight />
-                </Button>
-              </>
-            )}
-          </div>
+              </TooltipTrigger>
+              <TooltipContent>{compact ? "Comfortable rows" : "Compact rows"}</TooltipContent>
+            </Tooltip>
+          )}
         </div>
       )}
       {!showHeader && noSearch && !filters && <div className="h-1" />}
       {error ? (
-        <div className="px-4 pb-4">
+        <div className="px-5 pb-5">
           <ErrorState error={error} onRetry={onRetry ?? onRefresh} />
         </div>
       ) : loading && !data ? (
@@ -246,119 +259,153 @@ export function DataTable<T>({
           <TableSkeleton cols={Math.min(columns.length, 5)} />
         </div>
       ) : rows.length === 0 ? (
-        <div className="border-t">{empty ?? <p className="text-muted-foreground p-8 text-center text-sm">No resources</p>}</div>
+        <div className="border-t">{empty ?? <EmptyState title="No resources yet" className="py-10" />}</div>
       ) : (
-        <div className="relative w-full overflow-x-auto border-t">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 border-b">
-                {selection !== "none" && (
-                  <th className="w-10 px-4 py-2 text-left">
-                    {selection === "multi" && (
-                      <Checkbox
-                        aria-label="Select all"
-                        checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
-                        onCheckedChange={(v) =>
-                          setSelected(v ? Array.from(new Set([...selected, ...visibleIds])) : selected.filter((id) => !visibleIds.includes(id)))
-                        }
-                      />
-                    )}
-                  </th>
-                )}
-                {columns.map((c) => {
-                  const sortable = c.sortable ?? !!c.value
-                  const active = sort?.id === c.id
-                  return (
-                    <th
-                      key={c.id}
-                      className={cn(
-                        "text-muted-foreground px-3 py-2 text-left text-xs font-semibold tracking-wide whitespace-nowrap first:pl-4 last:pr-4",
-                        c.hideBelow && HIDE[c.hideBelow],
-                        c.headerClassName,
-                      )}
-                    >
-                      {sortable ? (
-                        <button type="button" onClick={() => onSort(c)} className="hover:text-foreground inline-flex items-center gap-1">
-                          {c.header}
-                          {active ? (
-                            sort?.desc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />
-                          ) : (
-                            <ChevronsUpDown className="size-3 opacity-40" />
-                          )}
-                        </button>
-                      ) : (
-                        c.header
+        <>
+          <div className={cn("relative w-full overflow-x-auto border-t", pinned && "max-h-[min(70vh,880px)] overflow-y-auto")}>
+            <table className="w-full text-sm">
+              <thead className={cn(pinned && "sticky top-0 z-10")}>
+                <tr className="bg-muted/80 shadow-[inset_0_-1px_0_var(--border)] backdrop-blur supports-[backdrop-filter]:bg-muted/70">
+                  {selection !== "none" && (
+                    <th className="w-10 py-2.5 pr-2 pl-5 text-left">
+                      {selection === "multi" && (
+                        <Checkbox
+                          aria-label="Select all"
+                          checked={allVisibleSelected ? true : someVisibleSelected ? "indeterminate" : false}
+                          onCheckedChange={(v) =>
+                            setSelected(v ? Array.from(new Set([...selected, ...visibleIds])) : selected.filter((id) => !visibleIds.includes(id)))
+                          }
+                        />
                       )}
                     </th>
+                  )}
+                  {columns.map((c) => {
+                    const sortable = c.sortable ?? !!c.value
+                    const active = sort?.id === c.id
+                    return (
+                      <th
+                        key={c.id}
+                        aria-sort={active ? (sort?.desc ? "descending" : "ascending") : undefined}
+                        className={cn(
+                          "text-faint h-9 px-3 text-left font-mono text-[11px] font-medium tracking-[0.06em] whitespace-nowrap uppercase first:pl-5 last:pr-5",
+                          c.hideBelow && HIDE[c.hideBelow],
+                          c.headerClassName,
+                        )}
+                      >
+                        {sortable ? (
+                          <button
+                            type="button"
+                            onClick={() => onSort(c)}
+                            className={cn("hover:text-foreground group/sort inline-flex items-center gap-1 uppercase", active && "text-foreground")}
+                          >
+                            {c.header}
+                            {active ? (
+                              sort?.desc ? <ArrowDown className="size-3" /> : <ArrowUp className="size-3" />
+                            ) : (
+                              <ChevronsUpDown className="size-3 opacity-0 transition-opacity group-hover/sort:opacity-60" />
+                            )}
+                          </button>
+                        ) : (
+                          c.header
+                        )}
+                      </th>
+                    )
+                  })}
+                </tr>
+              </thead>
+              <tbody>
+                {visible.length === 0 && (
+                  <tr>
+                    <td colSpan={colSpan} className="text-muted-foreground p-10 text-center">
+                      No matches for “{query}”
+                      <button type="button" onClick={() => setQuery("")} className="text-foreground ml-2 underline underline-offset-2">
+                        Clear filter
+                      </button>
+                    </td>
+                  </tr>
+                )}
+                {visible.map((r) => {
+                  const id = rowId(r)
+                  const isSel = selected.includes(id)
+                  const ex = expanded?.(r)
+                  return (
+                    <RowFragment key={id}>
+                      <tr
+                        data-state={isSel ? "selected" : undefined}
+                        onClick={() => {
+                          if (onRowClick) onRowClick(r)
+                          else if (selection !== "none") toggle(id)
+                        }}
+                        className={cn(
+                          "border-b transition-colors last:border-0",
+                          (selection !== "none" || onRowClick) && "cursor-pointer",
+                          isSel ? "bg-brand-soft" : "hover:bg-muted/60",
+                          rowClassName?.(r),
+                        )}
+                      >
+                        {selection !== "none" && (
+                          <td className={cn("relative w-10 pr-2 pl-5", compact ? "py-1.5" : "py-2.5")} onClick={(e) => e.stopPropagation()}>
+                            {isSel && <span className="bg-brand absolute inset-y-0 left-0 w-0.5" aria-hidden />}
+                            {selection === "multi" ? (
+                              <Checkbox aria-label={`Select ${id}`} checked={isSel} onCheckedChange={() => toggle(id)} />
+                            ) : (
+                              <input
+                                type="radio"
+                                aria-label={`Select ${id}`}
+                                className="accent-primary size-4 cursor-pointer align-middle"
+                                checked={isSel}
+                                onChange={() => toggle(id)}
+                                onClick={() => isSel && setSelected([])}
+                              />
+                            )}
+                          </td>
+                        )}
+                        {columns.map((c) => (
+                          <td
+                            key={c.id}
+                            className={cn(
+                              "px-3 align-middle first:pl-5 last:pr-5 [&_a.font-mono]:whitespace-nowrap",
+                              compact ? "py-1.5 text-[13px]" : "py-2.5",
+                              c.hideBelow && HIDE[c.hideBelow],
+                              c.className,
+                            )}
+                          >
+                            {c.cell(r)}
+                          </td>
+                        ))}
+                      </tr>
+                      {ex && (
+                        <tr className="bg-muted/40 border-b">
+                          <td colSpan={colSpan} className="px-5 py-3">
+                            {ex}
+                          </td>
+                        </tr>
+                      )}
+                    </RowFragment>
                   )
                 })}
-              </tr>
-            </thead>
-            <tbody>
-              {visible.length === 0 && (
-                <tr>
-                  <td colSpan={columns.length + (selection !== "none" ? 1 : 0)} className="text-muted-foreground p-8 text-center">
-                    No matches for “{query}”
-                  </td>
-                </tr>
-              )}
-              {visible.map((r) => {
-                const id = rowId(r)
-                const isSel = selected.includes(id)
-                const ex = expanded?.(r)
-                return (
-                  <RowFragment key={id}>
-                    <tr
-                      data-state={isSel ? "selected" : undefined}
-                      onClick={() => {
-                        if (onRowClick) onRowClick(r)
-                        else if (selection !== "none") toggle(id)
-                      }}
-                      className={cn(
-                        "border-b transition-colors last:border-0",
-                        (selection !== "none" || onRowClick) && "cursor-pointer",
-                        isSel ? "bg-primary/5 dark:bg-primary/10" : "hover:bg-muted/40",
-                        rowClassName?.(r),
-                      )}
-                    >
-                      {selection !== "none" && (
-                        <td className="w-10 px-4 py-2" onClick={(e) => e.stopPropagation()}>
-                          {selection === "multi" ? (
-                            <Checkbox aria-label={`Select ${id}`} checked={isSel} onCheckedChange={() => toggle(id)} />
-                          ) : (
-                            <input
-                              type="radio"
-                              aria-label={`Select ${id}`}
-                              className="accent-primary size-4 cursor-pointer align-middle"
-                              checked={isSel}
-                              onChange={() => toggle(id)}
-                              onClick={() => isSel && setSelected([])}
-                            />
-                          )}
-                        </td>
-                      )}
-                      {columns.map((c) => (
-                        <td
-                          key={c.id}
-                          className={cn("px-3 py-2 align-middle first:pl-4 last:pr-4 [&_a.font-mono]:whitespace-nowrap", c.hideBelow && HIDE[c.hideBelow], c.className)}
-                        >
-                          {c.cell(r)}
-                        </td>
-                      ))}
-                    </tr>
-                    {ex && (
-                      <tr className="bg-muted/30 border-b">
-                        <td colSpan={columns.length + (selection !== "none" ? 1 : 0)} className="px-4 py-3">
-                          {ex}
-                        </td>
-                      </tr>
-                    )}
-                  </RowFragment>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+              </tbody>
+            </table>
+          </div>
+          {pages > 1 && (
+            <div className="text-muted-foreground flex items-center justify-between gap-3 border-t px-5 py-2.5 text-xs">
+              <span className="tabular-nums">
+                {first}–{last} of {sorted.length}
+              </span>
+              <div className="flex items-center gap-1">
+                <Button variant="outline" size="xs" disabled={page === 0} onClick={() => setPage(page - 1)} aria-label="Previous page">
+                  <ChevronLeft /> Prev
+                </Button>
+                <span className="px-2 font-mono tabular-nums">
+                  {page + 1}/{pages}
+                </span>
+                <Button variant="outline" size="xs" disabled={page >= pages - 1} onClick={() => setPage(page + 1)} aria-label="Next page">
+                  Next <ChevronRight />
+                </Button>
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   )
@@ -368,7 +415,97 @@ function RowFragment({ children }: { children: ReactNode }) {
   return <>{children}</>
 }
 
-/** TableLink is a primary-colored link for use inside table cells. */
+const DENSITY_KEY = "hc.table.density"
+const densityListeners = new Set<(d: "comfortable" | "compact") => void>()
+
+/** useDensity is the table row density, remembered per browser and shared by every table. */
+function useDensity(): ["comfortable" | "compact", () => void] {
+  const [d, setD] = useState<"comfortable" | "compact">("comfortable")
+  useEffect(() => {
+    try {
+      if (window.localStorage.getItem(DENSITY_KEY) === "compact") setD("compact")
+    } catch {
+      // storage unavailable: default density
+    }
+    densityListeners.add(setD)
+    return () => {
+      densityListeners.delete(setD)
+    }
+  }, [])
+  const toggle = () => {
+    const next = d === "compact" ? "comfortable" : "compact"
+    try {
+      window.localStorage.setItem(DENSITY_KEY, next)
+    } catch {
+      // ignore
+    }
+    densityListeners.forEach((l) => l(next))
+  }
+  return [d, toggle]
+}
+
+/** cellLinkClass styles a resource link inside a table cell. */
 export function cellLinkClass() {
-  return "text-primary font-medium hover:underline"
+  return "text-primary font-medium underline-offset-2 hover:underline"
+}
+
+/**
+ * CellLink is the name/ID link of a table row: one line, truncated with the
+ * full value in a tooltip, mono for IDs/ARNs. Clicks don't toggle selection.
+ */
+export function CellLink({
+  href,
+  children,
+  title,
+  mono,
+  max = "22rem",
+  className,
+}: {
+  href: string
+  children: ReactNode
+  title?: string
+  mono?: boolean
+  /** max width before truncating (CSS length) */
+  max?: string
+  className?: string
+}) {
+  return (
+    <Link
+      href={href}
+      onClick={(e) => e.stopPropagation()}
+      title={title ?? (typeof children === "string" ? children : undefined)}
+      style={{ maxWidth: max }}
+      className={cn(cellLinkClass(), "block truncate whitespace-nowrap", mono && "font-mono text-[13px]", className)}
+    >
+      {children}
+    </Link>
+  )
+}
+
+/** CellText is a one-line, truncated table value with the full text as a tooltip. */
+export function CellText({
+  children,
+  title,
+  mono,
+  muted,
+  max = "22rem",
+  className,
+}: {
+  children: ReactNode
+  title?: string
+  mono?: boolean
+  muted?: boolean
+  max?: string
+  className?: string
+}) {
+  if (children === null || children === undefined || children === "") return <span className="text-muted-foreground">-</span>
+  return (
+    <span
+      title={title ?? (typeof children === "string" ? children : undefined)}
+      style={{ maxWidth: max }}
+      className={cn("block truncate whitespace-nowrap", mono && "font-mono text-[13px]", muted && "text-muted-foreground", className)}
+    >
+      {children}
+    </span>
+  )
 }

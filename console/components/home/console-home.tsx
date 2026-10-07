@@ -1,55 +1,45 @@
 "use client"
 
+import { useEffect, useState, type ReactNode } from "react"
 import Link from "next/link"
-import type { ReactNode } from "react"
+import { useSearchParams } from "next/navigation"
 import {
   ArrowRight,
-  BadgeCheck,
-  Bell,
-  Cable,
-  Container,
-  Cpu,
-  Database,
-  FolderOpen,
-  FunctionSquare,
-  Globe,
-  HardDrive,
-  KeyRound,
+  ArrowUpRight,
+  BellRing,
+  BookOpen,
+  CheckCircle2,
+  Command,
+  FileCode2,
   Layers,
-  ListOrdered,
-  Megaphone,
-  Network,
-  Package,
+  Rocket,
   Scaling,
   ScrollText,
-  ShieldCheck,
-  Split,
-  Table2,
   Terminal,
-  Upload,
-  UserPlus,
-  UsersRound,
-  Workflow,
+  type LucideIcon,
 } from "lucide-react"
 
+import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useSession } from "@/components/console/auth"
-import { KeyValueGrid } from "@/components/console/key-value"
-import { PageHeader } from "@/components/console/page-header"
-import { Section } from "@/components/console/section"
-import { StatusBadge } from "@/components/console/status-badge"
-import { TimeAgo } from "@/components/console/time-ago"
+import { CodeBlock } from "@/components/console/code-block"
+import { useCommandPalette, Kbd } from "@/components/console/command-palette"
 import { CopyableText } from "@/components/console/copy-button"
+import { PageHeader } from "@/components/console/page-header"
+import { ServiceIcon } from "@/components/console/service-icon"
+import { StatTile } from "@/components/console/stat-tile"
+import { StatusDot } from "@/components/console/status-badge"
+import { TimeAgo } from "@/components/console/time-ago"
+import { DOCS_URL, QUICK_ACTIONS, REPO_URL } from "@/lib/actions"
+import { API_BASE, DEMO } from "@/lib/api"
 import { formatDuration, pluralize } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
-import { SERVICES, servicesByCategory } from "@/lib/services"
+import { SERVICES } from "@/lib/services"
 import type {
   Alarm,
   AutoScalingGroup,
-  Certificate,
-  HostedZoneSummary,
-  UserPool,
   Bucket,
+  Certificate,
   DbInstance,
   DynamoTable,
   EcrRepository,
@@ -57,6 +47,7 @@ import type {
   EventRule,
   FileSystem,
   Health,
+  HostedZoneSummary,
   IamSummary,
   Instance,
   LambdaFunction,
@@ -66,71 +57,45 @@ import type {
   StateMachineSummary,
   Topic,
   TrailEvent,
+  UserPool,
   Vpc,
 } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-function Tile({
-  href,
-  icon: Icon,
-  color,
-  service,
-  value,
-  sub,
-  loading,
-  error,
-}: {
+const svc = (id: string) => SERVICES.find((s) => s.id === id)!
+
+interface ServiceCount {
+  key: string
+  name: string
+  icon: LucideIcon
   href: string
-  icon: typeof Cpu
-  color: string
-  service: string
-  value: ReactNode
-  sub: ReactNode
+  value: number
+  sub?: ReactNode
+  warn?: boolean
   loading: boolean
-  error?: boolean
-}) {
-  return (
-    <Link href={href} className="bg-card group flex flex-col gap-3 rounded-lg border p-4 shadow-xs transition-shadow hover:shadow-md">
-      <div className="flex items-center justify-between">
-        <span className="flex items-center gap-2 text-sm font-medium">
-          <span className={cn("flex size-7 items-center justify-center rounded-md", color)}>
-            <Icon className="size-4" />
-          </span>
-          {service}
-        </span>
-        <ArrowRight className="text-muted-foreground size-4 opacity-0 transition-opacity group-hover:opacity-100" />
-      </div>
-      {loading ? (
-        <Skeleton className="h-8 w-20" />
-      ) : error ? (
-        <span className="text-muted-foreground text-sm">Unavailable</span>
-      ) : (
-        <span className="text-3xl font-semibold tracking-tight tabular-nums">{value}</span>
-      )}
-      <span className="text-muted-foreground text-xs">{sub}</span>
-    </Link>
-  )
+  error: boolean
+  /** counted towards "resources" (IAM users and VPCs exist on a fresh install) */
+  counts?: boolean
 }
 
-const QUICK_LINKS = [
-  { href: "/ec2/launch/", label: "Launch an instance", icon: Cpu },
-  { href: "/ec2/autoscaling/create/", label: "Create an Auto Scaling group", icon: Scaling },
-  { href: "/lambda/create/", label: "Create a function", icon: FunctionSquare },
-  { href: "/rds/create/", label: "Create a database", icon: Database },
-  { href: "/sqs/create/", label: "Create a queue", icon: ListOrdered },
-  { href: "/cloudformation/create/", label: "Create a stack", icon: Layers },
-  { href: "/s3/?create=1", label: "Create a bucket", icon: Upload },
-  { href: "/iam/users/?create=1", label: "Add an IAM user", icon: UserPlus },
-  { href: "/secrets/create/", label: "Store a secret", icon: KeyRound },
-  { href: "/route53/?create=1", label: "Create a hosted zone", icon: Globe },
-  { href: "/acm/?request=1", label: "Request a certificate", icon: BadgeCheck },
-  { href: "/cognito/?create=1", label: "Create a user pool", icon: UsersRound },
-  { href: "/cloudwatch/logs/", label: "View logs", icon: Terminal },
-  { href: "/cloudwatch/alarms/?create=1", label: "Create an alarm", icon: Bell },
-]
+function endpoint(): string {
+  if (DEMO) return "http://127.0.0.1:8080"
+  if (API_BASE) return API_BASE
+  return typeof window === "undefined" ? "" : window.location.origin
+}
+
+function greeting(): string {
+  const h = new Date().getHours()
+  return h < 5 ? "Good evening" : h < 12 ? "Good morning" : h < 18 ? "Good afternoon" : "Good evening"
+}
 
 export function ConsoleHome() {
   const session = useSession()
+  const sp = useSearchParams()
+  const palette = useCommandPalette()
+  const [hello, setHello] = useState("Welcome")
+  useEffect(() => setHello(greeting()), [])
+
   const health = useApi<Health>("/api/v1/health", { refreshInterval: 30_000 })
   const instances = useApi<Instance[]>("/api/v1/ec2/instances", { refreshInterval: 15_000 })
   const buckets = useApi<Bucket[]>("/api/v1/s3/buckets")
@@ -154,11 +119,11 @@ export function ConsoleHome() {
   const certs = useApi<Certificate[]>("/api/v1/acm/certificates")
   const pools = useApi<UserPool[]>("/api/v1/cognito/user-pools")
   const asgs = useApi<AutoScalingGroup[]>("/api/v1/autoscaling/groups", { refreshInterval: 30_000 })
-  const events = useApi<TrailEvent[]>("/api/v1/cloudtrail/events", { query: { limit: 10 }, refreshInterval: 30_000 })
+  const events = useApi<TrailEvent[]>("/api/v1/cloudtrail/events", { query: { limit: 8 }, refreshInterval: 30_000 })
 
   const live = (instances.data ?? []).filter((i) => i.state !== "terminated")
   const running = live.filter((i) => i.state === "running").length
-  const inAlarm = (alarms.data ?? []).filter((a) => a.state === "ALARM").length
+  const firing = (alarms.data ?? []).filter((a) => a.state === "ALARM")
   const dbs = (databases.data ?? []).filter((d) => d.kind !== "cache")
   const caches = (databases.data ?? []).filter((d) => d.kind === "cache")
   const dbAvailable = dbs.filter((d) => d.status === "available").length
@@ -169,380 +134,446 @@ export function ConsoleHome() {
   const ecsDesired = (ecsServices.data ?? []).reduce((n, x) => n + (x.desired_count ?? 0), 0)
   const runningExecutions = (stateMachines.data ?? []).reduce((n, m) => n + (m.executions?.RUNNING ?? 0), 0)
   const stacksInProgress = (stacks.data ?? []).filter((x) => x.status.endsWith("_IN_PROGRESS")).length
+  const stacksFailed = (stacks.data ?? []).filter((x) => x.status.endsWith("_FAILED") || x.status.includes("ROLLBACK")).length
   const certsExpiring = (certs.data ?? []).filter((c) => new Date(c.not_after).getTime() - Date.now() < 30 * 86_400_000).length
   const asgInstances = (asgs.data ?? []).reduce((n, g) => n + (g.instances ?? []).length, 0)
   const cognitoUsers = (pools.data ?? []).reduce((n, p) => n + (p.users ?? 0), 0)
-  const stacksFailed = (stacks.data ?? []).filter((x) => x.status.endsWith("_FAILED") || x.status.includes("ROLLBACK")).length
+
+  const S = (id: string, value: number, q: { isLoading: boolean; error?: unknown }, sub?: ReactNode, extra: Partial<ServiceCount> = {}): ServiceCount => {
+    const s = svc(id)
+    return { key: id, name: s.name, icon: s.icon, href: s.href, value, sub, loading: q.isLoading, error: !!q.error, counts: true, ...extra }
+  }
+  const counts: ServiceCount[] = [
+    S("ec2", live.length, instances, `${running} running`),
+    S("lambda", functions.data?.length ?? 0, functions, "functions"),
+    S("s3", buckets.data?.length ?? 0, buckets, "buckets"),
+    S("rds", dbs.length, databases, `${dbAvailable} available`),
+    S("elasticache", caches.length, databases, "cache clusters"),
+    S("dynamodb", tables.data?.length ?? 0, tables, `${items.toLocaleString()} items`),
+    S("ecs", ecsServices.data?.length ?? 0, ecsServices, `${ecsRunning}/${ecsDesired} tasks running`),
+    S("ecr", repositories.data?.length ?? 0, repositories, "repositories"),
+    S("sqs", queues.data?.length ?? 0, queues, `${queuedMessages.toLocaleString()} messages`),
+    S("sns", topics.data?.length ?? 0, topics, pluralize((topics.data ?? []).reduce((n, t) => n + (t.subscriptions ?? 0), 0), "subscription")),
+    S("eventbridge", rules.data?.length ?? 0, rules, `${enabledRules} enabled`),
+    S("sfn", stateMachines.data?.length ?? 0, stateMachines, runningExecutions ? `${runningExecutions} running` : "state machines"),
+    S("cloudformation", stacks.data?.length ?? 0, stacks, stacksFailed ? `${stacksFailed} failed` : stacksInProgress ? `${stacksInProgress} in progress` : "stacks", {
+      warn: stacksFailed > 0,
+    }),
+    S("elb", loadBalancers.data?.length ?? 0, loadBalancers, "load balancers"),
+    S("efs", fileSystems.data?.length ?? 0, fileSystems, "file systems"),
+    S("route53", zones.data?.length ?? 0, zones, `${(zones.data ?? []).filter((z) => z.private).length} private`),
+    S("acm", certs.data?.length ?? 0, certs, certsExpiring ? `${certsExpiring} expiring` : "certificates", { warn: certsExpiring > 0 }),
+    S("cognito", pools.data?.length ?? 0, pools, pluralize(cognitoUsers, "user")),
+    S("secrets", secrets.data?.length ?? 0, secrets, "secrets"),
+    {
+      key: "autoscaling",
+      name: "Auto Scaling",
+      icon: Scaling,
+      href: "/ec2/autoscaling/",
+      value: asgs.data?.length ?? 0,
+      sub: pluralize(asgInstances, "instance"),
+      loading: asgs.isLoading,
+      error: !!asgs.error,
+      counts: true,
+    },
+    S("iam", iam.data?.users ?? 0, iam, iam.data ? `${iam.data.groups} groups, ${iam.data.policies} policies` : "users", { counts: false }),
+    S("vpc", vpcs.data?.length ?? 0, vpcs, "VPCs", { counts: false }),
+  ]
+
+  const loaded = counts.every((c) => !c.loading)
+  const total = counts.filter((c) => c.counts && !c.error).reduce((n, c) => n + c.value, 0)
+  const inUse = counts.filter((c) => c.value > 0 || c.loading)
+  const unused = counts.filter((c) => !c.loading && c.value === 0 && !c.error)
+  const firstRun = sp.get("welcome") === "1" || (loaded && total === 0)
+
+  const quick = QUICK_ACTIONS.filter((a) => a.featured)
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Console Home"
-        description={
+        title={
           <>
-            Welcome back, <span className="text-foreground font-medium">{session.user.name}</span>. Here is what is running in your HomeCloud.
+            {hello}, <span className="text-muted-foreground">{session.user.name}</span>
+          </>
+        }
+        description={
+          firstRun ? (
+            "Your HomeCloud is up. Point your tools at it and create your first resources."
+          ) : (
+            <>
+              {loaded ? pluralize(total, "resource") : "Counting resources"} across {inUse.filter((c) => c.counts).length} services in{" "}
+              <span className="text-foreground font-mono text-[13px]">{health.data?.region ?? "us-east-1"}</span>.
+            </>
+          )
+        }
+        actions={
+          <>
+            <Button variant="outline" size="sm" onClick={() => palette.setOpen(true)} className="hidden sm:inline-flex">
+              <Command /> Search
+              <Kbd className="ml-1">K</Kbd>
+            </Button>
+            <Button asChild size="sm">
+              <Link href="/ec2/launch/">
+                <Rocket /> Launch instance
+              </Link>
+            </Button>
           </>
         }
       />
 
-      <div className="grid grid-cols-2 gap-3 sm:gap-4 lg:grid-cols-3 xl:grid-cols-6">
-        <Tile
-          href="/ec2/"
-          icon={Cpu}
-          color="bg-orange-500/10 text-orange-600 dark:text-orange-400"
-          service="EC2"
-          value={
-            <>
-              {running}
-              <span className="text-muted-foreground text-lg font-normal"> / {live.length}</span>
-            </>
-          }
-          sub="Instances running / total"
-          loading={instances.isLoading}
-          error={!!instances.error}
-        />
-        <Tile
-          href="/lambda/"
-          icon={FunctionSquare}
-          color="bg-orange-500/10 text-orange-600 dark:text-orange-400"
-          service="Lambda"
-          value={functions.data?.length ?? 0}
-          sub="Functions"
-          loading={functions.isLoading}
-          error={!!functions.error}
-        />
-        <Tile
-          href="/s3/"
-          icon={HardDrive}
-          color="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-          service="S3"
-          value={buckets.data?.length ?? 0}
-          sub="Buckets"
-          loading={buckets.isLoading}
-          error={!!buckets.error}
-        />
-        <Tile
-          href="/rds/"
-          icon={Database}
-          color="bg-blue-500/10 text-blue-600 dark:text-blue-400"
-          service="RDS"
-          value={
-            <>
-              {dbAvailable}
-              <span className="text-muted-foreground text-lg font-normal"> / {dbs.length}</span>
-            </>
-          }
-          sub={`Databases available / total${caches.length ? `, ${caches.length} cache clusters` : ""}`}
-          loading={databases.isLoading}
-          error={!!databases.error}
-        />
-        <Tile
-          href="/dynamodb/"
-          icon={Table2}
-          color="bg-blue-500/10 text-blue-600 dark:text-blue-400"
-          service="DynamoDB"
-          value={tables.data?.length ?? 0}
-          sub={`Tables, ${items.toLocaleString()} items`}
-          loading={tables.isLoading}
-          error={!!tables.error}
-        />
-        <Tile
-          href="/sqs/"
-          icon={ListOrdered}
-          color="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
-          service="SQS"
-          value={queues.data?.length ?? 0}
-          sub={`Queues, ${queuedMessages.toLocaleString()} messages available`}
-          loading={queues.isLoading}
-          error={!!queues.error}
-        />
-        <Tile
-          href="/sns/"
-          icon={Megaphone}
-          color="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
-          service="SNS"
-          value={topics.data?.length ?? 0}
-          sub={`Topics, ${(topics.data ?? []).reduce((n, t) => n + (t.subscriptions ?? 0), 0)} subscriptions`}
-          loading={topics.isLoading}
-          error={!!topics.error}
-        />
-        <Tile
-          href="/events/"
-          icon={Cable}
-          color="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
-          service="EventBridge"
-          value={
-            <>
-              {enabledRules}
-              <span className="text-muted-foreground text-lg font-normal"> / {rules.data?.length ?? 0}</span>
-            </>
-          }
-          sub="Rules enabled / total"
-          loading={rules.isLoading}
-          error={!!rules.error}
-        />
-        <Tile
-          href="/ecs/"
-          icon={Container}
-          color="bg-orange-500/10 text-orange-600 dark:text-orange-400"
-          service="ECS"
-          value={ecsServices.data?.length ?? 0}
-          sub={`Services, ${ecsRunning} / ${ecsDesired} tasks running`}
-          loading={ecsServices.isLoading}
-          error={!!ecsServices.error}
-        />
-        <Tile
-          href="/ecr/"
-          icon={Package}
-          color="bg-orange-500/10 text-orange-600 dark:text-orange-400"
-          service="ECR"
-          value={repositories.data?.length ?? 0}
-          sub="Repositories"
-          loading={repositories.isLoading}
-          error={!!repositories.error}
-        />
-        <Tile
-          href="/elb/"
-          icon={Split}
-          color="bg-violet-500/10 text-violet-600 dark:text-violet-400"
-          service="ELB"
-          value={loadBalancers.data?.length ?? 0}
-          sub="Load balancers"
-          loading={loadBalancers.isLoading}
-          error={!!loadBalancers.error}
-        />
-        <Tile
-          href="/efs/"
-          icon={FolderOpen}
-          color="bg-emerald-500/10 text-emerald-600 dark:text-emerald-400"
-          service="EFS"
-          value={fileSystems.data?.length ?? 0}
-          sub="File systems"
-          loading={fileSystems.isLoading}
-          error={!!fileSystems.error}
-        />
-        <Tile
-          href="/sfn/"
-          icon={Workflow}
-          color="bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400"
-          service="Step Functions"
-          value={stateMachines.data?.length ?? 0}
-          sub={`State machines${runningExecutions ? `, ${runningExecutions} running` : ""}`}
-          loading={stateMachines.isLoading}
-          error={!!stateMachines.error}
-        />
-        <Tile
-          href="/cloudformation/"
-          icon={Layers}
-          color="bg-pink-500/10 text-pink-600 dark:text-pink-400"
-          service="CloudFormation"
-          value={stacks.data?.length ?? 0}
-          sub={`Stacks${stacksInProgress ? `, ${stacksInProgress} in progress` : ""}${stacksFailed ? `, ${stacksFailed} failed/rolled back` : ""}`}
-          loading={stacks.isLoading}
-          error={!!stacks.error}
-        />
-        <Tile
-          href="/iam/users/"
-          icon={ShieldCheck}
-          color="bg-red-500/10 text-red-600 dark:text-red-400"
-          service="IAM"
-          value={iam.data?.users ?? 0}
-          sub={iam.data ? `Users, ${iam.data.groups} groups, ${iam.data.policies} policies` : "Users"}
-          loading={iam.isLoading}
-          error={!!iam.error}
-        />
-        <Tile
-          href="/secrets/"
-          icon={KeyRound}
-          color="bg-red-500/10 text-red-600 dark:text-red-400"
-          service="Secrets Manager"
-          value={secrets.data?.length ?? 0}
-          sub="Secrets"
-          loading={secrets.isLoading}
-          error={!!secrets.error}
-        />
-        <Tile
-          href="/cloudwatch/alarms/"
-          icon={Bell}
-          color="bg-pink-500/10 text-pink-600 dark:text-pink-400"
-          service="CloudWatch"
-          value={<span className={cn(inAlarm > 0 && "text-red-600 dark:text-red-400")}>{inAlarm}</span>}
-          sub={`Alarms in ALARM of ${alarms.data?.length ?? 0}`}
-          loading={alarms.isLoading}
-          error={!!alarms.error}
-        />
-        <Tile
-          href="/ec2/autoscaling/"
-          icon={Scaling}
-          color="bg-orange-500/10 text-orange-600 dark:text-orange-400"
-          service="Auto Scaling"
-          value={asgs.data?.length ?? 0}
-          sub={`Groups, ${pluralize(asgInstances, "instance")}`}
-          loading={asgs.isLoading}
-          error={!!asgs.error}
-        />
-        <Tile
-          href="/route53/"
-          icon={Globe}
-          color="bg-violet-500/10 text-violet-600 dark:text-violet-400"
-          service="Route 53"
-          value={zones.data?.length ?? 0}
-          sub={`Hosted zones, ${(zones.data ?? []).filter((z) => z.private).length} private`}
-          loading={zones.isLoading}
-          error={!!zones.error}
-        />
-        <Tile
-          href="/acm/"
-          icon={BadgeCheck}
-          color="bg-red-500/10 text-red-600 dark:text-red-400"
-          service="Certificate Manager"
-          value={<span className={cn(certsExpiring > 0 && "text-amber-600 dark:text-amber-400")}>{certs.data?.length ?? 0}</span>}
-          sub={`Certificates${certsExpiring ? `, ${certsExpiring} expiring or expired` : ""}`}
-          loading={certs.isLoading}
-          error={!!certs.error}
-        />
-        <Tile
-          href="/cognito/"
-          icon={UsersRound}
-          color="bg-red-500/10 text-red-600 dark:text-red-400"
-          service="Cognito"
-          value={pools.data?.length ?? 0}
-          sub={`User pools, ${pluralize(cognitoUsers, "user")}`}
-          loading={pools.isLoading}
-          error={!!pools.error}
-        />
-        <Tile
-          href="/vpc/"
-          icon={Network}
-          color="bg-violet-500/10 text-violet-600 dark:text-violet-400"
-          service="VPC"
-          value={vpcs.data?.length ?? 0}
-          sub="VPCs"
-          loading={vpcs.isLoading}
-          error={!!vpcs.error}
-        />
-      </div>
+      {firstRun ? (
+        <GetStarted />
+      ) : (
+        <>
+          <div className="grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+            <StatTile
+              label="Instances"
+              href="/ec2/"
+              tone={running > 0 ? "success" : "neutral"}
+              value={running}
+              unit={`/ ${live.length}`}
+              caption="running / total"
+              loading={instances.isLoading}
+            />
+            <StatTile
+              label="Alarms"
+              href="/cloudwatch/alarms/"
+              tone={firing.length ? "danger" : "success"}
+              value={<span className={cn(firing.length > 0 && "text-danger")}>{firing.length}</span>}
+              unit={`/ ${alarms.data?.length ?? 0}`}
+              caption={firing.length ? "in ALARM" : "all clear"}
+              loading={alarms.isLoading}
+            />
+            <StatTile
+              label="Resources"
+              value={total}
+              caption={`across ${inUse.filter((c) => c.counts).length} services`}
+              loading={!loaded}
+            />
+            <StatTile
+              label="HomeCloud"
+              tone={health.error ? "danger" : "success"}
+              value={<span className="font-mono text-[24px] tracking-[-0.02em]">{health.data?.version ?? "-"}</span>}
+              caption={health.error ? "API unreachable" : health.data ? `up ${formatDuration(health.data.uptime_seconds)}` : " "}
+              loading={health.isLoading}
+            />
+          </div>
 
-      <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
-        <Section
-          className="xl:col-span-2"
-          flush
-          title="Recent activity"
-          description="The last 10 events recorded by CloudTrail"
-          actions={
-            <Link href="/cloudtrail/" className="text-primary text-sm hover:underline">
-              View event history
-            </Link>
-          }
-        >
-          {events.isLoading ? (
-            <div className="flex flex-col gap-3 p-4">
-              {Array.from({ length: 5 }, (_, i) => (
-                <Skeleton key={i} className="h-5 w-full" />
-              ))}
-            </div>
-          ) : events.error ? (
-            <p className="text-muted-foreground p-4 text-sm">{events.error.message}</p>
-          ) : !events.data?.length ? (
-            <p className="text-muted-foreground p-8 text-center text-sm">No activity yet</p>
-          ) : (
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                    <th className="px-4 py-2 font-semibold">Event</th>
-                    <th className="px-3 py-2 font-semibold">User</th>
-                    <th className="hidden px-3 py-2 font-semibold md:table-cell">Resource</th>
-                    <th className="px-3 py-2 font-semibold">Result</th>
-                    <th className="px-4 py-2 text-right font-semibold">Time</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {events.data.map((e) => (
-                    <tr key={e.id} className="border-b last:border-0">
-                      <td className="px-4 py-2 font-mono text-[13px]">{e.action}</td>
-                      <td className="px-3 py-2">{e.user}</td>
-                      <td className="text-muted-foreground hidden max-w-72 truncate px-3 py-2 font-mono text-xs md:table-cell" title={e.resource}>
-                        {e.resource}
-                      </td>
-                      <td className="px-3 py-2">
-                        <StatusBadge status={e.status < 400 ? "success" : "failed"} label={String(e.status)} />
-                      </td>
-                      <td className="text-muted-foreground px-4 py-2 text-right">
-                        <TimeAgo value={e.time} />
-                      </td>
-                    </tr>
+          <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
+            <div className="flex min-w-0 flex-col gap-6 xl:col-span-2">
+              <Panel title="Resources by service" action={<span className="text-faint text-xs">live counts</span>}>
+                <ul className="grid grid-cols-2 gap-px overflow-hidden rounded-b-xl bg-[var(--border)] xl:grid-cols-3">
+                  {inUse.map((c) => (
+                    <li key={c.key} className="bg-card">
+                      <Link href={c.href} className="hover:bg-muted/50 group flex items-center gap-3 px-3.5 py-3 transition-colors sm:px-4 sm:py-3.5">
+                        <ServiceIcon service={c} size="md" className="hidden sm:inline-flex" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-[13px] font-medium">{c.name}</span>
+                          <span className={cn("block truncate text-xs", c.warn ? "text-warning" : "text-faint")}>{c.error ? "unavailable" : c.sub}</span>
+                        </span>
+                        {c.loading ? (
+                          <Skeleton className="h-6 w-8" />
+                        ) : (
+                          <span className="text-xl font-semibold tracking-[-0.04em] tabular-nums">{c.error ? "–" : c.value}</span>
+                        )}
+                      </Link>
+                    </li>
                   ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-        </Section>
+                  {/* fill the last row so the hairline grid stays even */}
+                  {Array.from({ length: (3 - (inUse.length % 3)) % 3 }, (_, i) => (
+                    <li key={`pad-${i}`} className="bg-card hidden xl:block" aria-hidden />
+                  ))}
+                  {inUse.length % 2 === 1 && <li className="bg-card xl:hidden" aria-hidden />}
+                </ul>
+                {unused.length > 0 && (
+                  <div className="flex flex-wrap items-center gap-1.5 border-t px-4 py-3">
+                    <span className="text-faint mr-1 text-xs">Not in use yet</span>
+                    {unused.map((c) => (
+                      <Link
+                        key={c.key}
+                        href={c.href}
+                        className="text-muted-foreground hover:text-foreground hover:border-border-strong rounded-full border px-2 py-0.5 text-xs transition-colors"
+                      >
+                        {c.name}
+                      </Link>
+                    ))}
+                  </div>
+                )}
+              </Panel>
 
-        <div className="flex flex-col gap-6">
-          <Section title="HomeCloud">
-            {health.isLoading ? (
-              <Skeleton className="h-24 w-full" />
-            ) : (
-              <KeyValueGrid
-                columns={2}
-                items={[
-                  {
-                    label: "API status",
-                    value: health.error ? <StatusBadge status="error" label="Unreachable" /> : <StatusBadge status={health.data?.status ?? "ok"} tone="success" label="Healthy" />,
-                  },
-                  { label: "Version", value: health.data?.version },
-                  { label: "Region", value: <span className="font-mono">{health.data?.region ?? "us-east-1"}</span> },
-                  { label: "Uptime", value: health.data ? formatDuration(health.data.uptime_seconds) : "-" },
-                  { label: "Account ID", value: <CopyableText value={session.account_id} /> },
-                  { label: "Signed in as", value: session.user.name },
-                ]}
-              />
-            )}
-          </Section>
-          <Section title="Quick links">
-            <ul className="grid grid-cols-1 gap-1 sm:grid-cols-2 xl:grid-cols-1">
-              {QUICK_LINKS.map((q) => (
-                <li key={q.href}>
-                  <Link href={q.href} className="hover:bg-accent flex items-center gap-2 rounded-md px-2 py-1.5 text-sm">
-                    <q.icon className="text-muted-foreground size-4" />
-                    <span className="text-primary">{q.label}</span>
+              <Panel
+                title="Recent activity"
+                action={
+                  <Link href="/cloudtrail/" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs">
+                    Event history <ArrowRight className="size-3" />
                   </Link>
-                </li>
-              ))}
-            </ul>
-          </Section>
+                }
+              >
+                {events.isLoading ? (
+                  <div className="flex flex-col gap-3 p-4">
+                    {Array.from({ length: 5 }, (_, i) => (
+                      <Skeleton key={i} className="h-5 w-full" />
+                    ))}
+                  </div>
+                ) : events.error ? (
+                  <p className="text-muted-foreground p-4 text-sm">{events.error.message}</p>
+                ) : !events.data?.length ? (
+                  <p className="text-muted-foreground p-8 text-center text-sm">No API calls recorded yet.</p>
+                ) : (
+                  <ul className="divide-y">
+                    {events.data.slice(0, 8).map((e) => (
+                      <li key={e.id} className="flex items-center gap-3 px-4 py-2.5 text-[13px]">
+                        <StatusDot tone={e.status < 400 ? "success" : "danger"} />
+                        <span className="min-w-0 flex-1">
+                          <span className="flex min-w-0 items-baseline gap-2">
+                            <span className="truncate font-mono text-[12.5px]">{e.action}</span>
+                            {e.status >= 400 && <span className="text-danger font-mono text-[11px]">{e.status}</span>}
+                          </span>
+                          <span className="text-faint block truncate font-mono text-[11.5px]" title={e.resource}>
+                            {e.resource || e.path}
+                          </span>
+                        </span>
+                        <span className="text-muted-foreground hidden max-w-36 truncate sm:block">{e.user}</span>
+                        <span className="text-faint w-20 shrink-0 text-right text-xs">
+                          <TimeAgo value={e.time} />
+                        </span>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Panel>
+            </div>
+
+            <div className="flex min-w-0 flex-col gap-6">
+              <Panel
+                title="Alarms"
+                action={
+                  <Link href="/cloudwatch/alarms/" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs">
+                    All alarms <ArrowRight className="size-3" />
+                  </Link>
+                }
+              >
+                {alarms.isLoading ? (
+                  <div className="p-4">
+                    <Skeleton className="h-12 w-full" />
+                  </div>
+                ) : firing.length === 0 ? (
+                  <div className="flex items-center gap-3 px-4 py-4">
+                    <span className="bg-success-soft text-success border-success/20 flex size-8 items-center justify-center rounded-lg border">
+                      <CheckCircle2 className="size-4" />
+                    </span>
+                    <div>
+                      <p className="text-[13px] font-medium">All clear</p>
+                      <p className="text-faint text-xs">
+                        {alarms.data?.length ? `${pluralize(alarms.data.length, "alarm")}, none firing` : "No alarms configured"}
+                      </p>
+                    </div>
+                  </div>
+                ) : (
+                  <ul className="divide-y">
+                    {firing.slice(0, 5).map((a) => (
+                      <li key={a.arn}>
+                        <Link href="/cloudwatch/alarms/" className="hover:bg-muted/50 flex items-start gap-3 px-4 py-3 transition-colors">
+                          <BellRing className="text-danger mt-0.5 size-4 shrink-0" />
+                          <span className="min-w-0">
+                            <span className="block truncate text-[13px] font-medium">{a.name}</span>
+                            <span className="text-faint block truncate font-mono text-[11.5px]">
+                              {a.namespace} · {a.metric}
+                            </span>
+                          </span>
+                        </Link>
+                      </li>
+                    ))}
+                  </ul>
+                )}
+              </Panel>
+
+              <Panel title="Quick actions">
+                <div className="grid grid-cols-2 gap-2 p-3">
+                  {quick.map((q) => (
+                    <Link
+                      key={q.href}
+                      href={q.href}
+                      className="hover:border-border-strong hover:bg-muted/50 group flex flex-col gap-2 rounded-lg border p-3 transition-colors"
+                    >
+                      <q.icon className="text-muted-foreground group-hover:text-primary size-4 transition-colors" />
+                      <span className="text-[13px] leading-tight font-medium">{q.label}</span>
+                    </Link>
+                  ))}
+                </div>
+                <button
+                  type="button"
+                  onClick={() => palette.setOpen(true)}
+                  className="text-muted-foreground hover:text-foreground flex w-full items-center justify-between border-t px-4 py-2.5 text-xs"
+                >
+                  More actions in the command palette
+                  <span className="flex gap-0.5">
+                    <Kbd>⌘</Kbd>
+                    <Kbd>K</Kbd>
+                  </span>
+                </button>
+              </Panel>
+
+              <ConnectCli compact />
+            </div>
+          </div>
+
+          <DocLinks />
+        </>
+      )}
+    </div>
+  )
+}
+
+/** Panel is a card with a compact header row, used by the dashboard. */
+function Panel({ title, action, children, className }: { title: ReactNode; action?: ReactNode; children: ReactNode; className?: string }) {
+  return (
+    <section className={cn("bg-card rounded-xl border shadow-xs", className)}>
+      <header className="flex h-11 items-center justify-between gap-3 border-b px-4">
+        <h2 className="text-[13px] font-semibold tracking-[-0.01em]">{title}</h2>
+        {action}
+      </header>
+      {children}
+    </section>
+  )
+}
+
+function ConnectCli({ compact }: { compact?: boolean }) {
+  const ep = endpoint()
+  return (
+    <Panel
+      title="Connect the AWS CLI"
+      action={
+        <a href={`${REPO_URL}#quick-start`} target="_blank" rel="noreferrer" className="text-muted-foreground hover:text-foreground inline-flex items-center gap-1 text-xs">
+          Guide <ArrowUpRight className="size-3" />
+        </a>
+      }
+    >
+      <div className="flex flex-col gap-3 p-4">
+        {!compact && <p className="text-muted-foreground text-[13px]">Every AWS tool reads these variables. Run this on the machine where HomeCloud is installed:</p>}
+        <CodeBlock prompt code={`eval "$(homecloud aws-env)"\naws sts get-caller-identity`} />
+        <div className="flex min-w-0 items-center justify-between gap-2 text-xs">
+          <span className="text-faint shrink-0 font-mono">AWS_ENDPOINT_URL</span>
+          <CopyableText value={ep} className="text-muted-foreground min-w-0" />
         </div>
       </div>
+    </Panel>
+  )
+}
 
-      <Section title="All services">
-        <div className="grid grid-cols-1 gap-x-6 gap-y-5 sm:grid-cols-2 lg:grid-cols-4">
-          {servicesByCategory(SERVICES).map((g) => (
-            <div key={g.category}>
-              <p className="text-muted-foreground mb-2 text-xs font-semibold tracking-wide uppercase">{g.category}</p>
-              <ul className="flex flex-col gap-1">
-                {g.services.map((s) => (
-                  <li key={s.id}>
-                    {s.comingSoon ? (
-                      <span className="text-muted-foreground flex items-center gap-2 text-sm">
-                        <s.icon className="size-4 opacity-60" /> {s.name}
-                        <span className="bg-muted rounded px-1.5 text-[10px] font-medium uppercase">Soon</span>
-                      </span>
-                    ) : (
-                      <Link href={s.href} className="text-primary flex items-center gap-2 text-sm hover:underline">
-                        <s.icon className="size-4" /> {s.name}
-                      </Link>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
+function Step({ n, title, children, aside }: { n: number; title: ReactNode; children: ReactNode; aside?: ReactNode }) {
+  return (
+    <li className="bg-card flex flex-col gap-3 rounded-xl border p-5 shadow-xs">
+      <div className="flex items-center gap-3">
+        <span className="bg-brand-soft text-primary border-brand-line flex size-6 items-center justify-center rounded-md border font-mono text-[11px] font-semibold">
+          {n}
+        </span>
+        <h3 className="text-[15px] font-semibold tracking-[-0.015em]">{title}</h3>
+        {aside && <span className="ml-auto">{aside}</span>}
+      </div>
+      {children}
+    </li>
+  )
+}
+
+/** GetStarted replaces the dashboard while the account has no resources. */
+function GetStarted() {
+  const ep = endpoint()
+  return (
+    <div className="flex flex-col gap-6">
+      <section className="hc-backdrop bg-card overflow-hidden rounded-2xl border px-6 py-8 shadow-xs sm:px-10 sm:py-10">
+        <p className="hc-eyebrow flex items-center gap-2 !text-primary">
+          <span className="bg-brand size-1.5 rounded-[2px] shadow-[0_0_10px_var(--brand)]" /> Get started
+        </p>
+        <h2 className="mt-4 max-w-2xl text-[28px] leading-[1.1] font-semibold tracking-[-0.04em] sm:text-[34px]">
+          Your cloud is running. Point your AWS tools at it.
+        </h2>
+        <p className="text-muted-foreground mt-3 max-w-2xl text-[15px] leading-relaxed">
+          HomeCloud speaks the AWS APIs, so the AWS CLI, SDKs, Terraform and CloudFormation work unchanged. Three steps and you have real resources here.
+        </p>
+        <div className="mt-6 flex flex-wrap gap-2">
+          {QUICK_ACTIONS.filter((a) => a.featured).map((a) => (
+            <Button key={a.href} asChild variant="outline" size="sm">
+              <Link href={a.href}>
+                <a.icon /> {a.label}
+              </Link>
+            </Button>
           ))}
         </div>
-      </Section>
-      <p className="text-muted-foreground flex items-center gap-1.5 text-xs">
-        <ScrollText className="size-3.5" /> Every change you make in the console is recorded in CloudTrail.
-      </p>
+      </section>
+
+      <ol className="grid grid-cols-1 gap-4 lg:grid-cols-3">
+        <Step n={1} title="Connect the AWS CLI" aside={<Terminal className="text-faint size-4" />}>
+          <p className="text-muted-foreground text-[13px]">On the HomeCloud machine, load the endpoint and credentials into your shell:</p>
+          <CodeBlock prompt code={`eval "$(homecloud aws-env)"`} />
+          <p className="text-faint text-xs">
+            Elsewhere, set <code className="text-muted-foreground font-mono">AWS_ENDPOINT_URL</code> to{" "}
+            <CopyableText value={ep} className="text-muted-foreground align-middle" /> and use an IAM access key.
+          </p>
+        </Step>
+        <Step n={2} title="Run your first command" aside={<Command className="text-faint size-4" />}>
+          <p className="text-muted-foreground text-[13px]">Create a bucket and list it, exactly as you would on AWS:</p>
+          <CodeBlock prompt code={`aws s3 mb s3://hello-homecloud\naws s3 ls`} />
+          <p className="text-faint text-xs">It shows up under S3 here right away, and the call is recorded in CloudTrail.</p>
+        </Step>
+        <Step n={3} title="Deploy a sample stack" aside={<Layers className="text-faint size-4" />}>
+          <p className="text-muted-foreground text-[13px]">
+            The <span className="text-foreground">shop</span> example builds a VPC, load balancer, ECS service, Postgres, queues and Lambdas with the stock AWS provider:
+          </p>
+          <CodeBlock prompt code={`cd examples/terraform/shop\nterraform init && terraform apply`} />
+          <div className="flex flex-wrap gap-2">
+            <Button asChild variant="outline" size="xs">
+              <a href={`${REPO_URL}/tree/main/examples/terraform/shop`} target="_blank" rel="noreferrer">
+                <FileCode2 /> View the Terraform
+              </a>
+            </Button>
+            <Button asChild variant="ghost" size="xs">
+              <Link href="/cloudformation/create/">
+                <Layers /> Or a CloudFormation example
+              </Link>
+            </Button>
+          </div>
+        </Step>
+      </ol>
+
+      <DocLinks />
+    </div>
+  )
+}
+
+function DocLinks() {
+  const links = [
+    { href: DOCS_URL, label: "Documentation", sub: "Install, configure and operate HomeCloud", icon: BookOpen },
+    { href: `${REPO_URL}/blob/main/docs/aws-compat.md`, label: "AWS compatibility", sub: "Which APIs and flags each service supports", icon: Layers },
+    { href: `${REPO_URL}/tree/main/examples`, label: "Examples", sub: "Terraform and CloudFormation you can run", icon: FileCode2 },
+    { href: "/cloudtrail/", label: "Audit log", sub: "Every change made here is in CloudTrail", icon: ScrollText, internal: true },
+  ]
+  return (
+    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-4">
+      {links.map((l) => {
+        const body = (
+          <>
+            <l.icon className="text-faint group-hover:text-primary size-4 shrink-0 transition-colors" />
+            <span className="min-w-0 flex-1">
+              <span className="flex items-center gap-1 text-[13px] font-medium">
+                {l.label}
+                {!l.internal && <ArrowUpRight className="text-faint size-3" />}
+              </span>
+              <span className="text-faint block truncate text-xs">{l.sub}</span>
+            </span>
+          </>
+        )
+        const cls = "group hover:border-border-strong flex items-center gap-3 rounded-xl border px-4 py-3 transition-colors"
+        return l.internal ? (
+          <Link key={l.label} href={l.href} className={cls}>
+            {body}
+          </Link>
+        ) : (
+          <a key={l.label} href={l.href} target="_blank" rel="noreferrer" className={cls}>
+            {body}
+          </a>
+        )
+      })}
     </div>
   )
 }

@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { useEffect, useState } from "react"
 import { Loader2, Plus, Trash2, UsersRound } from "lucide-react"
 import { toast } from "sonner"
@@ -10,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
@@ -20,7 +19,7 @@ import { pluralize } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { IamGroup, PolicySummary } from "@/lib/types"
 
-import { IAM, LINK, PolicyPicker, groupHref, nameError } from "./common"
+import { IAM, PolicyPicker, groupHref, nameError } from "./common"
 
 export function GroupsList() {
   const { data, error, isLoading, isValidating, mutate } = useApi<IamGroup[]>(`${IAM}/groups`)
@@ -45,11 +44,7 @@ export function GroupsList() {
       id: "name",
       header: "Group name",
       value: (g) => g.name,
-      cell: (g) => (
-        <Link href={groupHref(g.name)} className={LINK}>
-          {g.name}
-        </Link>
-      ),
+      cell: (g) => <CellLink href={groupHref(g.name)}>{g.name}</CellLink>,
     },
     { id: "users", header: "Users", value: (g) => g.members.length, cell: (g) => g.members.length },
     {

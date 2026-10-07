@@ -3,18 +3,21 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import { AlertCircle, Info, Loader2, Send, Square } from "lucide-react"
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyButton } from "@/components/console/copy-button"
 import { Field } from "@/components/console/form-field"
 import { Section } from "@/components/console/section"
+import { StatusBadge } from "@/components/console/status-badge"
+import { httpStatusTone } from "@/components/console/tag"
 import { TagsEditor, type TagRow } from "@/components/console/tags-editor"
 import { DEMO } from "@/lib/api"
 import { formatBytes, formatNumber } from "@/lib/format"
 import type { HttpApi } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 const METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS"]
 
@@ -46,13 +49,6 @@ function resolvePath(path: string, values: Record<string, string>): string {
     const v = values[name] ?? ""
     return plus ? v.split("/").map(encodeURIComponent).join("/") : encodeURIComponent(v)
   })
-}
-
-function statusTone(s: number) {
-  if (s >= 500) return "text-red-700 bg-red-50 ring-red-600/20 dark:text-red-300 dark:bg-red-500/10 dark:ring-red-400/20"
-  if (s >= 400) return "text-amber-700 bg-amber-50 ring-amber-600/20 dark:text-amber-300 dark:bg-amber-500/10 dark:ring-amber-400/20"
-  if (s >= 300) return "text-blue-700 bg-blue-50 ring-blue-600/20 dark:text-blue-300 dark:bg-blue-500/10 dark:ring-blue-400/20"
-  return "text-emerald-700 bg-emerald-50 ring-emerald-600/20 dark:text-emerald-300 dark:bg-emerald-500/10 dark:ring-emerald-400/20"
 }
 
 const shellQuote = (s: string) => `'${s.replace(/'/g, `'\\''`)}'`
@@ -150,19 +146,23 @@ export function TryIt({ api: target, preset }: { api: HttpApi; preset: TryPreset
       <Section title="Try it" description="Send a request from this browser to the API's public invoke URL.">
         <form onSubmit={send} className="flex flex-col gap-4">
           <div className="grid grid-cols-[7.5rem_minmax(0,1fr)] gap-2">
-            <Select value={method} onValueChange={setMethod}>
-              <SelectTrigger aria-label="Method" className="w-full font-mono">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {METHODS.map((m) => (
-                  <SelectItem key={m} value={m} className="font-mono">
-                    {m}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Input aria-label="Path" value={path} onChange={(e) => setPath(e.target.value)} className="font-mono" placeholder="/items/{id}" spellCheck={false} />
+            <Field label="Method" htmlFor="try-method">
+              <Select value={method} onValueChange={setMethod}>
+                <SelectTrigger id="try-method" className="w-full font-mono">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {METHODS.map((m) => (
+                    <SelectItem key={m} value={m} className="font-mono">
+                      {m}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+            <Field label="Path" htmlFor="try-path">
+              <Input id="try-path" value={path} onChange={(e) => setPath(e.target.value)} className="font-mono" placeholder="/items/{id}" spellCheck={false} />
+            </Field>
           </div>
 
           {ps.length > 0 && (
@@ -218,40 +218,40 @@ export function TryIt({ api: target, preset }: { api: HttpApi; preset: TryPreset
             </span>
           </p>
 
-          <div className="flex flex-wrap items-center gap-2">
-            <Button type="submit" disabled={pending || missing.length > 0}>
-              {pending ? <Loader2 className="animate-spin" /> : <Send />} Send
-            </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+            {missing.length > 0 && <span className="text-warning mr-auto text-xs">Fill in {missing.map((p) => `{${p.name}}`).join(", ")}</span>}
+            <CopyButton value={curl} size="sm" label="Copy as curl" />
             {pending && (
               <Button type="button" variant="outline" onClick={() => abort.current?.abort()}>
                 <Square /> Cancel
               </Button>
             )}
-            <CopyButton value={curl} size="sm" label="Copy as curl" />
-            {missing.length > 0 && <span className="text-muted-foreground text-xs">Fill in {missing.map((p) => `{${p.name}}`).join(", ")}</span>}
+            <Button type="submit" disabled={pending || missing.length > 0}>
+              {pending ? <Loader2 className="animate-spin" /> : <Send />} Send
+            </Button>
           </div>
         </form>
 
         {netError && (
-          <div className="border-destructive/30 bg-destructive/5 text-destructive mt-4 flex items-start gap-2 rounded-md border p-3 text-sm">
-            <AlertCircle className="mt-0.5 size-4 shrink-0" />
-            <span>
-              <span className="font-medium">No response: {netError}</span>
-              <br />
-              <span className="text-destructive/80 text-xs">
-                The server may be unreachable, or the browser blocked the request (a custom header that fails the CORS preflight, or an http endpoint
-                called from an https page). Try the curl command.
-              </span>
-            </span>
-          </div>
+          <Alert variant="destructive" className="mt-4">
+            <AlertCircle />
+            <AlertTitle>No response: {netError}</AlertTitle>
+            <AlertDescription>
+              The server may be unreachable, or the browser blocked the request (a custom header that fails the CORS preflight, or an http endpoint called
+              from an https page). Try the curl command.
+            </AlertDescription>
+          </Alert>
         )}
 
         {result && (
           <div className="mt-4 flex flex-col gap-3 border-t pt-4">
             <div className="flex flex-wrap items-center gap-3 text-sm">
-              <span className={cn("rounded px-2 py-0.5 font-mono font-semibold ring-1 ring-inset", statusTone(result.status))}>
-                {result.status} {result.statusText}
-              </span>
+              <StatusBadge
+                status={String(result.status)}
+                tone={httpStatusTone(result.status)}
+                label={`${result.status} ${result.statusText}`.trim()}
+                className="font-mono"
+              />
               <span className="text-muted-foreground">{formatNumber(result.ms, 0)} ms</span>
               <span className="text-muted-foreground">{formatBytes(result.size)}</span>
             </div>
@@ -268,19 +268,11 @@ export function TryIt({ api: target, preset }: { api: HttpApi; preset: TryPreset
                 </dl>
               </div>
             )}
-            <div className="flex flex-col gap-1">
-              <div className="flex items-center justify-between gap-2">
-                <h3 className="text-sm font-medium">Body</h3>
-                {result.body && <CopyButton value={result.body} label="Copy body" />}
-              </div>
-              {result.body ? (
-                <pre className="bg-muted/50 max-h-96 overflow-auto rounded-md border p-3 font-mono text-[12.5px] leading-5 break-all whitespace-pre-wrap">
-                  {result.body}
-                </pre>
-              ) : (
-                <p className="text-muted-foreground text-sm">Empty body.</p>
-              )}
-            </div>
+            {result.body ? (
+              <CodeBlock code={result.body} title="Response body" copyLabel="Copy body" wrap maxHeight="24rem" />
+            ) : (
+              <p className="text-muted-foreground text-sm">Empty body.</p>
+            )}
           </div>
         )}
       </Section>

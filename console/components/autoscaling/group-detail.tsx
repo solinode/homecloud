@@ -7,15 +7,19 @@ import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { instanceHref } from "@/components/ec2/instance-actions"
 import { tgHref } from "@/components/elb/shared"
@@ -43,15 +47,15 @@ const instanceColumns: Column<AsgInstance>[] = [
     id: "id",
     header: "Instance ID",
     cell: (i) => (
-      <Link href={instanceHref(i.id)} className="text-primary font-mono text-[13px] hover:underline">
+      <CellLink href={instanceHref(i.id)} mono>
         {i.id}
-      </Link>
+      </CellLink>
     ),
     value: (i) => i.id,
   },
   { id: "state", header: "State", cell: (i) => <StatusBadge status={i.state} />, value: (i) => i.state },
-  { id: "ip", header: "Private IP", cell: (i) => <span className="font-mono text-[13px]">{i.private_ip || "-"}</span>, value: (i) => i.private_ip, hideBelow: "sm" },
-  { id: "subnet", header: "Subnet", cell: (i) => <span className="font-mono text-[13px]">{i.subnet_id}</span>, value: (i) => i.subnet_id, hideBelow: "md" },
+  { id: "ip", header: "Private IP", cell: (i) => <CellText mono>{i.private_ip}</CellText>, value: (i) => i.private_ip, hideBelow: "sm" },
+  { id: "subnet", header: "Subnet", cell: (i) => <CellText mono>{i.subnet_id}</CellText>, value: (i) => i.subnet_id, hideBelow: "md" },
   { id: "launched", header: "Launched", cell: (i) => <TimeAgo value={i.launch_time} />, value: (i) => i.launch_time },
 ]
 
@@ -134,22 +138,40 @@ export function GroupDetail() {
         breadcrumbs={crumbs}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => mutate()} aria-label="Refresh">
+            <Button variant="outline" size="icon-sm" onClick={() => mutate()} aria-label="Refresh">
               <RefreshCw className={cn(isValidating && "animate-spin")} />
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setCapacity(true)} disabled={deletingState}>
-              <Pencil /> Edit capacity
             </Button>
             <Button variant="outline" size="sm" onClick={toggleSuspend} disabled={deletingState || suspending}>
               {suspending ? <Loader2 className="animate-spin" /> : g.suspended ? <Play /> : <Pause />}
               {g.suspended ? "Resume scaling" : "Suspend scaling"}
             </Button>
-            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(true)} disabled={deletingState}>
-              <Trash2 /> Delete
+            <ActionsMenu
+              disabled={deletingState}
+              items={[
+                { label: "Edit capacity", onSelect: () => setCapacity(true) },
+                { label: "Edit scaling policies", onSelect: () => setPolicies(true) },
+                { separator: true },
+                { label: "Delete group", destructive: true, icon: <Trash2 />, onSelect: () => setDeleting(true) },
+              ]}
+            />
+            <Button size="sm" onClick={() => setCapacity(true)} disabled={deletingState}>
+              <Pencil /> Edit capacity
             </Button>
           </>
         }
       />
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatTile label="Desired" value={g.desired_capacity} caption="Target instance count" />
+        <StatTile label="Minimum" value={g.min_size} caption="Lower bound" />
+        <StatTile label="Maximum" value={g.max_size} caption="Upper bound" />
+        <StatTile
+          label="Instances"
+          value={instances.length}
+          tone={instances.length === g.desired_capacity ? "success" : "warning"}
+          caption={instances.length === g.desired_capacity ? "At desired capacity" : "Converging"}
+        />
+      </div>
 
       {deletingState && (
         <Alert>
@@ -170,10 +192,6 @@ export function GroupDetail() {
         <KeyValueGrid
           columns={4}
           items={[
-            { label: "Desired capacity", value: <span className="tabular-nums">{g.desired_capacity}</span> },
-            { label: "Minimum", value: <span className="tabular-nums">{g.min_size}</span> },
-            { label: "Maximum", value: <span className="tabular-nums">{g.max_size}</span> },
-            { label: "Instances", value: <span className="tabular-nums">{instances.length}</span> },
             { label: "Health check grace period", value: `${g.health_check_grace_seconds} seconds` },
             { label: "Last scaling", value: g.last_scaling ? <TimeAgo value={g.last_scaling} /> : "Never" },
             { label: "Created", value: <span>{formatDate(g.created_at)}</span> },
@@ -254,7 +272,7 @@ export function GroupDetail() {
             {
               label: "User data",
               wide: true,
-              value: launch.user_data ? <pre className="bg-muted/50 max-h-40 overflow-auto rounded-md border p-2 font-mono text-xs">{launch.user_data}</pre> : "",
+              value: launch.user_data ? <CodeBlock code={launch.user_data} title="user-data" wrap maxHeight="14rem" /> : "",
             },
           ]}
         />
@@ -271,12 +289,15 @@ export function GroupDetail() {
         {(g.policies ?? []).length === 0 ? (
           <p className="text-muted-foreground text-sm">No policies. The group keeps the desired capacity you set.</p>
         ) : (
-          <ul className="flex flex-col gap-2 text-sm">
+          <ul className="flex flex-col divide-y text-sm">
             {(g.policies ?? []).map((p) => (
-              <li key={p.name} className="flex flex-wrap items-baseline gap-x-2">
+              <li key={p.name} className="flex flex-wrap items-center gap-x-3 gap-y-1 py-2 first:pt-0 last:pb-0">
+                <Tag mono={false} accent="info">
+                  Target tracking
+                </Tag>
                 <span className="font-medium">{p.name}</span>
                 <span className="text-muted-foreground">
-                  Target tracking: {metricLabel(p.metric)} at {p.target_value}%, cooldown {p.cooldown_seconds}s
+                  {metricLabel(p.metric)} at {p.target_value}%, cooldown {p.cooldown_seconds}s
                 </span>
               </li>
             ))}

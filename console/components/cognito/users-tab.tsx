@@ -12,10 +12,11 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { KeyValueGrid } from "@/components/console/key-value"
+import { Tag } from "@/components/console/tag"
 import { TagsEditor, tagsToRows, type TagRow } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage, seg } from "@/lib/api"
@@ -77,14 +78,23 @@ export function UsersTab({ pool }: { pool: UserPool }) {
   }
 
   const columns: Column<CognitoUser>[] = [
-    { id: "username", header: "User name", cell: (u) => <span className="font-medium">{u.username}</span>, value: (u) => u.username },
-    { id: "email", header: "Email", cell: (u) => u.attributes?.email || <span className="text-muted-foreground">-</span>, value: (u) => u.attributes?.email, hideBelow: "md" },
+    {
+      id: "username",
+      header: "User name",
+      cell: (u) => (
+        <CellText max="16rem" className="font-medium">
+          {u.username}
+        </CellText>
+      ),
+      value: (u) => u.username,
+    },
+    { id: "email", header: "Email", cell: (u) => <CellText max="16rem">{u.attributes?.email}</CellText>, value: (u) => u.attributes?.email, hideBelow: "md" },
     { id: "status", header: "Confirmation status", cell: (u) => <UserStatusBadge status={u.status} />, value: (u) => u.status },
     { id: "enabled", header: "Status", cell: (u) => <EnabledBadge enabled={u.enabled} />, value: (u) => (u.enabled ? 1 : 0) },
     {
       id: "groups",
       header: "Groups",
-      cell: (u) => (u.groups?.length ? <span className="line-clamp-1 max-w-48">{u.groups.join(", ")}</span> : <span className="text-muted-foreground">-</span>),
+      cell: (u) => <CellText max="12rem">{u.groups?.length ? u.groups.join(", ") : null}</CellText>,
       value: (u) => (u.groups ?? []).join(" "),
       hideBelow: "lg",
     },
@@ -211,9 +221,11 @@ function UserDetails({ user }: { user: CognitoUser }) {
           value: attrs.length ? (
             <span className="flex flex-wrap gap-1.5">
               {attrs.map(([k, v]) => (
-                <span key={k} className="bg-background rounded border px-1.5 py-0.5 font-mono text-[12px]">
-                  {k}={v}
-                </span>
+                <Tag key={k} title={`${k}=${v}`} className="max-w-full">
+                  <span className="truncate">
+                    {k}={v}
+                  </span>
+                </Tag>
               ))}
             </span>
           ) : (
@@ -304,8 +316,7 @@ function CreateUserDialog({ pool, open, onOpenChange, onCreated }: { pool: UserP
           <Field label="Email" htmlFor="cu-email" optional error={err("email")} help="Stored as the email attribute and included in ID tokens.">
             <Input id="cu-email" type="email" value={email} onChange={(e) => setEmail(e.target.value)} placeholder="ann@example.com" autoComplete="off" />
           </Field>
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium">Password</span>
+          <Field label="Password">
             <RadioGroup value={mode} onValueChange={(v) => setMode(v as PwMode)} className="gap-2">
               <label className="flex items-start gap-2 text-sm">
                 <RadioGroupItem value="generate" className="mt-0.5" />
@@ -330,7 +341,7 @@ function CreateUserDialog({ pool, open, onOpenChange, onCreated }: { pool: UserP
                 </label>
               </div>
             )}
-          </div>
+          </Field>
           {pool.groups.length > 0 && (
             <Field label="Groups" optional>
               <div className="flex flex-wrap gap-x-4 gap-y-2">
@@ -459,8 +470,9 @@ function AttributesDialog({ pool, user, onClose }: { pool: UserPool; user: Cogni
             <DialogTitle>Attributes of {user?.username}</DialogTitle>
             <DialogDescription>Attributes become claims in new ID tokens. Remove a row to delete the attribute. An empty value also deletes it.</DialogDescription>
           </DialogHeader>
-          <TagsEditor rows={rows} onChange={setRows} keyPlaceholder="Attribute" valuePlaceholder="Value" addLabel="Add attribute" />
-          {rErr && <p className="text-destructive text-xs">{rErr}</p>}
+          <Field label="Attributes" error={rErr} help="Custom claims, e.g. email, name, locale, custom:tenant.">
+            <TagsEditor rows={rows} onChange={setRows} keyPlaceholder="Attribute" valuePlaceholder="Value" addLabel="Add attribute" />
+          </Field>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={pending}>
               Cancel
@@ -507,17 +519,19 @@ function GroupsDialog({ pool, user, onClose }: { pool: UserPool; user: CognitoUs
             <DialogTitle>Groups of {user?.username}</DialogTitle>
             <DialogDescription>Group names appear in the cognito:groups claim of new tokens.</DialogDescription>
           </DialogHeader>
-          <div className="divide-y rounded-md border">
-            {pool.groups.map((g) => (
-              <label key={g.name} className="flex cursor-pointer items-start gap-3 px-3 py-2 text-sm">
-                <Checkbox className="mt-0.5" checked={groups.includes(g.name)} onCheckedChange={(c) => setGroups(c ? [...groups, g.name] : groups.filter((x) => x !== g.name))} />
-                <span>
-                  <span className="font-medium">{g.name}</span>
-                  {g.description && <span className="text-muted-foreground block text-xs">{g.description}</span>}
-                </span>
-              </label>
-            ))}
-          </div>
+          <Field label="Groups" help={`${groups.length} of ${pool.groups.length} selected`}>
+            <div className="divide-y rounded-md border">
+              {pool.groups.map((g) => (
+                <label key={g.name} className="hover:bg-accent/50 flex cursor-pointer items-start gap-3 px-3 py-2 text-sm transition-colors">
+                  <Checkbox className="mt-0.5" checked={groups.includes(g.name)} onCheckedChange={(c) => setGroups(c ? [...groups, g.name] : groups.filter((x) => x !== g.name))} />
+                  <span className="min-w-0">
+                    <span className="block truncate font-medium">{g.name}</span>
+                    {g.description && <span className="text-muted-foreground block text-xs">{g.description}</span>}
+                  </span>
+                </label>
+              ))}
+            </div>
+          </Field>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={pending}>
               Cancel

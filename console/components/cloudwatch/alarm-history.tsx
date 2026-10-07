@@ -5,7 +5,7 @@ import type { ReactNode } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ErrorState } from "@/components/console/error-state"
-import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { seg } from "@/lib/api"
 import { useApi } from "@/lib/hooks"
@@ -37,7 +37,7 @@ function AlarmHistory({ name }: { name: string }) {
   return (
     <div className="overflow-x-auto rounded-md border">
       <table className="w-full text-sm">
-        <thead className="text-muted-foreground border-b text-left">
+        <thead className="text-muted-foreground bg-muted/40 border-b text-left text-xs">
           <tr>
             <th className="px-3 py-2 font-medium">Time</th>
             <th className="px-3 py-2 font-medium">Type</th>
@@ -51,9 +51,9 @@ function AlarmHistory({ name }: { name: string }) {
                 <TimeAgo value={h.timestamp} />
               </td>
               <td className="px-3 py-2 whitespace-nowrap">
-                <StatusBadge status={h.type} label={h.type.replace(/([a-z])([A-Z])/g, "$1 $2")} tone="neutral" />
+                <Tag mono={false}>{h.type.replace(/([a-z])([A-Z])/g, "$1 $2")}</Tag>
               </td>
-              <td className="px-3 py-2">{h.summary}</td>
+              <td className="min-w-60 px-3 py-2">{h.summary}</td>
             </tr>
           ))}
         </tbody>

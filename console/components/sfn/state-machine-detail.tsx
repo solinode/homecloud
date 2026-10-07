@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { roleHref } from "@/components/iam/role-common"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, Loader2, Pencil, Play, PlayCircle, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, FileJson, Loader2, Pencil, Play, PlayCircle, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -12,8 +12,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
@@ -22,6 +24,7 @@ import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TagList } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -40,6 +43,7 @@ import {
   machinePath,
   nameError,
   pretty,
+  totalExecutions,
   useDeleteStateMachine,
 } from "./common"
 import { StateMachineGraph } from "./graph"
@@ -111,15 +115,33 @@ export function StateMachineDetailPage() {
                 <Pencil /> Edit
               </Link>
             </Button>
-            <Button variant="outline" size="sm" onClick={() => del.remove(sm.name)}>
-              <Trash2 /> Delete
-            </Button>
+            <ActionsMenu
+              items={[
+                { label: "Start execution", icon: <Play />, onSelect: () => setStarting(true) },
+                { label: "Edit definition", icon: <Pencil />, onSelect: () => router.push(editMachineHref(sm.name)) },
+                { label: "View definition", icon: <FileJson />, onSelect: () => setParam("tab", "definition") },
+                { separator: true },
+                { label: "Delete", icon: <Trash2 />, destructive: true, onSelect: () => del.remove(sm.name) },
+              ]}
+            />
             <Button size="sm" onClick={() => setStarting(true)}>
               <Play /> Start execution
             </Button>
           </>
         }
       />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Executions" value={totalExecutions(data.executions)} caption="Kept in history" />
+        <StatTile label="Running" value={data.executions.RUNNING ?? 0} tone={(data.executions.RUNNING ?? 0) > 0 ? "info" : undefined} />
+        <StatTile label="Succeeded" value={data.executions.SUCCEEDED ?? 0} tone={(data.executions.SUCCEEDED ?? 0) > 0 ? "success" : undefined} />
+        <StatTile
+          label="Failed"
+          value={(data.executions.FAILED ?? 0) + (data.executions.TIMED_OUT ?? 0)}
+          caption={(data.executions.TIMED_OUT ?? 0) > 0 ? `${data.executions.TIMED_OUT} timed out` : undefined}
+          tone={(data.executions.FAILED ?? 0) + (data.executions.TIMED_OUT ?? 0) > 0 ? "danger" : undefined}
+        />
+      </div>
 
       <Section title="Details">
         <KeyValueGrid
@@ -131,9 +153,9 @@ export function StateMachineDetailPage() {
             {
               label: "Execution role",
               value: sm.role_arn ? (
-                <Link href={roleHref(sm.role_arn.split("/").pop() ?? "")} className="text-primary hover:underline">
-                  {sm.role_arn.split("/").pop()}
-                </Link>
+                <CellLink href={roleHref(sm.role_arn.split("/").pop() ?? "")} className="w-fit">
+                  {sm.role_arn.split("/").pop() ?? ""}
+                </CellLink>
               ) : (
                 ""
               ),
@@ -192,9 +214,9 @@ function ExecutionsTab({ machine, onStart }: { machine: string; onStart: () => v
       id: "name",
       header: "Name",
       cell: (x) => (
-        <Link href={executionHref(x.id)} className={`${cellLinkClass()} font-mono text-[13px]`}>
+        <CellLink href={executionHref(x.id)} mono>
           {x.name}
-        </Link>
+        </CellLink>
       ),
       value: (x) => x.name,
     },
@@ -305,7 +327,7 @@ function DefinitionTab({ detail }: { detail: StateMachineDetail }) {
         }
         bodyClassName="p-3"
       >
-        <pre className="bg-muted/30 max-h-[36rem] overflow-auto rounded-md border p-3 font-mono text-[12.5px] leading-5">{json}</pre>
+        <CodeBlock code={json} maxHeight="36rem" noCopy />
       </Section>
     </div>
   )
@@ -362,9 +384,9 @@ export function StartExecutionDialog({ machine, onClose, initialInput }: { machi
           <Field label="Name" optional htmlFor="exec-name" error={submitted || name ? nameErr : undefined} help="Unique within this state machine. Defaults to a random ID.">
             <Input id="exec-name" autoComplete="off" spellCheck={false} value={name} onChange={(e) => setName(e.target.value)} className="font-mono text-[13px]" />
           </Field>
-          <Field label="Input">
+          <Field label="Input" htmlFor="exec-input" help="JSON passed to the first state as $.">
             <div className="max-h-[50vh] overflow-auto">
-              <JsonEditor value={input} onChange={setInput} rows={8} />
+              <JsonEditor id="exec-input" value={input} onChange={setInput} rows={8} />
             </div>
           </Field>
           <DialogFooter>

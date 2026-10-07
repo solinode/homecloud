@@ -3,10 +3,13 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { HardDrive, RefreshCw, Trash2 } from "lucide-react"
+import { Copy, HardDrive, RefreshCw, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { copyText } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { DetailSkeleton } from "@/components/console/loading"
@@ -89,9 +92,27 @@ export function BucketDetail() {
             <Button variant="outline" size="sm" onClick={onChanged} aria-label="Refresh bucket">
               <RefreshCw className={cn(isValidating && "animate-spin")} />
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setDeleteOpen(true)} className="text-destructive hover:text-destructive">
-              <Trash2 /> Delete
-            </Button>
+            <ActionsMenu
+              items={[
+                {
+                  label: "Copy ARN",
+                  icon: <Copy />,
+                  disabled: !data,
+                  onSelect: async () => {
+                    if (data && (await copyText(data.arn))) toast.success("ARN copied")
+                  },
+                },
+                {
+                  label: "Copy S3 URI",
+                  icon: <Copy />,
+                  onSelect: async () => {
+                    if (await copyText(`s3://${name}`)) toast.success("S3 URI copied")
+                  },
+                },
+                { separator: true },
+                { label: "Delete bucket", icon: <Trash2 />, destructive: true, onSelect: () => setDeleteOpen(true) },
+              ]}
+            />
           </>
         }
       />

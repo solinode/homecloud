@@ -56,6 +56,16 @@ export function EnabledBadge({ enabled }: { enabled: boolean }) {
   return enabled ? <StatusBadge status="enabled" label="Enabled" /> : <StatusBadge status="disabled" label="Disabled" />
 }
 
+/** SignUpBadge shows a pool's self sign-up mode: auto-confirmed, needs confirmation, or disabled. */
+export function SignUpBadge({ pool }: { pool: Pick<UserPool, "self_sign_up" | "auto_confirm"> }) {
+  if (!pool.self_sign_up) return <StatusBadge status="disabled" label="Disabled" tone="neutral" />
+  return pool.auto_confirm ? (
+    <StatusBadge status="auto-confirmed" label="Auto-confirmed" tone="success" />
+  ) : (
+    <StatusBadge status="needs-confirmation" label="Needs confirmation" tone="warning" />
+  )
+}
+
 /** PasswordPolicyFields edits a password policy (min length 6-128 and the four character classes). */
 export function PasswordPolicyFields({ value, onChange, idPrefix, error }: { value: PasswordPolicy; onChange: (p: PasswordPolicy) => void; idPrefix: string; error?: string }) {
   const boxes: [keyof PasswordPolicy, string][] = [
@@ -77,9 +87,8 @@ export function PasswordPolicyFields({ value, onChange, idPrefix, error }: { val
           className="w-28"
         />
       </Field>
-      <div className="flex flex-col gap-1.5">
-        <span className="text-sm font-medium">Require</span>
-        <div className="grid grid-cols-2 gap-2">
+      <Field label="Require" help="Character classes every new password must contain.">
+        <div className="grid grid-cols-1 gap-2 min-[400px]:grid-cols-2">
           {boxes.map(([k, label]) => (
             <label key={k} className="flex items-center gap-2 text-sm">
               <Checkbox checked={!!value[k]} onCheckedChange={(c) => onChange({ ...value, [k]: !!c })} />
@@ -87,7 +96,7 @@ export function PasswordPolicyFields({ value, onChange, idPrefix, error }: { val
             </label>
           ))}
         </div>
-      </div>
+      </Field>
     </div>
   )
 }

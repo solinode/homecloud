@@ -7,7 +7,7 @@ import { Plus, Workflow } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
@@ -20,11 +20,7 @@ const columns: Column<StateMachineSummary>[] = [
   {
     id: "name",
     header: "Name",
-    cell: (m) => (
-      <Link href={machineHref(m.name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-        {m.name}
-      </Link>
-    ),
+    cell: (m) => <CellLink href={machineHref(m.name)}>{m.name}</CellLink>,
     value: (m) => m.name,
   },
   { id: "status", header: "Status", cell: (m) => <StatusBadge status={m.status.toLowerCase()} />, value: (m) => m.status, hideBelow: "sm" },

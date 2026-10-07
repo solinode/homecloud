@@ -10,7 +10,7 @@ import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
@@ -25,29 +25,36 @@ const columns: Column<Instance>[] = [
   {
     id: "name",
     header: "Name",
-    cell: (i) => (i.name ? <span className="font-medium">{i.name}</span> : <span className="text-muted-foreground">-</span>),
+    cell: (i) =>
+      i.name ? (
+        <CellLink href={instanceHref(i.id)} max="16rem">
+          {i.name}
+        </CellLink>
+      ) : (
+        <span className="text-muted-foreground">-</span>
+      ),
     value: (i) => i.name,
   },
   {
     id: "id",
     header: "Instance ID",
     cell: (i) => (
-      <Link href={instanceHref(i.id)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] font-medium whitespace-nowrap hover:underline">
+      <CellLink href={instanceHref(i.id)} mono>
         {i.id}
-      </Link>
+      </CellLink>
     ),
     value: (i) => i.id,
   },
   { id: "state", header: "Instance state", cell: (i) => <StatusBadge status={i.state} />, value: (i) => i.state },
   { id: "kind", header: "Type", cell: (i) => <InstanceKindBadge instance={i} />, value: (i) => instanceKind(i) },
-  { id: "type", header: "Instance type", cell: (i) => <span className="font-mono text-[13px]">{i.instance_type}</span>, value: (i) => i.instance_type },
+  { id: "type", header: "Instance type", cell: (i) => <CellText mono>{i.instance_type}</CellText>, value: (i) => i.instance_type },
   {
     id: "image",
     header: "Image",
     cell: (i) => (
-      <span className="font-mono text-[13px]" title={i.image_id}>
+      <CellText mono muted title={i.image_ref ? `${i.image_ref} (${i.image_id})` : i.image_id} max="14rem">
         {i.image_ref || i.image_id}
-      </span>
+      </CellText>
     ),
     value: (i) => `${i.image_ref} ${i.image_id}`,
     hideBelow: "md",
@@ -55,7 +62,7 @@ const columns: Column<Instance>[] = [
   {
     id: "ip",
     header: "Private IPv4",
-    cell: (i) => <span className="font-mono text-[13px]">{i.private_ip || "-"}</span>,
+    cell: (i) => <CellText mono>{i.private_ip}</CellText>,
     value: (i) => i.private_ip,
     hideBelow: "sm",
   },
@@ -67,7 +74,7 @@ const columns: Column<Instance>[] = [
     sortable: false,
     hideBelow: "md",
   },
-  { id: "az", header: "Availability zone", cell: (i) => i.availability_zone, value: (i) => i.availability_zone, hideBelow: "lg" },
+  { id: "az", header: "Availability zone", cell: (i) => <CellText>{i.availability_zone}</CellText>, value: (i) => i.availability_zone, hideBelow: "lg" },
   {
     id: "launch",
     header: "Launch time",

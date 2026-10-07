@@ -2,13 +2,15 @@
 
 import Link from "next/link"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { AlertTriangle, ArrowRight, CheckCircle2, FileText, FlaskConical, Info, KeyRound, Server, ShieldCheck, UserCog, UserPlus, Users, UsersRound } from "lucide-react"
+import { AlertTriangle, CheckCircle2, FileText, FlaskConical, Info, KeyRound, Server, ShieldCheck, UserCog, UserPlus, Users, UsersRound } from "lucide-react"
 
 import { Skeleton } from "@/components/ui/skeleton"
 import { CopyableText } from "@/components/console/copy-button"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
+import { ErrorState } from "@/components/console/error-state"
 import { useSession } from "@/components/console/auth"
 import { useApi } from "@/lib/hooks"
 import { pluralize } from "@/lib/format"
@@ -17,21 +19,6 @@ import { cn } from "@/lib/utils"
 
 import { DAY, IAM, keyIdleDays, policyHref, signInUrl, useAccessKeysByUser, userHref } from "./common"
 import { createRoleHref, roleHref } from "./role-common"
-
-function StatCard({ href, icon: Icon, label, value, sub, loading }: { href: string; icon: typeof Users; label: string; value: ReactNode; sub?: ReactNode; loading: boolean }) {
-  return (
-    <Link href={href} className="bg-card group flex flex-col gap-2 rounded-lg border p-4 shadow-xs transition-shadow hover:shadow-md">
-      <span className="text-muted-foreground flex items-center justify-between text-sm">
-        <span className="flex items-center gap-2">
-          <Icon className="size-4" /> {label}
-        </span>
-        <ArrowRight className="size-4 opacity-0 transition-opacity group-hover:opacity-100" />
-      </span>
-      {loading ? <Skeleton className="h-8 w-16" /> : <span className="text-primary text-3xl font-semibold tracking-tight tabular-nums">{value}</span>}
-      {sub && <span className="text-muted-foreground text-xs">{sub}</span>}
-    </Link>
-  )
-}
 
 type Severity = "warning" | "info" | "ok"
 interface Rec {
@@ -42,9 +29,9 @@ interface Rec {
 }
 
 const SEV_ICON = {
-  warning: <AlertTriangle className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />,
-  info: <Info className="size-4 shrink-0 text-blue-600 dark:text-blue-400" />,
-  ok: <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />,
+  warning: <AlertTriangle className="text-warning size-4 shrink-0" />,
+  info: <Info className="text-info size-4 shrink-0" />,
+  ok: <CheckCircle2 className="text-success size-4 shrink-0" />,
 }
 
 function names(list: string[], href: (n: string) => string, max = 5) {
@@ -198,36 +185,49 @@ export function IamDashboard() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader title="IAM dashboard" description="Manage who can sign in to HomeCloud and what they are allowed to do." />
+      <PageHeader
+        title="IAM dashboard"
+        breadcrumbs={[{ label: "IAM", href: "/iam/" }, { label: "Dashboard" }]}
+        description="Manage who can sign in to HomeCloud and what they are allowed to do."
+      />
 
-      <Section title="IAM resources" description="Resources in this account">
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
-          <StatCard href="/iam/users/" icon={Users} label="Users" value={summary.data?.users ?? 0} sub={users.data ? `${users.data.filter((u) => u.console_access).length} with console access` : undefined} loading={summary.isLoading} />
-          <StatCard href="/iam/groups/" icon={UsersRound} label="User groups" value={summary.data?.groups ?? 0} loading={summary.isLoading} />
-          <StatCard
-            href="/iam/roles/"
-            icon={UserCog}
-            label="Roles"
-            value={summary.data?.roles ?? roles.data?.length ?? 0}
-            sub={roles.data ? `${roles.data.filter((r) => r.trusted_services.length).length} for HomeCloud services` : undefined}
-            loading={summary.isLoading}
-          />
-          <StatCard
-            href="/iam/policies/"
-            icon={FileText}
-            label="Customer managed policies"
-            value={
-              <>
-                {customer}
-                <span className="text-muted-foreground text-lg font-normal"> / {summary.data?.policies ?? policies.data?.length ?? 0}</span>
-              </>
-            }
-            sub="Customer managed / total policies"
-            loading={summary.isLoading || policies.isLoading}
-          />
-          <StatCard href="/iam/users/" icon={KeyRound} label="Access keys" value={summary.data?.access_keys ?? 0} sub={keys.data ? `${activeKeys} active` : undefined} loading={summary.isLoading} />
-        </div>
-      </Section>
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3 2xl:grid-cols-5">
+        <StatTile
+          href="/iam/users/"
+          icon={<Users />}
+          label="Users"
+          value={summary.data?.users ?? 0}
+          caption={users.data ? `${users.data.filter((u) => u.console_access).length} with console access` : undefined}
+          loading={summary.isLoading}
+        />
+        <StatTile href="/iam/groups/" icon={<UsersRound />} label="User groups" value={summary.data?.groups ?? 0} loading={summary.isLoading} />
+        <StatTile
+          href="/iam/roles/"
+          icon={<UserCog />}
+          label="Roles"
+          value={summary.data?.roles ?? roles.data?.length ?? 0}
+          caption={roles.data ? `${roles.data.filter((r) => r.trusted_services.length).length} for HomeCloud services` : undefined}
+          loading={summary.isLoading}
+        />
+        <StatTile
+          href="/iam/policies/"
+          icon={<FileText />}
+          label="Customer policies"
+          value={customer}
+          unit={`/ ${summary.data?.policies ?? policies.data?.length ?? 0}`}
+          caption="Customer managed / total policies"
+          loading={summary.isLoading || policies.isLoading}
+        />
+        <StatTile
+          href="/iam/users/"
+          icon={<KeyRound />}
+          label="Access keys"
+          value={summary.data?.access_keys ?? 0}
+          caption={keys.data ? `${activeKeys} active` : undefined}
+          tone={keys.data ? (activeKeys > 0 ? "success" : "neutral") : undefined}
+          loading={summary.isLoading}
+        />
+      </div>
 
       <div className="grid grid-cols-1 gap-6 xl:grid-cols-3">
         <Section title="Security recommendations" className="xl:col-span-2" flush>
@@ -238,7 +238,7 @@ export function IamDashboard() {
               ))}
             </div>
           ) : users.error || policies.error ? (
-            <p className="text-muted-foreground p-4 text-sm">{(users.error ?? policies.error)?.message}</p>
+            <ErrorState error={users.error ?? policies.error} />
           ) : (
             <ul>
               {recs.map((r) => (

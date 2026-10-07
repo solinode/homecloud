@@ -5,7 +5,7 @@ import { toast } from "sonner"
 
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { StatusBadge } from "@/components/console/status-badge"
+import { StatusBadge, TONES, type Tone } from "@/components/console/status-badge"
 import { api, seg } from "@/lib/api"
 import { formatDuration } from "@/lib/format"
 import { revalidate } from "@/lib/hooks"
@@ -34,8 +34,6 @@ export function nameError(name: string, what = "Names"): string | null {
 
 // ---- execution status ----
 
-type Tone = "success" | "warning" | "neutral" | "danger" | "info"
-
 const EXEC_TONE: Record<ExecutionStatus, Tone> = {
   RUNNING: "info",
   SUCCEEDED: "success",
@@ -50,14 +48,13 @@ export function ExecStatusBadge({ status, className }: { status: string; classNa
   return <StatusBadge status={status} tone={EXEC_TONE[status as ExecutionStatus] ?? "neutral"} label={execStatusLabel(status)} className={className} />
 }
 
-/** Text colors for the per-status execution counters. */
-export const EXEC_COUNT_CLASS: Record<ExecutionStatus, string> = {
-  RUNNING: "text-blue-700 bg-blue-50 dark:text-blue-300 dark:bg-blue-500/10",
-  SUCCEEDED: "text-emerald-700 bg-emerald-50 dark:text-emerald-300 dark:bg-emerald-500/10",
-  FAILED: "text-red-700 bg-red-50 dark:text-red-300 dark:bg-red-500/10",
-  TIMED_OUT: "text-orange-700 bg-orange-50 dark:text-orange-300 dark:bg-orange-500/10",
-  ABORTED: "text-slate-600 bg-slate-100 dark:text-slate-300 dark:bg-slate-500/15",
-}
+/** Tone per status for the execution counters (timed out reads as a warning next to failed). */
+const COUNT_TONE: Record<ExecutionStatus, Tone> = { ...EXEC_TONE, TIMED_OUT: "warning" }
+
+/** Fill and text classes for the per-status execution counters. */
+export const EXEC_COUNT_CLASS: Record<ExecutionStatus, string> = Object.fromEntries(
+  EXECUTION_STATUSES.map((s) => [s, TONES[COUNT_TONE[s]]]),
+) as Record<ExecutionStatus, string>
 
 /** ExecutionCountsView renders "2 running · 5 succeeded ..." as small colored counters. */
 export function ExecutionCountsView({ counts, className }: { counts?: ExecutionCounts; className?: string }) {
@@ -68,7 +65,7 @@ export function ExecutionCountsView({ counts, className }: { counts?: ExecutionC
       {present.map((s) => (
         <Tooltip key={s}>
           <TooltipTrigger asChild>
-            <span className={cn("inline-flex items-center rounded px-1.5 py-0.5 text-xs font-medium tabular-nums", EXEC_COUNT_CLASS[s])}>
+            <span className={cn("inline-flex items-center rounded border px-1.5 py-0.5 text-xs font-medium whitespace-nowrap tabular-nums", EXEC_COUNT_CLASS[s])}>
               {counts![s]} {execStatusLabel(s).toLowerCase()}
             </span>
           </TooltipTrigger>

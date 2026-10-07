@@ -9,9 +9,11 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
 import { CopyableText } from "@/components/console/copy-button"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { Section } from "@/components/console/section"
+import { StatusBadge } from "@/components/console/status-badge"
 import { api, errorMessage, request } from "@/lib/api"
 import { formatDate, formatTime, pluralize } from "@/lib/format"
 import { revalidate, useNow } from "@/lib/hooks"
@@ -92,7 +94,7 @@ function SendPanel({ queue }: { queue: Queue }) {
               <span>
                 {size.toLocaleString()} bytes of {queue.max_message_size.toLocaleString()}
               </span>
-              {json && <span className="text-emerald-600 dark:text-emerald-400">Valid JSON</span>}
+              {json && <span className="text-success">Valid JSON</span>}
             </span>
           }
         >
@@ -150,21 +152,21 @@ function SendPanel({ queue }: { queue: Queue }) {
         <Field label="Message attributes" optional error={err("attrs")}>
           <AttributesEditor rows={attrs} onChange={setAttrs} />
         </Field>
-        <div className="flex flex-wrap items-center gap-3 border-t pt-4">
-          <Button type="submit" disabled={pending}>
-            {pending ? <Loader2 className="animate-spin" /> : <Send />}
-            Send message
-          </Button>
-          <Button type="button" variant="outline" onClick={() => (setBody(""), setAttrs([]), setDelay(""), setSubmitted(false))} disabled={pending}>
-            <Eraser /> Clear
-          </Button>
+        <div className="flex flex-wrap items-center justify-end gap-3 border-t pt-4">
           {last && (
-            <span className="text-muted-foreground flex min-w-0 flex-wrap items-center gap-1 text-sm">
+            <span className="text-muted-foreground mr-auto flex min-w-0 flex-wrap items-center gap-1 text-sm">
               {last.duplicate ? "Duplicate dropped" : "Last sent"} {formatTime(last.at)}:
               <CopyableText value={last.message_id} />
               {last.sequence_number && <span className="font-mono text-xs">seq {last.sequence_number}</span>}
             </span>
           )}
+          <Button type="button" variant="outline" onClick={() => (setBody(""), setAttrs([]), setDelay(""), setSubmitted(false))} disabled={pending}>
+            <Eraser /> Clear
+          </Button>
+          <Button type="submit" disabled={pending}>
+            {pending ? <Loader2 className="animate-spin" /> : <Send />}
+            Send message
+          </Button>
         </div>
       </form>
     </Section>
@@ -267,13 +269,88 @@ function ReceivePanel({ queue }: { queue: Queue }) {
 
   const elapsed = progress ? Math.min(1, (now - progress.start) / Math.max(1, progress.until - progress.start)) : 0
 
+  const columns: Column<Held>[] = [
+    {
+      id: "id",
+      header: "Message ID",
+      cell: (m) => (
+        <span className="text-primary block truncate font-mono text-[13px] whitespace-nowrap hover:underline" title={m.message_id}>
+          {m.message_id.slice(0, 8)}…
+        </span>
+      ),
+      value: (m) => m.message_id,
+    },
+    {
+      id: "sent",
+      header: "Sent",
+      cell: (m) => <span className="whitespace-nowrap">{formatDate(Number(m.attributes?.SentTimestamp))}</span>,
+      value: (m) => Number(m.attributes?.SentTimestamp) || 0,
+      hideBelow: "md",
+    },
+    {
+      id: "receives",
+      header: "Receives",
+      cell: (m) => <span className="tabular-nums">{m.attributes?.ApproximateReceiveCount ?? "-"}</span>,
+      value: (m) => Number(m.attributes?.ApproximateReceiveCount) || 0,
+      hideBelow: "sm",
+    },
+    {
+      id: "body",
+      header: "Body",
+      cell: (m) => (
+        <CellText mono max="28rem" title={m.body}>
+          {bodyPreview(m.body)}
+        </CellText>
+      ),
+      value: (m) => m.body,
+    },
+    {
+      id: "visibility",
+      header: "Visibility",
+      cell: (m) => {
+        const left = Math.ceil((m.visibleAt - now) / 1000)
+        return left > 0 ? (
+          <span className="text-muted-foreground whitespace-nowrap">Hidden for {left}s</span>
+        ) : (
+          <StatusBadge status="visible" label="Visible again" tone="warning" />
+        )
+      },
+      value: (m) => m.visibleAt,
+      hideBelow: "lg",
+    },
+    {
+      id: "actions",
+      header: <span className="sr-only">Actions</span>,
+      sortable: false,
+      className: "text-right",
+      cell: (m) => (
+        <span className="inline-flex whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
+          <Button variant="ghost" size="icon" className="size-7" aria-label="Change visibility" title="Change visibility" onClick={() => setChanging(m)}>
+            <Timer />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-destructive size-7"
+            aria-label="Delete message"
+            title="Delete message"
+            disabled={deleting}
+            onClick={() => deleteMsgs([m])}
+          >
+            <Trash2 />
+          </Button>
+        </span>
+      ),
+    },
+  ]
+
   return (
+    <>
     <Section
       title="Receive messages"
       description="Receiving hides messages from other consumers for the visibility timeout. Delete them once processed, or they become visible again."
-      flush
     >
-      <div className="flex flex-col gap-4 p-4">
+      <div className="flex flex-col gap-4">
         <div className="flex flex-wrap items-end gap-4">
           <Field label="Maximum messages" htmlFor="recv-max" error={errors.max}>
             <Input id="recv-max" inputMode="numeric" value={max} onChange={(e) => setMax(e.target.value)} className="h-9 w-24" disabled={polling} />
@@ -324,85 +401,43 @@ function ReceivePanel({ queue }: { queue: Queue }) {
         )}
       </div>
 
-      <div className="border-t">
-        <div className="flex flex-wrap items-center justify-between gap-2 px-4 py-3">
-          <h3 className="text-sm font-semibold">
-            Received messages <span className="text-muted-foreground font-normal">({held.length})</span>
-          </h3>
-          <div className="flex flex-wrap gap-2">
-            <Button variant="outline" size="sm" onClick={() => setHeld([])} disabled={!held.length || deleting}>
-              <Eraser /> Clear list
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => deleteMsgs(held)} disabled={!held.length || deleting}>
-              {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
-              Delete all
-            </Button>
-          </div>
-        </div>
-        {held.length === 0 ? (
-          <EmptyState
-            icon={Radio}
-            title="No messages received"
-            description="Poll for messages to receive them from the queue. Received messages stay hidden from other consumers until you delete them or the visibility timeout ends."
-            className="border-t"
-          />
-        ) : (
-          <div className="overflow-x-auto border-t">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b">
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Message ID</th>
-                  <th className="text-muted-foreground hidden px-3 py-2 text-left text-xs font-semibold md:table-cell">Sent</th>
-                  <th className="text-muted-foreground hidden px-3 py-2 text-left text-xs font-semibold sm:table-cell">Receives</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Body</th>
-                  <th className="text-muted-foreground hidden px-3 py-2 text-left text-xs font-semibold lg:table-cell">Visibility</th>
-                  <th className="px-4 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {held.map((m) => {
-                  const left = Math.ceil((m.visibleAt - now) / 1000)
-                  return (
-                    <tr key={m.message_id} className="hover:bg-muted/40 cursor-pointer border-b last:border-0" onClick={() => setOpen(m)}>
-                      <td className="px-4 py-2">
-                        <span className="text-primary font-mono text-[13px] hover:underline" title={m.message_id}>
-                          {m.message_id.slice(0, 8)}…
-                        </span>
-                      </td>
-                      <td className="hidden px-3 py-2 whitespace-nowrap md:table-cell">{formatDate(Number(m.attributes?.SentTimestamp))}</td>
-                      <td className="hidden px-3 py-2 tabular-nums sm:table-cell">{m.attributes?.ApproximateReceiveCount ?? "-"}</td>
-                      <td className="max-w-[16rem] truncate px-3 py-2 font-mono text-[13px] sm:max-w-md">{bodyPreview(m.body)}</td>
-                      <td className="hidden px-3 py-2 whitespace-nowrap lg:table-cell">
-                        {left > 0 ? (
-                          <span className="text-muted-foreground">Hidden for {left}s</span>
-                        ) : (
-                          <span className="text-amber-700 dark:text-amber-300">Visible again</span>
-                        )}
-                      </td>
-                      <td className="px-4 py-2 text-right whitespace-nowrap" onClick={(e) => e.stopPropagation()}>
-                        <Button variant="ghost" size="icon" className="size-7" aria-label="Change visibility" title="Change visibility" onClick={() => setChanging(m)}>
-                          <Timer />
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive size-7"
-                          aria-label="Delete message"
-                          title="Delete message"
-                          disabled={deleting}
-                          onClick={() => deleteMsgs([m])}
-                        >
-                          <Trash2 />
-                        </Button>
-                      </td>
-                    </tr>
-                  )
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+    </Section>
+
+    <DataTable
+      title="Received messages"
+      data={held}
+      columns={columns}
+      rowId={(m) => m.message_id}
+      selection="none"
+      noSearch={held.length === 0}
+      searchPlaceholder="Search received messages"
+      onRowClick={(m) => setOpen(m)}
+      actions={
+        <>
+          <Button variant="outline" size="sm" onClick={() => setHeld([])} disabled={!held.length || deleting}>
+            <Eraser /> Clear list
+          </Button>
+          <Button variant="outline" size="sm" onClick={() => deleteMsgs(held)} disabled={!held.length || deleting}>
+            {deleting ? <Loader2 className="animate-spin" /> : <Trash2 />}
+            Delete all
+          </Button>
+        </>
+      }
+      empty={
+        <EmptyState
+          icon={Radio}
+          title="No messages received"
+          description="Poll for messages to receive them from the queue. Received messages stay hidden from other consumers until you delete them or the visibility timeout ends."
+          action={
+            !polling && (
+              <Button size="sm" onClick={poll} disabled={!valid}>
+                <Radio /> Poll for messages
+              </Button>
+            )
+          }
+        />
+      }
+    />
 
       <MessageDetailDialog
         message={open}
@@ -431,7 +466,7 @@ function ReceivePanel({ queue }: { queue: Queue }) {
           setOpen((o) => (o?.message_id === m.message_id ? { ...o, visibleAt: at } : o))
         }}
       />
-    </Section>
+    </>
   )
 }
 
@@ -482,7 +517,7 @@ function VisibilityDialog({
           </DialogHeader>
           <Field label="Visibility timeout" htmlFor="chg-vis" error={valid ? undefined : "Enter 0-43200 seconds"}>
             <div className="flex items-center gap-2">
-              <Input id="chg-vis" autoFocus inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value)} className={cn("h-9 w-32")} />
+              <Input id="chg-vis" autoFocus inputMode="numeric" value={value} onChange={(e) => setValue(e.target.value)} className="h-9 w-32" />
               <span className="text-muted-foreground text-sm">seconds</span>
             </div>
           </Field>

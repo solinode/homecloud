@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { CopyableText } from "@/components/console/copy-button"
+import { Field } from "@/components/console/form-field"
 import { Section } from "@/components/console/section"
 import { errorMessage } from "@/lib/api"
 import { useApi } from "@/lib/hooks"
@@ -125,7 +126,7 @@ export function PermissionsBoundarySection({
         {arn ? (
           <>
             <div className="flex flex-wrap items-center gap-2">
-              <ShieldAlert className="size-4 shrink-0 text-amber-600 dark:text-amber-400" />
+              <ShieldAlert className="text-warning size-4 shrink-0" />
               <Link href={policyHref(policyNameFromArn(arn))} className={LINK}>
                 {policyNameFromArn(arn)}
               </Link>
@@ -187,7 +188,9 @@ function SetBoundaryDialog({
             <BoundaryHelp kind={kind} />
           </DialogDescription>
         </DialogHeader>
-        <BoundarySelect value={value} onChange={setValue} className="w-full" />
+        <Field label="Boundary policy" htmlFor="set-boundary" help="Choose “No permissions boundary” to remove it.">
+          <BoundarySelect id="set-boundary" value={value} onChange={setValue} className="w-full" />
+        </Field>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             Cancel

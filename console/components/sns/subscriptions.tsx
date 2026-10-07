@@ -2,9 +2,10 @@
 
 import { useEffect, useState, type ReactNode } from "react"
 import Link from "next/link"
-import { Loader2, Plus, Rss } from "lucide-react"
+import { Clock, Loader2, Plus, Rss } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -13,17 +14,18 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { JsonEditor, jsonError } from "@/components/console/json-editor"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
+import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { QueueTypeBadge, queueHref } from "@/components/sqs/common"
 import { api, errorMessage } from "@/lib/api"
 import { formatNumber } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { FilterPolicyScope, LambdaFunction, Queue, Subscription, SubscriptionProtocol } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import {
   CONFIRM_PROTOCOLS,
@@ -91,9 +93,9 @@ export function SubscriptionsTable({
       id: "id",
       header: "ID",
       cell: (s) => (
-        <span className="font-mono text-[13px]" title={s.arn}>
-          {s.arn.slice(s.arn.lastIndexOf(":") + 1, s.arn.lastIndexOf(":") + 9)}…
-        </span>
+        <CellText mono title={s.arn}>
+          {`${s.arn.slice(s.arn.lastIndexOf(":") + 1, s.arn.lastIndexOf(":") + 9)}…`}
+        </CellText>
       ),
       value: (s) => s.arn,
       hideBelow: "lg",
@@ -103,22 +105,18 @@ export function SubscriptionsTable({
           {
             id: "topic",
             header: "Topic",
-            cell: (s: Subscription) => (
-              <Link href={topicHref(s.topic_name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-                {s.topic_name}
-              </Link>
-            ),
+            cell: (s: Subscription) => <CellLink href={topicHref(s.topic_name)}>{s.topic_name}</CellLink>,
             value: (s: Subscription) => s.topic_name,
           },
         ]
       : []),
     { id: "protocol", header: "Protocol", cell: (s) => <ProtocolBadge protocol={s.protocol} />, value: (s) => s.protocol },
-    { id: "endpoint", header: "Endpoint", cell: (s) => <SubscriptionEndpoint sub={s} className="line-clamp-2" />, value: (s) => s.endpoint },
+    { id: "endpoint", header: "Endpoint", cell: (s) => <SubscriptionEndpoint sub={s} className="block max-w-[22rem] truncate whitespace-nowrap" />, value: (s) => s.endpoint },
     { id: "status", header: "Status", cell: (s) => <SubscriptionStatusBadge status={s.status} />, value: (s) => s.status, hideBelow: "md" },
     {
       id: "raw",
       header: "Raw delivery",
-      cell: (s) => (s.raw_message_delivery ? "Enabled" : <span className="text-muted-foreground">Disabled</span>),
+      cell: (s) => <StatusBadge status={s.raw_message_delivery ? "enabled" : "disabled"} />,
       value: (s) => (s.raw_message_delivery ? "raw" : ""),
       hideBelow: "lg",
     },
@@ -150,7 +148,7 @@ export function SubscriptionsTable({
     {
       id: "failed",
       header: "Failed",
-      cell: (s) => <span className={s.failed ? "text-destructive tabular-nums" : "text-muted-foreground tabular-nums"}>{formatNumber(s.failed)}</span>,
+      cell: (s) => <span className={s.failed ? "text-danger tabular-nums" : "text-muted-foreground tabular-nums"}>{formatNumber(s.failed)}</span>,
       value: (s) => s.failed,
       hideBelow: "sm",
     },
@@ -242,26 +240,29 @@ function SubscriptionNotes({ sub: s }: { sub: Subscription }) {
   return (
     <div className="flex flex-col gap-1.5 text-xs">
       {pending && (
-        <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-amber-700 dark:text-amber-300">
-          <span>
-            Waiting for the endpoint to confirm.{" "}
-            {s.protocol.startsWith("http")
-              ? "HomeCloud POSTed a SubscriptionConfirmation message; the endpoint must visit its SubscribeURL."
-              : "The confirmation link is written to the HomeCloud server log."}{" "}
-            Messages are not delivered until then.
-          </span>
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 px-2 text-xs"
-            onClick={(e) => {
-              e.stopPropagation()
-              requestConfirmation(s)
-            }}
-          >
-            Request confirmation
-          </Button>
-        </p>
+        <Alert variant="warning" className="py-2 text-xs">
+          <Clock />
+          <AlertDescription className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs">
+            <span>
+              Waiting for the endpoint to confirm.{" "}
+              {s.protocol.startsWith("http")
+                ? "HomeCloud POSTed a SubscriptionConfirmation message; the endpoint must visit its SubscribeURL."
+                : "The confirmation link is written to the HomeCloud server log."}{" "}
+              Messages are not delivered until then.
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-6 px-2 text-xs"
+              onClick={(e) => {
+                e.stopPropagation()
+                requestConfirmation(s)
+              }}
+            >
+              Request confirmation
+            </Button>
+          </AlertDescription>
+        </Alert>
       )}
       {dlq && (
         <p className="text-muted-foreground">
@@ -272,7 +273,7 @@ function SubscriptionNotes({ sub: s }: { sub: Subscription }) {
         </p>
       )}
       {s.last_error && (
-        <p className="text-destructive break-words">
+        <p className="text-danger break-words">
           <span className="font-medium">Last error: </span>
           {s.last_error}
         </p>
@@ -628,41 +629,32 @@ function FilterPolicyField({
       </div>
       {on && (
         <>
-          <div className="flex flex-col gap-1.5">
-            <span className="text-sm font-medium">Filter policy scope</span>
-            <div role="radiogroup" aria-label="Filter policy scope" className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-              {(Object.keys(SCOPE_LABEL) as FilterPolicyScope[]).map((s) => (
-                <button
-                  key={s}
-                  type="button"
-                  role="radio"
-                  aria-checked={scope === s}
-                  onClick={() => onScopeChange(s)}
-                  className={cn(
-                    "flex flex-col rounded-md border px-3 py-2 text-left transition-colors",
-                    scope === s ? "border-primary bg-primary/5 ring-primary ring-1" : "hover:bg-muted/40",
-                  )}
-                >
-                  <span className="text-sm font-medium">{SCOPE_LABEL[s]}</span>
-                  <span className="text-muted-foreground text-xs">
-                    {s === "MessageAttributes" ? "Match the message attributes." : "Match fields of a JSON message body (may nest)."}
-                  </span>
-                </button>
+          <Field label="Filter policy scope">
+            <OptionGroup label="Filter policy scope">
+              {(Object.keys(SCOPE_LABEL) as FilterPolicyScope[]).map((sc) => (
+                <OptionCard
+                  key={sc}
+                  selected={scope === sc}
+                  onSelect={() => onScopeChange(sc)}
+                  title={SCOPE_LABEL[sc]}
+                  description={sc === "MessageAttributes" ? "Match the message attributes." : "Match fields of a JSON message body (may nest)."}
+                />
               ))}
-            </div>
-          </div>
-          <JsonEditor
-            value={value}
-            onChange={onChange}
-            rows={6}
-            validate={(p) => filterPolicyError(p, scope)}
-            className={error ? "[&>div:first-child]:border-destructive" : undefined}
-          />
+            </OptionGroup>
+          </Field>
+          <Field label="Filter policy" error={error}>
+            <JsonEditor
+              value={value}
+              onChange={onChange}
+              rows={6}
+              validate={(p) => filterPolicyError(p, scope)}
+              className={error ? "[&>div:first-child]:border-destructive" : undefined}
+            />
+          </Field>
           <div className="-mt-1 flex flex-wrap items-center gap-2">
             <Button type="button" variant="ghost" size="sm" onClick={() => onChange(EXAMPLE_POLICY[scope])}>
               Insert example
             </Button>
-            {error && <span className="text-destructive text-xs">{error}</span>}
           </div>
         </>
       )}
@@ -797,12 +789,15 @@ export function EditSubscriptionDialog({ sub, onClose }: { sub: Subscription | n
             </DialogDescription>
           </DialogHeader>
           {sub && isPending(sub) && CONFIRM_PROTOCOLS.includes(sub.protocol) && (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-amber-600/30 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300">
-              <span>This subscription is waiting for its endpoint to confirm it.</span>
-              <Button type="button" variant="outline" size="sm" className="h-7" onClick={() => requestConfirmation(sub)}>
-                Request confirmation
-              </Button>
-            </div>
+            <Alert variant="warning">
+              <Clock />
+              <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+                <span>This subscription is waiting for its endpoint to confirm it.</span>
+                <Button type="button" variant="outline" size="sm" className="h-7" onClick={() => requestConfirmation(sub)}>
+                  Request confirmation
+                </Button>
+              </AlertDescription>
+            </Alert>
           )}
           {rawSupported && <RawDeliverySwitch checked={raw} onChange={setRaw} />}
           <FilterPolicyField

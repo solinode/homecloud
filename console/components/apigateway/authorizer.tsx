@@ -5,6 +5,7 @@ import Link from "next/link"
 import { AlertTriangle, Loader2, Lock, LockOpen, Pencil } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
@@ -13,10 +14,10 @@ import { CopyableText } from "@/components/console/copy-button"
 import { Field } from "@/components/console/form-field"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { Section } from "@/components/console/section"
+import { Tag } from "@/components/console/tag"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { ApiRoute, AppClient, HttpApi, UserPool } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import { APIGW_PATH, apiPath } from "./common"
 
@@ -24,21 +25,14 @@ const POOLS_PATH = "/api/v1/cognito/user-pools"
 const poolHref = (id: string, tab?: string) => `/cognito/pool/?id=${encodeURIComponent(id)}${tab ? `&tab=${tab}` : ""}`
 const ANY_CLIENT = "__any__"
 
+/** AuthBadge is a route's authorization kind: JWT (locked) or None (public). */
 export function AuthBadge({ authorization, className }: { authorization?: string; className?: string }) {
   const jwt = authorization === "JWT"
   const Icon = jwt ? Lock : LockOpen
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
-        jwt
-          ? "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/20"
-          : "bg-slate-100 text-slate-600 ring-slate-500/20 dark:bg-slate-500/15 dark:text-slate-300 dark:ring-slate-400/20",
-        className,
-      )}
-    >
-      <Icon className="size-3" /> {jwt ? "JWT" : "None"}
-    </span>
+    <Tag accent={jwt ? "success" : "neutral"} mono={false} className={className}>
+      <Icon /> {jwt ? "JWT" : "None"}
+    </Tag>
   )
 }
 
@@ -82,7 +76,7 @@ export function AuthorizerSection({ api: a }: { api: HttpApi }) {
                       {pool?.name ?? auth.user_pool_id}
                     </Link>
                     <span className="text-muted-foreground font-mono text-xs">{auth.user_pool_id}</span>
-                    {pools.data && !pool && <span className="text-destructive text-xs">(pool not found: JWT routes return 401)</span>}
+                    {pools.data && !pool && <span className="text-danger text-xs">(pool not found: JWT routes return 401)</span>}
                   </span>
                 ),
               },
@@ -94,10 +88,12 @@ export function AuthorizerSection({ api: a }: { api: HttpApi }) {
           <p className="text-muted-foreground text-sm">No authorizer. Every route is public.</p>
         )}
         {!auth && jwtRoutes > 0 && (
-          <p className="flex gap-2 text-sm text-amber-700 dark:text-amber-400">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            {jwtRoutes} route{jwtRoutes === 1 ? " requires" : "s require"} JWT but the API has no authorizer, so they always return 401.
-          </p>
+          <Alert variant="warning">
+            <AlertTriangle />
+            <AlertDescription>
+              {jwtRoutes} route{jwtRoutes === 1 ? " requires" : "s require"} JWT but the API has no authorizer, so they always return 401.
+            </AlertDescription>
+          </Alert>
         )}
       </div>
       <AuthorizerDialog api={editing ? a : null} pools={pools.data} onClose={() => setEditing(false)} />
@@ -255,7 +251,7 @@ export function ChangeRouteAuthDialog({ api: a, route, onClose }: { api: HttpApi
                 : "will accept requests without a token."}
             </p>
             {next === "JWT" && !a.authorizer && (
-              <p className="text-amber-700 dark:text-amber-400">The API has no authorizer yet, so the route will return 401 until you set one.</p>
+              <p className="text-warning">The API has no authorizer yet, so the route will return 401 until you set one.</p>
             )}
           </div>
         )

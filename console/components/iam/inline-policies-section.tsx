@@ -6,6 +6,7 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
+import { EmptyState } from "@/components/console/empty-state"
 import { Section } from "@/components/console/section"
 import { api, seg } from "@/lib/api"
 import { pluralize } from "@/lib/format"
@@ -54,13 +55,22 @@ export function InlinePoliciesSection({
         }
       >
         {!names.length ? (
-          <p className="text-muted-foreground p-6 text-center text-sm">No inline policies.</p>
+          <EmptyState
+            icon={FileJson}
+            title="No inline policies"
+            description={`Inline policies are embedded in this ${kind} and deleted with it.`}
+            action={
+              <Button size="sm" variant="outline" onClick={() => setDialog({ open: true, initial: null })}>
+                <Plus /> Create inline policy
+              </Button>
+            }
+          />
         ) : (
           <ul>
             {names.map((n) => {
               const doc = policies![n]
               return (
-                <li key={n} className="flex flex-wrap items-center justify-between gap-2 border-b px-4 py-2.5 last:border-0">
+                <li key={n} className="flex flex-wrap items-center justify-between gap-2 border-b px-5 py-2.5 last:border-0">
                   <span className="flex min-w-0 items-center gap-2 text-sm">
                     <FileJson className="text-muted-foreground size-4 shrink-0" />
                     <span className="truncate font-medium">{n}</span>

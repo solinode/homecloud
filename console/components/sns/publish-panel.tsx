@@ -175,9 +175,9 @@ export function PublishPanel({ topic }: { topic: TopicDetail }) {
                 <span>{size.toLocaleString()} bytes of 256 KB</span>
                 {looksJson &&
                   (isJson ? (
-                    <span className="text-emerald-600 dark:text-emerald-400">Valid JSON</span>
+                    <span className="text-success">Valid JSON</span>
                   ) : (
-                    <span className="text-amber-700 dark:text-amber-300">Not valid JSON (sent as text)</span>
+                    <span className="text-warning">Not valid JSON (sent as text)</span>
                   ))}
               </span>
             }
@@ -214,13 +214,13 @@ export function PublishPanel({ topic }: { topic: TopicDetail }) {
           >
             <AttributesEditor rows={attrs} onChange={setAttrs} />
           </Field>
-          <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+          <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+            <Button type="button" variant="outline" onClick={() => (setSubject(""), setMessage(""), setAttrs([]), setGroupId(""), setDedupId(""), setSubmitted(false))} disabled={pending}>
+              <Eraser /> Clear
+            </Button>
             <Button type="submit" disabled={pending}>
               {pending ? <Loader2 className="animate-spin" /> : <Send />}
               Publish message
-            </Button>
-            <Button type="button" variant="outline" onClick={() => (setSubject(""), setMessage(""), setAttrs([]), setGroupId(""), setDedupId(""), setSubmitted(false))} disabled={pending}>
-              <Eraser /> Clear
             </Button>
           </div>
         </form>
@@ -230,7 +230,7 @@ export function PublishPanel({ topic }: { topic: TopicDetail }) {
         <Section title="Recently published" flush>
           <ul className="divide-y">
             {results.map((r) => (
-              <li key={`${r.message_id}-${r.at}`}className="flex flex-col gap-1 px-4 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between">
+              <li key={`${r.message_id}-${r.at}`} className="flex flex-col gap-1 px-5 py-2.5 text-sm sm:flex-row sm:items-center sm:justify-between">
                 <span className="flex min-w-0 items-center gap-2">
                   <span className="text-muted-foreground shrink-0 tabular-nums">{formatTime(r.at)}</span>
                   <CopyableText value={r.message_id} />
@@ -240,7 +240,7 @@ export function PublishPanel({ topic }: { topic: TopicDetail }) {
                   {r.group_id && <span className="mr-2">group {r.group_id}</span>}
                   {r.sequence_number && <span className="mr-2 font-mono">seq {r.sequence_number}</span>}
                   {r.duplicate ? (
-                    <span className="text-amber-700 dark:text-amber-300">duplicate, not delivered again</span>
+                    <span className="text-warning">duplicate, not delivered again</span>
                   ) : (
                     <>
                       matched {pluralize(r.matched, "subscription")}

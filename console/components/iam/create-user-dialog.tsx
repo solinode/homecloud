@@ -9,14 +9,15 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { CopyableText } from "@/components/console/copy-button"
 import { Field } from "@/components/console/form-field"
+import { KeyValueGrid } from "@/components/console/key-value"
+import { Stepper } from "@/components/console/stepper"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
 import { api, errorMessage } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { IamGroup, IamUser, PolicySummary } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import {
   CheckList,
@@ -113,7 +114,7 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
           <>
             <DialogHeader>
               <DialogTitle className="flex items-center gap-2">
-                <CheckCircle2 className="size-5 text-emerald-600 dark:text-emerald-400" /> User created successfully
+                <CheckCircle2 className="text-success size-5" /> User created successfully
               </DialogTitle>
               <DialogDescription>
                 {created.password ? "Retrieve the console password now. You can reset it later, but you cannot view it again." : "The user was created without console access."}
@@ -121,23 +122,21 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
             </DialogHeader>
             {created.password && (
               <div className="flex flex-col gap-3">
-                <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
-                  <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-                  This is the only time the password is shown. Copy it or download the .csv file and share it with {created.name} securely.
-                </div>
-                <div className="bg-muted/30 grid gap-3 rounded-md border p-3 text-sm">
-                  <div>
-                    <p className="text-muted-foreground mb-1 text-xs">Console sign-in URL</p>
-                    <CopyableText value={url} />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground mb-1 text-xs">User name</p>
-                    <CopyableText value={created.name} />
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground mb-1 text-xs">Console password</p>
-                    <SecretValue value={created.password} label="Password" />
-                  </div>
+                <Alert variant="warning">
+                  <AlertTriangle />
+                  <AlertDescription>
+                    This is the only time the password is shown. Copy it or download the .csv file and share it with {created.name} securely.
+                  </AlertDescription>
+                </Alert>
+                <div className="bg-muted/40 rounded-lg border p-4">
+                  <KeyValueGrid
+                    columns={2}
+                    items={[
+                      { label: "Console sign-in URL", value: <CopyableText value={url} />, wide: true },
+                      { label: "User name", value: <CopyableText value={created.name} /> },
+                      { label: "Console password", value: <SecretValue value={created.password} label="Password" /> },
+                    ]}
+                  />
                 </div>
               </div>
             )}
@@ -163,22 +162,7 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
             <DialogHeader>
               <DialogTitle>Create user</DialogTitle>
               <DialogDescription className="sr-only">Create an IAM user in three steps.</DialogDescription>
-              <ol className="mt-1 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs">
-                {STEPS.map((s, i) => (
-                  <li key={s} className={cn("flex items-center gap-1.5", i === step ? "text-foreground font-medium" : "text-muted-foreground")}>
-                    <span
-                      className={cn(
-                        "flex size-5 items-center justify-center rounded-full border text-[11px]",
-                        i === step && "border-primary bg-primary text-primary-foreground",
-                        i < step && "border-primary text-primary",
-                      )}
-                    >
-                      {i + 1}
-                    </span>
-                    {s}
-                  </li>
-                ))}
-              </ol>
+              <Stepper steps={STEPS} current={step} onStepClick={(i) => i < step && !pending && setStep(i)} className="mt-2" />
             </DialogHeader>
 
             {step === 0 && (
@@ -186,7 +170,7 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
                 <Field label="User name" htmlFor="new-user-name" error={touched ? nErr : null} help="Up to 64 characters: letters, digits and + = , . @ _ -">
                   <Input id="new-user-name" autoFocus autoComplete="off" value={name} onChange={(e) => setName(e.target.value.trim())} aria-invalid={touched && !!nErr} placeholder="e.g. jane" />
                 </Field>
-                <label className="flex items-start gap-3 rounded-md border p-3">
+                <label className="bg-card hover:bg-muted/50 flex cursor-pointer items-start gap-3 rounded-lg border p-3.5 transition-colors">
                   <Checkbox checked={consoleAccess} onCheckedChange={(v) => setConsoleAccess(v === true)} className="mt-0.5" />
                   <span className="flex flex-col gap-0.5">
                     <span className="text-sm font-medium">Provide user access to the HomeCloud console</span>
@@ -196,21 +180,16 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
                   </span>
                 </label>
                 {consoleAccess && (
-                  <div className="flex flex-col gap-2 pl-1">
-                    <Label>Console password</Label>
+                  <Field label="Console password">
                     <PasswordChooser value={pw} onChange={setPw} showErrors={touched} />
-                  </div>
+                  </Field>
                 )}
               </div>
             )}
 
             {step === 1 && (
               <div className="flex flex-col gap-5">
-                <div className="flex flex-col gap-2">
-                  <div>
-                    <p className="text-sm font-medium">Add user to groups</p>
-                    <p className="text-muted-foreground text-xs">The user gets every policy attached to its groups. This is the recommended way to manage permissions.</p>
-                  </div>
+                <Field label="Add user to groups" help="The user gets every policy attached to its groups. This is the recommended way to manage permissions.">
                   <CheckList
                     loading={groupsQ.isLoading}
                     items={(groupsQ.data ?? []).map((g) => ({ id: g.name, label: g.name, sub: `${g.attached_policies.length} policies, ${g.members.length} users` }))}
@@ -225,14 +204,10 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
                       </>
                     }
                   />
-                </div>
-                <div className="flex flex-col gap-2">
-                  <div>
-                    <p className="text-sm font-medium">Attach policies directly</p>
-                    <p className="text-muted-foreground text-xs">Optional. Policies attached here apply only to this user.</p>
-                  </div>
+                </Field>
+                <Field label="Attach policies directly" optional help="Policies attached here apply only to this user.">
                   <PolicyPicker policies={policiesQ.data} loading={policiesQ.isLoading} selected={policies} onChange={setPolicies} maxHeight="max-h-60" />
-                </div>
+                </Field>
                 <Field label="Permissions boundary" optional htmlFor="new-user-boundary" help={<BoundaryHelp kind="user" />}>
                   <BoundarySelect id="new-user-boundary" value={boundary} onChange={setBoundary} />
                 </Field>
@@ -241,31 +216,21 @@ export function CreateUserDialog({ open, onOpenChange, existing }: { open: boole
 
             {step === 2 && (
               <div className="flex flex-col gap-4 text-sm">
-                <div className="bg-muted/30 grid gap-2 rounded-md border p-3 sm:grid-cols-2">
-                  <div>
-                    <p className="text-muted-foreground text-xs">User name</p>
-                    <p className="font-medium">{name}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Console access</p>
-                    <p>{consoleAccess ? `Enabled (${pw.mode === "auto" ? "autogenerated" : "custom"} password)` : "Disabled"}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Groups</p>
-                    <p>{groups.length ? groups.join(", ") : "None"}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Policies attached directly</p>
-                    <p>{policies.length ? policies.join(", ") : "None"}</p>
-                  </div>
-                  <div>
-                    <p className="text-muted-foreground text-xs">Permissions boundary</p>
-                    <p>{boundary ? policyNameFromArn(boundary) : "Not set"}</p>
-                  </div>
+                <div className="bg-muted/40 rounded-lg border p-4">
+                  <KeyValueGrid
+                    columns={2}
+                    items={[
+                      { label: "User name", value: <span className="font-medium">{name}</span> },
+                      { label: "Console access", value: consoleAccess ? `Enabled (${pw.mode === "auto" ? "autogenerated" : "custom"} password)` : "Disabled" },
+                      { label: "Groups", value: groups.length ? groups.join(", ") : "None" },
+                      { label: "Policies attached directly", value: policies.length ? policies.join(", ") : "None" },
+                      { label: "Permissions boundary", value: boundary ? policyNameFromArn(boundary) : "Not set" },
+                    ]}
+                  />
                 </div>
                 {!groups.length && !policies.length && (
                   <p className="text-muted-foreground flex items-center gap-2 text-xs">
-                    <AlertTriangle className="size-3.5 text-amber-600 dark:text-amber-400" /> The user will have no permissions until you add it to a group or attach a policy.
+                    <AlertTriangle className="text-warning size-3.5" /> The user will have no permissions until you add it to a group or attach a policy.
                   </p>
                 )}
                 <Field label="Tags" optional help="Key-value pairs to organize and find users. You can change them later on the user's Tags tab." error={tagErr}>

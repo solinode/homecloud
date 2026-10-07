@@ -11,7 +11,7 @@ import { ErrorState } from "@/components/console/error-state"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useApi } from "@/lib/hooks"
 import type { S3Credentials } from "@/lib/types"
-import { cn } from "@/lib/utils"
+import { CodeBlock } from "@/components/console/code-block"
 
 /** Bucket name rules, mirroring validBucket in cli/internal/svc/s3/s3.go. */
 export function bucketNameChecks(name: string) {
@@ -39,17 +39,8 @@ export function objectExt(key: string): string {
   return i > 0 ? base.slice(i + 1).toLowerCase() : ""
 }
 
-/** CodeBlock is a monospace block with a copy button. */
-export function CodeBlock({ code, className }: { code: string; className?: string }) {
-  return (
-    <div className={cn("bg-muted/50 relative rounded-md border", className)}>
-      <pre className="overflow-x-auto p-3 pr-10 font-mono text-[12.5px] leading-5 whitespace-pre">{code}</pre>
-      <div className="absolute top-2 right-2">
-        <CopyButton value={code} label="Copy code" />
-      </div>
-    </div>
-  )
-}
+/** CodeBlock is re-exported from the console design system (kms and secrets import it from here). */
+export { CodeBlock } from "@/components/console/code-block"
 
 /** SecretText shows a masked value with reveal and copy controls. */
 export function SecretText({ value }: { value: string }) {
@@ -116,10 +107,7 @@ export function S3AccessCard({ bucket }: { bucket?: string }) {
               { label: "Secret access key", value: <SecretText value={data.secret_access_key} /> },
             ]}
           />
-          <div className="flex flex-col gap-1.5">
-            <span className="text-muted-foreground text-xs font-medium">AWS CLI example</span>
-            <CodeBlock code={example} />
-          </div>
+          <CodeBlock title="AWS CLI example" code={example} />
         </div>
       )}
     </Section>

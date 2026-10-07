@@ -7,8 +7,10 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { CopyButton, CopyableText } from "@/components/console/copy-button"
+import { CodeBlock } from "@/components/console/code-block"
+import { CopyableText } from "@/components/console/copy-button"
 import { KeyValueGrid } from "@/components/console/key-value"
+import { Tag } from "@/components/console/tag"
 import { formatBytes, formatDate } from "@/lib/format"
 import type { MessageAttribute } from "@/lib/types"
 
@@ -139,7 +141,9 @@ export function AttributesTable({ attrs }: { attrs?: Record<string, MessageAttri
           {entries.map(([k, a]) => (
             <tr key={k} className="border-b last:border-0">
               <td className="px-3 py-1.5 font-mono text-[13px]">{k}</td>
-              <td className="px-3 py-1.5">{a.data_type}</td>
+              <td className="px-3 py-1.5">
+                <Tag accent={a.data_type.startsWith("Number") ? "info" : "neutral"}>{a.data_type}</Tag>
+              </td>
               <td className="px-3 py-1.5 font-mono text-[13px] break-all">{a.string_value}</td>
             </tr>
           ))}
@@ -175,19 +179,12 @@ export function MessageDetailDialog({ message, onClose, actions }: { message: Me
         </DialogHeader>
         {message && (
           <div className="flex min-w-0 flex-col gap-4">
-            <div className="flex min-w-0 flex-col gap-1.5">
-              <div className="flex items-center justify-between gap-2">
-                <span className="text-sm font-medium">
-                  Body{" "}
-                  <span className="text-muted-foreground text-xs font-normal">
-                    ({formatBytes(new TextEncoder().encode(message.body).length)}
-                    {body.json ? ", JSON" : ""})
-                  </span>
-                </span>
-                <CopyButton value={message.body} size="sm" />
-              </div>
-              <pre className="bg-muted/50 max-h-80 overflow-auto rounded-md border p-3 font-mono text-[12.5px] whitespace-pre-wrap break-all">{body.text}</pre>
-            </div>
+            <CodeBlock
+              code={body.text}
+              title={`Body (${formatBytes(new TextEncoder().encode(message.body).length)}${body.json ? ", JSON" : ""})`}
+              wrap
+              maxHeight="20rem"
+            />
             <KeyValueGrid
               columns={2}
               items={[

@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
 import { Loader2, Plus, Server, Trash2 } from "lucide-react"
@@ -11,7 +10,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
@@ -20,7 +19,7 @@ import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { InstanceProfile } from "@/lib/types"
 
-import { IAM, LINK, instanceProfileHref, nameError } from "./common"
+import { IAM, instanceProfileHref, nameError } from "./common"
 import { RolePicker } from "./role-picker"
 import { roleHref } from "./role-common"
 
@@ -56,11 +55,7 @@ export function InstanceProfilesList() {
       id: "name",
       header: "Instance profile name",
       value: (p) => p.name,
-      cell: (p) => (
-        <Link href={instanceProfileHref(p.name)} className={LINK}>
-          {p.name}
-        </Link>
-      ),
+      cell: (p) => <CellLink href={instanceProfileHref(p.name)}>{p.name}</CellLink>,
     },
     {
       id: "role",
@@ -68,23 +63,17 @@ export function InstanceProfilesList() {
       value: (p) => p.roles?.[0] ?? "",
       cell: (p) =>
         p.roles?.length ? (
-          <Link href={roleHref(p.roles[0])} className="text-primary hover:underline">
-            {p.roles[0]}
-          </Link>
+          <CellLink href={roleHref(p.roles[0])}>{p.roles[0]}</CellLink>
         ) : (
           <span className="text-muted-foreground">No role</span>
         ),
     },
-    { id: "path", header: "Path", value: (p) => p.path, cell: (p) => <span className="font-mono text-xs">{p.path || "/"}</span>, hideBelow: "md" },
+    { id: "path", header: "Path", value: (p) => p.path, cell: (p) => <CellText mono muted>{p.path || "/"}</CellText>, hideBelow: "md" },
     {
       id: "arn",
       header: "ARN",
       value: (p) => p.arn,
-      cell: (p) => (
-        <span className="text-muted-foreground block max-w-[24rem] truncate font-mono text-xs" title={p.arn}>
-          {p.arn}
-        </span>
-      ),
+      cell: (p) => <CellText mono muted>{p.arn}</CellText>,
       hideBelow: "lg",
     },
     { id: "created", header: "Created", value: (p) => p.created_at, cell: (p) => <TimeAgo value={p.created_at} />, hideBelow: "sm" },

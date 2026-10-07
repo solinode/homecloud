@@ -80,8 +80,8 @@ export function CodeEditor({
   }
 
   return (
-    <div className={cn("bg-muted/30 flex max-h-[65vh] min-h-64 overflow-auto rounded-md border font-mono text-[13px] leading-5", className)}>
-      <div aria-hidden className="text-muted-foreground/60 bg-muted/50 h-fit min-h-full border-r px-2 py-2 text-right select-none">
+    <div className={cn("bg-muted/30 focus-within:border-ring flex max-h-[65vh] min-h-64 overflow-auto rounded-md border font-mono text-[13px] leading-5 transition-colors", className)}>
+      <div aria-hidden className="text-faint bg-muted/50 h-fit min-h-full border-r px-2 py-2 text-right select-none">
         {Array.from({ length: lines }, (_, i) => (
           <div key={i}>{i + 1}</div>
         ))}

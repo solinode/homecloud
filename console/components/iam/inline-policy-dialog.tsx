@@ -95,7 +95,9 @@ export function InlinePolicyDialog({
           </Field>
         )}
         {readOnly && parsed && <PolicyStatementsTable doc={parsed} />}
-        <JsonEditor value={text} onChange={readOnly ? undefined : setText} readOnly={readOnly} validate={validatePolicy} rows={14} />
+        <Field label="Policy document" help={readOnly ? undefined : "JSON with a Version and one or more Statements (Effect, Action, Resource)."}>
+          <JsonEditor value={text} onChange={readOnly ? undefined : setText} readOnly={readOnly} validate={validatePolicy} rows={14} />
+        </Field>
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
             {readOnly ? "Close" : "Cancel"}

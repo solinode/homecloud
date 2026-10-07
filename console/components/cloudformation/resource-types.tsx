@@ -7,9 +7,10 @@ import { Boxes, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { CopyButton } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
+import { StatusBadge } from "@/components/console/status-badge"
 import { useApi } from "@/lib/hooks"
 import { CREATE_HREF, TYPES_PATH, TYPE_META, typeParts } from "./common"
 
@@ -35,18 +36,18 @@ const columns: Column<TypeRow>[] = [
     ),
     value: (t) => t.type,
   },
-  { id: "resource", header: "Resource", cell: (t) => t.resource, value: (t) => t.resource, hideBelow: "sm" },
+  { id: "resource", header: "Resource", cell: (t) => <CellText>{t.resource}</CellText>, value: (t) => t.resource, hideBelow: "sm" },
   {
     id: "ref",
     header: "Ref returns",
-    cell: (t) => (t.ref ? t.ref : <span className="text-muted-foreground">Physical ID</span>),
+    cell: (t) => (t.ref ? <CellText>{t.ref}</CellText> : <span className="text-muted-foreground">Physical ID</span>),
     value: (t) => t.ref,
     hideBelow: "md",
   },
   {
     id: "waits",
     header: "Waits for",
-    cell: (t) => (t.waits ? <span className="font-mono text-[13px]">{t.waits}</span> : <span className="text-muted-foreground">-</span>),
+    cell: (t) => (t.waits ? <StatusBadge status={t.waits} /> : <span className="text-muted-foreground">-</span>),
     value: (t) => t.waits,
     hideBelow: "lg",
   },
@@ -55,9 +56,9 @@ const columns: Column<TypeRow>[] = [
     header: "Console",
     cell: (t) =>
       t.consoleHref ? (
-        <Link href={t.consoleHref} className="text-primary whitespace-nowrap hover:underline">
+        <CellLink href={t.consoleHref} max="14rem">
           {t.consoleService}
-        </Link>
+        </CellLink>
       ) : (
         <span className="text-muted-foreground">-</span>
       ),

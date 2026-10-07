@@ -7,7 +7,7 @@ import { Container, Plus } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -20,7 +20,7 @@ export function TaskCounts({ s }: { s: Pick<EcsService, "desired_count" | "runni
   const ok = s.running_count === s.desired_count && s.pending_count === 0
   return (
     <span className="text-sm whitespace-nowrap tabular-nums">
-      <span className={ok ? "text-emerald-700 dark:text-emerald-400" : "text-amber-700 dark:text-amber-400"}>{s.running_count}</span>
+      <span className={ok ? "text-success font-medium" : "text-warning font-medium"}>{s.running_count}</span>
       <span className="text-muted-foreground"> / {s.desired_count} running</span>
       {s.pending_count > 0 && <span className="text-muted-foreground">, {s.pending_count} pending</span>}
     </span>
@@ -32,9 +32,9 @@ const columns: Column<EcsService>[] = [
     id: "name",
     header: "Service name",
     cell: (s) => (
-      <Link href={serviceHref(s.name)} onClick={(e) => e.stopPropagation()} className="text-primary font-medium whitespace-nowrap hover:underline">
+      <CellLink href={serviceHref(s.name)} max="18rem">
         {s.name}
-      </Link>
+      </CellLink>
     ),
     value: (s) => s.name,
   },
@@ -58,14 +58,12 @@ const columns: Column<EcsService>[] = [
     header: "Target group",
     cell: (s) =>
       s.load_balancer ? (
-        <Link
-          href={targetGroupHref(s.load_balancer.target_group)}
-          onClick={(e) => e.stopPropagation()}
-          className="text-primary text-sm whitespace-nowrap hover:underline"
-        >
-          {s.load_balancer.target_group}
-          <span className="text-muted-foreground">:{s.load_balancer.container_port}</span>
-        </Link>
+        <span className="flex items-center whitespace-nowrap">
+          <CellLink href={targetGroupHref(s.load_balancer.target_group)} max="14rem">
+            {s.load_balancer.target_group}
+          </CellLink>
+          <span className="text-muted-foreground font-mono text-[13px]">:{s.load_balancer.container_port}</span>
+        </span>
       ) : (
         <span className="text-muted-foreground">-</span>
       ),

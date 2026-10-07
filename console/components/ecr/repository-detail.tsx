@@ -2,28 +2,30 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { AlertCircle, ArrowLeft, Copy, Layers, Loader2, Terminal, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, Copy, Layers, RefreshCw, Terminal, Trash2 } from "lucide-react"
 import { useRouter } from "next/navigation"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyButton, CopyableText, copyText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
+import { Tag } from "@/components/console/tag"
 import { TagList } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, api } from "@/lib/api"
 import { formatBytes, formatDate, pluralize } from "@/lib/format"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { EcrImage, EcrRepositoryDetail } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
 import { CommandSteps, DeleteRepositoryDialog, ECR_PATH, PushCommandsDialog, repoApiPath, shortDigest } from "./common"
 
@@ -69,6 +71,11 @@ export function RepositoryDetail() {
   const images = data.images ?? []
   const totalSize = images.reduce((a, i) => a + (i.size_bytes || 0), 0)
   const sel = images.find((i) => i.digest === selected[0])
+  const lastPushed = images
+    .map((i) => i.pushed_at)
+    .filter(validTime)
+    .sort()
+    .at(-1)
 
   const columns: Column<EcrImage>[] = [
     {
@@ -79,9 +86,9 @@ export function RepositoryDetail() {
         i.tags.length ? (
           <span className="flex flex-wrap gap-1">
             {i.tags.map((t) => (
-              <Badge key={t} variant="secondary" className="font-mono">
+              <Tag key={t} accent={t === "latest" ? "brand" : "neutral"}>
                 {t}
-              </Badge>
+              </Tag>
             ))}
           </span>
         ) : (
@@ -94,7 +101,7 @@ export function RepositoryDetail() {
       value: (i) => i.digest,
       cell: (i) => <CopyableText value={i.digest} display={shortDigest(i.digest)} />,
     },
-    { id: "platform", header: "Platform", value: (i) => i.platform ?? "", cell: (i) => <span className="font-mono text-[13px]">{i.platform || "-"}</span>, hideBelow: "md" },
+    { id: "platform", header: "Platform", value: (i) => i.platform ?? "", cell: (i) => <CellText mono>{i.platform}</CellText>, hideBelow: "md" },
     {
       id: "size",
       header: "Size",
@@ -128,18 +135,39 @@ export function RepositoryDetail() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating}>
-              {isValidating && <Loader2 className="animate-spin" />}
+              <RefreshCw className={cn(isValidating && "animate-spin")} />
               Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setPushOpen(true)}>
+            <ActionsMenu
+              items={[
+                {
+                  label: "Copy URI",
+                  icon: <Copy />,
+                  onSelect: async () => {
+                    if (await copyText(repo.uri)) toast.success("URI copied")
+                  },
+                },
+                { separator: true },
+                { label: "Delete repository", icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(true) },
+              ]}
+            />
+            <Button size="sm" onClick={() => setPushOpen(true)}>
               <Terminal /> View push commands
-            </Button>
-            <Button variant="destructive" size="sm" onClick={() => setDeleting(true)}>
-              <Trash2 /> Delete
             </Button>
           </>
         }
       />
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+        <StatTile label="Images" value={images.length} caption={pluralize(images.reduce((a, i) => a + i.tags.length, 0), "tag")} />
+        <StatTile label="Total size" value={formatBytes(totalSize)} caption="Sum of image sizes" />
+        <StatTile
+          label="Last pushed"
+          value={lastPushed ? <TimeAgo value={lastPushed} /> : "Never"}
+          caption={lastPushed ? formatDate(lastPushed) : "No images yet"}
+          className="col-span-2 lg:col-span-1"
+        />
+      </div>
 
       <Section title="General information">
         <KeyValueGrid
@@ -148,8 +176,6 @@ export function RepositoryDetail() {
             { label: "Repository name", value: <span className="font-mono text-[13px] break-all">{repo.name}</span> },
             { label: "URI", value: <CopyableText value={repo.uri} /> },
             { label: "Tag mutability", value: repo.tag_mutable ? "Mutable" : "Immutable" },
-            { label: "Images", value: String(images.length) },
-            { label: "Total size", value: formatBytes(totalSize) },
             { label: "Created", value: <span>{formatDate(repo.created_at)} (<TimeAgo value={repo.created_at} />)</span> },
             { label: "Description", value: repo.description ?? "" },
             { label: "ARN", value: <CopyableText value={repo.arn} />, wide: true },

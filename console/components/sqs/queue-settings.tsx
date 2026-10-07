@@ -7,7 +7,9 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyableText } from "@/components/console/copy-button"
+import { StatusBadge } from "@/components/console/status-badge"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { Section } from "@/components/console/section"
 import { TagList, TagsEditor, rowsToTags, tagsToRows, type TagRow } from "@/components/console/tags-editor"
@@ -83,7 +85,7 @@ export function QueueSettings({ queue, editing, onEditingChange }: { queue: Queu
               { label: "Maximum message size", value: `${Math.round(queue.max_message_size / 1024)} KB` },
               ...(queue.fifo
                 ? [
-                    { label: "Content-based deduplication", value: queue.content_based_deduplication ? "Enabled" : "Disabled" },
+                    { label: "Content-based deduplication", value: <StatusBadge status={queue.content_based_deduplication ? "enabled" : "disabled"} /> },
                     { label: "Deduplication scope", value: queue.deduplication_scope === "messageGroup" ? "Message group" : "Queue" },
                     { label: "FIFO throughput limit", value: queue.fifo_throughput_limit === "perMessageGroupId" ? "Per message group ID" : "Per queue" },
                   ]
@@ -141,7 +143,12 @@ export function QueueSettings({ queue, editing, onEditingChange }: { queue: Queu
             items={[
               {
                 label: "Server-side encryption",
-                value: { sqs: "Enabled (SSE-SQS)", kms: "Enabled (SSE-KMS)", none: "Disabled" }[sseMode(queue)],
+                value: (
+                  <StatusBadge
+                    status={sseMode(queue) === "none" ? "disabled" : "enabled"}
+                    label={{ sqs: "Enabled (SSE-SQS)", kms: "Enabled (SSE-KMS)", none: "Disabled" }[sseMode(queue)]}
+                  />
+                ),
               },
               ...(queue.kms_master_key_id
                 ? [
@@ -160,7 +167,7 @@ export function QueueSettings({ queue, editing, onEditingChange }: { queue: Queu
           description={queue.policy ? "Stored with the queue and returned by GetQueueAttributes; HomeCloud authorizes requests with IAM identity policies." : undefined}
         >
           {queue.policy ? (
-            <pre className="bg-muted/50 max-h-80 overflow-auto rounded-md border p-3 font-mono text-xs">{prettyJson(queue.policy)}</pre>
+            <CodeBlock code={prettyJson(queue.policy)} title="policy.json" maxHeight="20rem" />
           ) : (
             <p className="text-muted-foreground text-sm">No access policy.</p>
           )}

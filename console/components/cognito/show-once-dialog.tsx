@@ -3,9 +3,10 @@
 import type { ReactNode } from "react"
 import { AlertTriangle } from "lucide-react"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { CopyButton } from "@/components/console/copy-button"
+import { CodeBlock } from "@/components/console/code-block"
 
 export interface OnceValue {
   label: string
@@ -27,22 +28,20 @@ export function ShowOnceDialog({ open, onClose, title, description, values }: { 
         </DialogHeader>
         <div className="flex flex-col gap-3">
           {values.map((v) => (
-            <div key={v.label} className="flex flex-col gap-1">
-              <span className="text-muted-foreground text-xs font-medium">{v.label}</span>
-              <div className="bg-muted/50 flex items-center gap-2 rounded-md border px-3 py-2">
-                <code className="min-w-0 flex-1 font-mono text-[13px] break-all" data-testid={`once-${v.label}`}>
-                  {v.value}
-                </code>
-                <CopyButton value={v.value} label={`Copy ${v.label.toLowerCase()}`} />
-              </div>
-            </div>
+            <CodeBlock key={v.label} title={v.label} code={v.value} copyLabel={`Copy ${v.label.toLowerCase()}`} wrap>
+              <code className="block break-all whitespace-pre-wrap" data-testid={`once-${v.label}`}>
+                {v.value}
+              </code>
+            </CodeBlock>
           ))}
           {values.some((v) => v.secret) && (
-            <p className="flex gap-2 text-sm text-amber-700 dark:text-amber-400">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              This is the only time the {values.filter((v) => v.secret).map((v) => v.label.toLowerCase()).join(" and ")} is shown. Copy it now and store it
-              safely.
-            </p>
+            <Alert variant="warning">
+              <AlertTriangle />
+              <AlertDescription>
+                This is the only time the {values.filter((v) => v.secret).map((v) => v.label.toLowerCase()).join(" and ")} is shown. Copy it now and store it
+                safely.
+              </AlertDescription>
+            </Alert>
           )}
         </div>
         <DialogFooter>

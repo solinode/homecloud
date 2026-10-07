@@ -54,7 +54,7 @@ export function DeleteZoneDialog({
       }}
     >
       {hasRecords && (
-        <label className="flex items-start gap-2 rounded-md border border-amber-600/30 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300">
+        <label className="bg-warning-soft border-warning/25 text-foreground flex cursor-pointer items-start gap-2 rounded-lg border p-3 text-sm">
           <Checkbox className="mt-0.5" checked={force} onCheckedChange={(c) => setForce(!!c)} />
           <span>
             Also delete the {pluralize(zone!.records, "record")} in this zone (force delete).

@@ -6,6 +6,7 @@ import { useState } from "react"
 import { Eye, FilePen, Info, Loader2, Pencil, Star, Trash2, UserCog, Users, UsersRound } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -13,7 +14,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
@@ -119,14 +120,12 @@ export function PolicyDetail() {
         actions={
           !policy.managed && (
             <>
+              <ActionsMenu items={[{ label: "Delete policy", icon: <Trash2 />, destructive: true, onSelect: () => setConfirmDelete(true) }]} />
               {!editing && (
-                <Button size="sm" variant="outline" onClick={() => startEdit()}>
+                <Button size="sm" onClick={() => startEdit()}>
                   <Pencil /> Edit
                 </Button>
               )}
-              <Button size="sm" variant="outline" onClick={() => setConfirmDelete(true)}>
-                <Trash2 /> Delete
-              </Button>
             </>
           )
         }
@@ -170,13 +169,13 @@ export function PolicyDetail() {
             >
               <div className="flex flex-col gap-4">
                 {versionCount >= MAX_VERSIONS && (
-                  <p className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
-                    <Info className="mt-0.5 size-4 shrink-0" />
-                    <span>
+                  <Alert variant="warning">
+                    <Info />
+                    <AlertDescription>
                       This policy already has {MAX_VERSIONS} versions, the maximum. Saving deletes the oldest non-default version
                       {oldestNonDefault ? ` (${oldestNonDefault.version_id})` : ""}.
-                    </span>
-                  </p>
+                    </AlertDescription>
+                  </Alert>
                 )}
                 <Field label="Description" htmlFor="edit-desc" optional>
                   <Textarea id="edit-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} maxLength={1000} />
@@ -195,16 +194,18 @@ export function PolicyDetail() {
           ) : (
             <>
               {policy.managed && (
-                <p className="text-muted-foreground flex items-start gap-2 rounded-md border px-3 py-2 text-sm">
-                  <Info className="mt-0.5 size-4 shrink-0 text-blue-600 dark:text-blue-400" />
-                  <span>
-                    This is an AWS managed policy. It cannot be edited or deleted. To customize it, copy its JSON into a{" "}
-                    <Link href="/iam/policies/create/" className="text-primary hover:underline">
-                      new policy
-                    </Link>
-                    .
-                  </span>
-                </p>
+                <Alert variant="info">
+                  <Info />
+                  <AlertDescription>
+                    <span>
+                      This is an AWS managed policy. It cannot be edited or deleted. To customize it, copy its JSON into a{" "}
+                      <Link href="/iam/policies/create/" className="text-primary hover:underline">
+                        new policy
+                      </Link>
+                      .
+                    </span>
+                  </AlertDescription>
+                </Alert>
               )}
               <Section title="Permissions defined in this policy">
                 <PolicyStatementsTable doc={policy.document} />
@@ -259,39 +260,31 @@ function EntitiesTab({ users, groups, roles }: { users: string[]; groups: string
     ...groups.map((n) => ({ n, href: groupHref(n), icon: UsersRound, type: "User group" })),
     ...roles.map((n) => ({ n, href: roleHref(n), icon: UserCog, type: "Role" })),
   ]
+  type Row = (typeof rows)[number]
+  const columns: Column<Row>[] = [
+    { id: "name", header: "Entity name", value: (r) => r.n, cell: (r) => <CellLink href={r.href}>{r.n}</CellLink> },
+    {
+      id: "type",
+      header: "Entity type",
+      value: (r) => r.type,
+      cell: (r) => (
+        <span className="text-muted-foreground flex items-center gap-1.5 whitespace-nowrap">
+          <r.icon className="size-3.5" /> {r.type}
+        </span>
+      ),
+    },
+  ]
   return (
-    <Section title="Entities attached" description="Users, user groups and roles this policy is attached to as a permissions policy." flush>
-      {!rows.length ? (
-        <EmptyState icon={Users} title="Not attached" description="Attach this policy from the Permissions tab of a user, group or role." />
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                <th className="px-4 py-2 font-semibold">Entity name</th>
-                <th className="px-4 py-2 font-semibold">Entity type</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr key={`${r.type}-${r.n}`} className="border-b last:border-0">
-                  <td className="px-4 py-2">
-                    <Link href={r.href} className={LINK}>
-                      {r.n}
-                    </Link>
-                  </td>
-                  <td className="text-muted-foreground px-4 py-2">
-                    <span className="flex items-center gap-1.5">
-                      <r.icon className="size-3.5" /> {r.type}
-                    </span>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </Section>
+    <DataTable
+      title="Entities attached"
+      description="Users, user groups and roles this policy is attached to as a permissions policy."
+      data={rows}
+      columns={columns}
+      rowId={(r) => `${r.type}-${r.n}`}
+      count={rows.length}
+      noSearch={rows.length < 10}
+      empty={<EmptyState icon={Users} title="Not attached" description="Attach this policy from the Permissions tab of a user, group or role." />}
+    />
   )
 }
 

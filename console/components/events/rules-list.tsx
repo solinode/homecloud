@@ -2,11 +2,11 @@
 
 import { useState } from "react"
 import Link from "next/link"
-import { CalendarClock, Plus, Send, Workflow } from "lucide-react"
+import { Plus, Send, Workflow } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
@@ -15,29 +15,20 @@ import { formatNumber } from "@/lib/format"
 import { useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { EventRule } from "@/lib/types"
 import { BusSelect } from "./bus-select"
-import { RULES_PATH, busQuery, describeSchedule, hasNextRun, isSchedule, patternSummary, ruleHref, useRuleActions } from "./common"
+import { RULES_PATH, RuleTypeTag, busQuery, describeSchedule, hasNextRun, isSchedule, patternSummary, ruleHref, useRuleActions } from "./common"
 
 const columns: Column<EventRule>[] = [
   {
     id: "name",
     header: "Name",
-    cell: (r) => (
-      <Link href={ruleHref(r.name, r.event_bus)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-        {r.name}
-      </Link>
-    ),
+    cell: (r) => <CellLink href={ruleHref(r.name, r.event_bus)}>{r.name}</CellLink>,
     value: (r) => r.name,
   },
   { id: "state", header: "Status", cell: (r) => <StatusBadge status={r.state} />, value: (r) => r.state },
   {
     id: "type",
     header: "Type",
-    cell: (r) => (
-      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-        {isSchedule(r) ? <CalendarClock className="text-muted-foreground size-3.5" /> : <Workflow className="text-muted-foreground size-3.5" />}
-        {isSchedule(r) ? "Schedule" : "Event pattern"}
-      </span>
-    ),
+    cell: (r) => <RuleTypeTag rule={r} />,
     value: (r) => (isSchedule(r) ? "schedule" : "event pattern"),
     hideBelow: "sm",
   },
@@ -46,13 +37,13 @@ const columns: Column<EventRule>[] = [
     header: "Schedule / pattern",
     cell: (r) =>
       isSchedule(r) ? (
-        <span className="font-mono text-[13px] whitespace-nowrap" title={describeSchedule(r.schedule_expression!)}>
+        <CellText mono title={describeSchedule(r.schedule_expression!)}>
           {r.schedule_expression}
-        </span>
+        </CellText>
       ) : (
-        <span className="text-muted-foreground block max-w-80 truncate font-mono text-[12.5px]" title={JSON.stringify(r.event_pattern)}>
+        <CellText mono muted max="20rem" className="text-[12.5px]" title={JSON.stringify(r.event_pattern)}>
           {patternSummary(r.event_pattern)}
-        </span>
+        </CellText>
       ),
     value: (r) => r.schedule_expression || JSON.stringify(r.event_pattern ?? {}),
     hideBelow: "md",
@@ -72,7 +63,7 @@ const columns: Column<EventRule>[] = [
     cell: (r) => (
       <span className="tabular-nums whitespace-nowrap">
         {formatNumber(r.invocations)}
-        {r.failed_invocations > 0 && <span className="text-destructive"> ({formatNumber(r.failed_invocations)} failed)</span>}
+        {r.failed_invocations > 0 && <span className="text-danger"> ({formatNumber(r.failed_invocations)} failed)</span>}
       </span>
     ),
     value: (r) => r.invocations,

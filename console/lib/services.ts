@@ -50,8 +50,6 @@ export interface ServiceDef {
   description: string
   category: string
   icon: LucideIcon
-  /** tile/icon accent color (tailwind classes) */
-  color: string
   href: string
   /** path prefixes owned by this service */
   paths: string[]
@@ -78,7 +76,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Virtual servers in the cloud",
     category: "Compute",
     icon: Cpu,
-    color: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
     href: "/ec2/",
     paths: ["/ec2"],
     nav: [
@@ -129,7 +126,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Run code without thinking about servers",
     category: "Compute",
     icon: FunctionSquare,
-    color: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
     href: "/lambda/",
     paths: ["/lambda"],
     nav: [
@@ -154,7 +150,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Scalable object storage",
     category: "Storage",
     icon: HardDrive,
-    color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
     href: "/s3/",
     paths: ["/s3"],
     nav: [{ items: [{ label: "Buckets", href: "/s3/", match: ["/s3/bucket/"] }] }],
@@ -166,7 +161,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Managed relational and document databases",
     category: "Database",
     icon: Database,
-    color: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
     href: "/rds/",
     paths: ["/rds"],
     nav: [
@@ -186,7 +180,6 @@ export const SERVICES: ServiceDef[] = [
     description: "In-memory caching (Redis, Valkey, Memcached)",
     category: "Database",
     icon: DatabaseZap,
-    color: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
     href: "/elasticache/",
     paths: ["/elasticache"],
     nav: [
@@ -206,7 +199,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Managed NoSQL key-value database",
     category: "Database",
     icon: Table2,
-    color: "bg-blue-500/10 text-blue-600 dark:text-blue-400",
     href: "/dynamodb/",
     paths: ["/dynamodb"],
     nav: [{ items: [{ label: "Tables", href: "/dynamodb/", match: ["/dynamodb/table/", "/dynamodb/create/"] }] }],
@@ -218,7 +210,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Isolated virtual networks",
     category: "Networking & Content Delivery",
     icon: Network,
-    color: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
     href: "/vpc/",
     paths: ["/vpc"],
     nav: [
@@ -244,7 +235,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Create, publish and secure APIs",
     category: "Networking & Content Delivery",
     icon: Route,
-    color: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
     href: "/apigateway/",
     paths: ["/apigateway"],
     nav: [
@@ -259,7 +249,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Manage access to HomeCloud resources",
     category: "Security, Identity & Compliance",
     icon: ShieldCheck,
-    color: "bg-red-500/10 text-red-600 dark:text-red-400",
     href: "/iam/",
     paths: ["/iam"],
     nav: [
@@ -284,7 +273,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Store and rotate credentials securely",
     category: "Security, Identity & Compliance",
     icon: KeyRound,
-    color: "bg-red-500/10 text-red-600 dark:text-red-400",
     href: "/secrets/",
     paths: ["/secrets"],
     nav: [{ items: [{ label: "Secrets", href: "/secrets/", match: ["/secrets/secret/", "/secrets/create/"] }] }],
@@ -296,7 +284,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Metrics, logs and alarms",
     category: "Management & Governance",
     icon: Activity,
-    color: "bg-pink-500/10 text-pink-600 dark:text-pink-400",
     href: "/cloudwatch/",
     paths: ["/cloudwatch"],
     nav: [
@@ -319,7 +306,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Audit log of every API call",
     category: "Management & Governance",
     icon: ScrollText,
-    color: "bg-pink-500/10 text-pink-600 dark:text-pink-400",
     href: "/cloudtrail/",
     paths: ["/cloudtrail"],
     nav: [{ items: [{ label: "Event history", href: "/cloudtrail/" }] }],
@@ -331,7 +317,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Managed message queues",
     category: "Application Integration",
     icon: ListOrdered,
-    color: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
     href: "/sqs/",
     paths: ["/sqs"],
     nav: [{ items: [{ label: "Queues", href: "/sqs/", match: ["/sqs/queue/", "/sqs/create/"] }] }],
@@ -343,7 +328,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Pub/sub notifications",
     category: "Application Integration",
     icon: Megaphone,
-    color: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
     href: "/sns/",
     paths: ["/sns"],
     nav: [
@@ -362,7 +346,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Serverless event bus and schedules",
     category: "Application Integration",
     icon: Cable,
-    color: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
     href: "/events/",
     paths: ["/events"],
     nav: [
@@ -384,7 +367,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Run containerized services and tasks",
     category: "Containers",
     icon: Container,
-    color: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
     href: "/ecs/",
     paths: ["/ecs"],
     nav: [
@@ -405,7 +387,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Private Docker image registry",
     category: "Containers",
     icon: Package,
-    color: "bg-orange-500/10 text-orange-600 dark:text-orange-400",
     href: "/ecr/",
     paths: ["/ecr"],
     nav: [{ items: [{ label: "Repositories", href: "/ecr/", match: ["/ecr/repository/"] }] }],
@@ -417,7 +398,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Shared file systems for instances",
     category: "Storage",
     icon: FolderOpen,
-    color: "bg-emerald-500/10 text-emerald-600 dark:text-emerald-400",
     href: "/efs/",
     paths: ["/efs"],
     nav: [{ items: [{ label: "File systems", href: "/efs/", match: ["/efs/file-system/"] }] }],
@@ -429,7 +409,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Load balancers and target groups",
     category: "Networking & Content Delivery",
     icon: Split,
-    color: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
     href: "/elb/",
     paths: ["/elb"],
     nav: [
@@ -450,7 +429,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Create and control encryption keys",
     category: "Security, Identity & Compliance",
     icon: LockKeyhole,
-    color: "bg-red-500/10 text-red-600 dark:text-red-400",
     href: "/kms/",
     paths: ["/kms"],
     nav: [{ items: [{ label: "Customer managed keys", href: "/kms/", match: ["/kms/key/"] }, { label: "Encrypt / decrypt", href: "/kms/crypto/" }] }],
@@ -462,7 +440,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Parameter Store for configuration and secrets",
     category: "Management & Governance",
     icon: SlidersHorizontal,
-    color: "bg-pink-500/10 text-pink-600 dark:text-pink-400",
     href: "/ssm/",
     paths: ["/ssm"],
     nav: [{ title: "Application management", items: [{ label: "Parameter Store", href: "/ssm/", match: ["/ssm/parameter/", "/ssm/create/"] }] }],
@@ -474,7 +451,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Visual workflows for distributed applications",
     category: "Application Integration",
     icon: Workflow,
-    color: "bg-fuchsia-500/10 text-fuchsia-600 dark:text-fuchsia-400",
     href: "/sfn/",
     paths: ["/sfn"],
     nav: [
@@ -492,7 +468,6 @@ export const SERVICES: ServiceDef[] = [
     description: "Model and provision resources with templates",
     category: "Management & Governance",
     icon: Layers,
-    color: "bg-pink-500/10 text-pink-600 dark:text-pink-400",
     href: "/cloudformation/",
     paths: ["/cloudformation"],
     nav: [
@@ -511,7 +486,6 @@ export const SERVICES: ServiceDef[] = [
     description: "DNS hosted zones for your VPCs and LAN",
     category: "Networking & Content Delivery",
     icon: Globe,
-    color: "bg-violet-500/10 text-violet-600 dark:text-violet-400",
     href: "/route53/",
     paths: ["/route53"],
     nav: [
@@ -526,7 +500,6 @@ export const SERVICES: ServiceDef[] = [
     description: "TLS certificates from a private CA or imported",
     category: "Security, Identity & Compliance",
     icon: BadgeCheck,
-    color: "bg-red-500/10 text-red-600 dark:text-red-400",
     href: "/acm/",
     paths: ["/acm"],
     nav: [
@@ -541,7 +514,6 @@ export const SERVICES: ServiceDef[] = [
     description: "User sign-up, sign-in and JWTs for your apps",
     category: "Security, Identity & Compliance",
     icon: UsersRound,
-    color: "bg-red-500/10 text-red-600 dark:text-red-400",
     href: "/cognito/",
     paths: ["/cognito"],
     nav: [

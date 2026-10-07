@@ -9,7 +9,7 @@ export function ErrorState({ error, onRetry, className }: { error: unknown; onRe
   return (
     <div
       className={cn(
-        "border-destructive/30 bg-destructive/5 text-destructive flex flex-col gap-3 rounded-lg border p-4 text-sm sm:flex-row sm:items-center sm:justify-between",
+        "border-danger/25 bg-danger-soft text-danger flex flex-col gap-3 rounded-lg border p-4 text-sm sm:flex-row sm:items-center sm:justify-between",
         className,
       )}
     >

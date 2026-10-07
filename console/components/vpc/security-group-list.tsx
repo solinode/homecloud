@@ -1,7 +1,6 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Plus, Shield, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -9,7 +8,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { cellLinkClass, DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -39,12 +38,10 @@ export function SecurityGroupList() {
         header: "Name",
         value: (g) => g.name,
         cell: (g) => (
-          <Link href={sgHref(g.id)} className={cellLinkClass()} onClick={(e) => e.stopPropagation()}>
-            {g.name}
-          </Link>
+          <CellLink href={sgHref(g.id)}>{g.name}</CellLink>
         ),
       },
-      { id: "id", header: "Group ID", value: (g) => g.id, cell: (g) => <span className="font-mono text-[13px]">{g.id}</span> },
+      { id: "id", header: "Group ID", value: (g) => g.id, cell: (g) => <CellText mono>{g.id}</CellText> },
       {
         id: "vpc",
         header: "VPC",
@@ -61,9 +58,9 @@ export function SecurityGroupList() {
         header: "Description",
         value: (g) => g.description,
         cell: (g) => (
-          <span className="text-muted-foreground block max-w-64 truncate" title={g.description}>
-            {g.description || "-"}
-          </span>
+          <CellText muted max="16rem">
+            {g.description}
+          </CellText>
         ),
         hideBelow: "lg",
       },
@@ -73,7 +70,7 @@ export function SecurityGroupList() {
         value: (g) => g.ingress.length,
         cell: (g) =>
           g.ingress.length ? (
-            <span className="flex items-baseline gap-2">
+            <span className="flex items-baseline gap-2 whitespace-nowrap">
               <span className="tabular-nums">{g.ingress.length}</span>
               <span className="text-muted-foreground max-w-56 truncate font-mono text-xs" title={rulesSummary(g.ingress, 50)}>
                 {rulesSummary(g.ingress)}

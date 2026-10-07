@@ -8,7 +8,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
@@ -17,47 +17,49 @@ import { api, seg } from "@/lib/api"
 import { formatBytes, formatNumber, pluralize } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { DynamoTable } from "@/lib/types"
-import { DELETION_PROTECTED_MESSAGE, TABLES_PATH, allIndexes, tableHref } from "./common"
+import { DELETION_PROTECTED_MESSAGE, KeyAttr, TABLES_PATH, allIndexes, tableHref } from "./common"
 
 const columns: Column<DynamoTable>[] = [
   {
     id: "name",
     header: "Name",
-    cell: (t) => (
-      <Link href={tableHref(t.name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-        {t.name}
-      </Link>
-    ),
+    cell: (t) => <CellLink href={tableHref(t.name)}>{t.name}</CellLink>,
     value: (t) => t.name,
   },
   { id: "status", header: "Status", cell: (t) => <StatusBadge status={t.status} />, value: (t) => t.status, hideBelow: "sm" },
   {
     id: "pk",
     header: "Partition key",
-    cell: (t) => (
-      <span className="whitespace-nowrap">
-        <span className="font-mono text-[13px]">{t.partition_key.name}</span> <span className="text-muted-foreground text-xs">({t.partition_key.type})</span>
-      </span>
-    ),
+    cell: (t) => <KeyAttr k={t.partition_key} />,
     value: (t) => t.partition_key.name,
   },
   {
     id: "sk",
     header: "Sort key",
-    cell: (t) =>
-      t.sort_key ? (
-        <span className="whitespace-nowrap">
-          <span className="font-mono text-[13px]">{t.sort_key.name}</span> <span className="text-muted-foreground text-xs">({t.sort_key.type})</span>
-        </span>
-      ) : (
-        <span className="text-muted-foreground">-</span>
-      ),
+    cell: (t) => (t.sort_key ? <KeyAttr k={t.sort_key} /> : <span className="text-muted-foreground">-</span>),
     value: (t) => t.sort_key?.name ?? "",
     hideBelow: "md",
   },
-  { id: "indexes", header: "Indexes", cell: (t) => allIndexes(t).length, value: (t) => allIndexes(t).length, hideBelow: "md" },
-  { id: "items", header: "Item count", cell: (t) => <span className="tabular-nums">{formatNumber(t.item_count)}</span>, value: (t) => t.item_count },
-  { id: "size", header: "Size", cell: (t) => <span className="tabular-nums">{formatBytes(t.size_bytes)}</span>, value: (t) => t.size_bytes, hideBelow: "sm" },
+  {
+    id: "indexes",
+    header: "Indexes",
+    cell: (t) => <span className="tabular-nums">{allIndexes(t).length}</span>,
+    value: (t) => allIndexes(t).length,
+    hideBelow: "md",
+  },
+  {
+    id: "items",
+    header: "Item count",
+    cell: (t) => <span className="whitespace-nowrap tabular-nums">{formatNumber(t.item_count)}</span>,
+    value: (t) => t.item_count,
+  },
+  {
+    id: "size",
+    header: "Size",
+    cell: (t) => <span className="whitespace-nowrap tabular-nums">{formatBytes(t.size_bytes)}</span>,
+    value: (t) => t.size_bytes,
+    hideBelow: "sm",
+  },
   { id: "created", header: "Created", cell: (t) => <TimeAgo value={t.created_at} />, value: (t) => t.created_at, hideBelow: "lg" },
 ]
 
@@ -128,7 +130,7 @@ export function DeleteTableDialog({ table, onClose, onDeleted }: { table: Dynamo
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
-              <ShieldAlert className="size-5 text-amber-600 dark:text-amber-400" /> Table {table.name} is protected
+              <ShieldAlert className="text-warning size-5" /> Table {table.name} is protected
             </DialogTitle>
             <DialogDescription>{DELETION_PROTECTED_MESSAGE}</DialogDescription>
           </DialogHeader>

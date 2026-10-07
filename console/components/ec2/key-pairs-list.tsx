@@ -1,9 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { Download, KeyRound, Plus, Upload } from "lucide-react"
+import { AlertTriangle, Download, KeyRound, Plus, Upload } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Textarea } from "@/components/ui/textarea"
@@ -11,7 +12,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
+import { Tag } from "@/components/console/tag"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { FormDialog, KEEP_OPEN } from "@/components/console/form-dialog"
@@ -35,10 +37,10 @@ export function downloadText(filename: string, text: string) {
 }
 
 const columns: Column<KeyPair>[] = [
-  { id: "name", header: "Name", cell: (k) => <span className="font-medium">{k.name}</span>, value: (k) => k.name },
-  { id: "type", header: "Type", cell: (k) => k.type, value: (k) => k.type, hideBelow: "sm" },
-  { id: "fp", header: "Fingerprint", cell: (k) => <span className="font-mono text-[13px]">{k.fingerprint}</span>, value: (k) => k.fingerprint, hideBelow: "md" },
-  { id: "id", header: "ID", cell: (k) => <span className="font-mono text-[13px]">{k.id}</span>, value: (k) => k.id, hideBelow: "lg" },
+  { id: "name", header: "Name", cell: (k) => <CellText className="font-medium">{k.name}</CellText>, value: (k) => k.name },
+  { id: "type", header: "Type", cell: (k) => <Tag>{k.type.toUpperCase()}</Tag>, value: (k) => k.type, hideBelow: "sm" },
+  { id: "fp", header: "Fingerprint", cell: (k) => <CellText mono muted max="20rem">{k.fingerprint}</CellText>, value: (k) => k.fingerprint, hideBelow: "md" },
+  { id: "id", header: "ID", cell: (k) => <CellText mono>{k.id}</CellText>, value: (k) => k.id, hideBelow: "lg" },
   { id: "created", header: "Created", cell: (k) => <TimeAgo value={k.created_at} />, value: (k) => k.created_at, hideBelow: "lg" },
 ]
 
@@ -56,15 +58,22 @@ export function CreateKeyPairDialog({ onClose, onCreated }: { onClose: () => voi
           <DialogHeader>
             <DialogTitle>Key pair created</DialogTitle>
             <DialogDescription>
-              The private key is shown once and is not stored. Download it now and keep it safe (chmod 400 {file}).
+              <span className="font-mono">{created.key_pair.name}</span> is ready. Download the private key to log in to instances launched with it.
             </DialogDescription>
           </DialogHeader>
-          <Button onClick={() => downloadText(file, created.private_key)}>
-            <Download /> Download {file}
-          </Button>
+          <Alert variant="warning">
+            <AlertTriangle />
+            <AlertTitle>Download the private key now</AlertTitle>
+            <AlertDescription>
+              It is shown once and is not stored. Keep it safe (<span className="font-mono text-xs">chmod 400 {file}</span>).
+            </AlertDescription>
+          </Alert>
           <DialogFooter>
             <Button variant="outline" onClick={onClose}>
               Done
+            </Button>
+            <Button onClick={() => downloadText(file, created.private_key)}>
+              <Download /> Download {file}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -87,10 +96,10 @@ export function CreateKeyPairDialog({ onClose, onCreated }: { onClose: () => voi
         return KEEP_OPEN
       }}
     >
-      <Field label="Name" htmlFor="kp-name">
+      <Field label="Name" htmlFor="kp-name" help="Up to 255 ASCII characters.">
         <Input id="kp-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="my-key" autoFocus autoComplete="off" />
       </Field>
-      <Field label="Key pair type" htmlFor="kp-type">
+      <Field label="Key pair type" htmlFor="kp-type" help="ED25519 keys are shorter and faster; use RSA for older SSH clients.">
         <Select value={type} onValueChange={setType}>
           <SelectTrigger id="kp-type" className="w-full">
             <SelectValue />
@@ -125,7 +134,7 @@ function ImportDialog({ onClose }: { onClose: () => void }) {
       <Field label="Name" htmlFor="kpi-name">
         <Input id="kpi-name" value={name} onChange={(e) => setName(e.target.value)} autoFocus autoComplete="off" />
       </Field>
-      <Field label="Public key" htmlFor="kpi-key">
+      <Field label="Public key" htmlFor="kpi-key" help="One line: key type, base64 key and an optional comment.">
         <Textarea id="kpi-key" value={key} onChange={(e) => setKey(e.target.value)} rows={5} className="font-mono text-xs" spellCheck={false} placeholder="ssh-ed25519 AAAA... user@host" />
       </Field>
     </FormDialog>

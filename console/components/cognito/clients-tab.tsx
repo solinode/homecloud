@@ -9,9 +9,10 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyButton } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
@@ -36,7 +37,19 @@ export function ClientsTab({ pool }: { pool: UserPool }) {
   const [deleting, setDeleting] = useState<AppClient | null>(null)
 
   const columns: Column<AppClient>[] = [
-    { id: "name", header: "App client name", cell: (c) => <span className="font-medium">{c.name || <span className="text-muted-foreground">(unnamed)</span>}</span>, value: (c) => c.name },
+    {
+      id: "name",
+      header: "App client name",
+      cell: (c) =>
+        c.name ? (
+          <CellText max="16rem" className="font-medium">
+            {c.name}
+          </CellText>
+        ) : (
+          <span className="text-muted-foreground">(unnamed)</span>
+        ),
+      value: (c) => c.name,
+    },
     {
       id: "id",
       header: "Client ID",
@@ -48,7 +61,13 @@ export function ClientsTab({ pool }: { pool: UserPool }) {
       ),
       value: (c) => c.id,
     },
-    { id: "secret", header: "Client secret", cell: (c) => (c.has_secret ? "Yes" : <span className="text-muted-foreground">No</span>), value: (c) => (c.has_secret ? 1 : 0), hideBelow: "sm" },
+    {
+      id: "secret",
+      header: "Client secret",
+      cell: (c) => (c.has_secret ? <Tag accent="brand" mono={false}>Confidential</Tag> : <Tag mono={false}>Public</Tag>),
+      value: (c) => (c.has_secret ? 1 : 0),
+      hideBelow: "sm",
+    },
     { id: "access", header: "ID/access token", cell: (c) => formatMinutes(c.access_token_minutes), value: (c) => c.access_token_minutes, hideBelow: "md" },
     { id: "refresh", header: "Refresh token", cell: (c) => `${c.refresh_token_days} day${c.refresh_token_days === 1 ? "" : "s"}`, value: (c) => c.refresh_token_days, hideBelow: "md" },
     { id: "created", header: "Created", cell: (c) => <TimeAgo value={c.created_at} />, value: (c) => c.created_at, hideBelow: "lg" },

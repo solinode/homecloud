@@ -8,11 +8,13 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { copyText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
-import { formatBytes, formatDate } from "@/lib/format"
+import { Tag } from "@/components/console/tag"
+import { TimeAgo } from "@/components/console/time-ago"
+import { formatBytes } from "@/lib/format"
 import { useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { FileSystem } from "@/lib/types"
 
@@ -48,9 +50,7 @@ export function FileSystemList() {
       value: (f) => f.name,
       cell: (f) =>
         f.name ? (
-          <Link href={fileSystemHref(f.id)} className="text-primary font-medium hover:underline" onClick={(e) => e.stopPropagation()}>
-            {f.name}
-          </Link>
+          <CellLink href={fileSystemHref(f.id)}>{f.name}</CellLink>
         ) : (
           <span className="text-muted-foreground">-</span>
         ),
@@ -60,9 +60,9 @@ export function FileSystemList() {
       header: "File system ID",
       value: (f) => f.id,
       cell: (f) => (
-        <Link href={fileSystemHref(f.id)} className="text-primary font-mono text-[13px] whitespace-nowrap hover:underline" onClick={(e) => e.stopPropagation()}>
+        <CellLink href={fileSystemHref(f.id)} mono>
           {f.id}
-        </Link>
+        </CellLink>
       ),
     },
     { id: "state", header: "State", value: (f) => f.state, cell: (f) => <StatusBadge status={f.state} /> },
@@ -109,10 +109,17 @@ export function FileSystemList() {
       id: "access",
       header: "Access",
       value: (f) => (f.read_only ? "Read-only" : "Read/write"),
-      cell: (f) => (f.read_only ? <StatusBadge status="read-only" label="Read-only" tone="info" /> : <span>Read/write</span>),
+      cell: (f) =>
+        f.read_only ? (
+          <Tag accent="info" mono={false}>
+            Read-only
+          </Tag>
+        ) : (
+          <Tag mono={false}>Read/write</Tag>
+        ),
       hideBelow: "lg",
     },
-    { id: "created", header: "Creation time", value: (f) => f.created_at, cell: (f) => <span className="whitespace-nowrap">{formatDate(f.created_at)}</span>, hideBelow: "lg" },
+    { id: "created", header: "Creation time", value: (f) => f.created_at, cell: (f) => <TimeAgo value={f.created_at} />, hideBelow: "lg" },
   ]
 
   return (

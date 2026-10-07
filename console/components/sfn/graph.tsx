@@ -360,18 +360,19 @@ export function statusesFromHistory(history: SfnHistoryEvent[] | undefined, runn
 
 // ---- rendering ----
 
+/** Node outline and fill per state, from the semantic tokens (running = info, caught = warning). */
 const STATUS_CLASS: Record<StateStatus, string> = {
-  entered: "stroke-amber-500 fill-amber-500/10 dark:stroke-amber-400",
-  succeeded: "stroke-emerald-600 fill-emerald-500/10 dark:stroke-emerald-400",
-  failed: "stroke-red-600 fill-red-500/10 dark:stroke-red-400",
-  caught: "stroke-orange-500 fill-orange-500/10 dark:stroke-orange-400",
+  entered: "stroke-info fill-info-soft",
+  succeeded: "stroke-success fill-success-soft",
+  failed: "stroke-danger fill-danger-soft",
+  caught: "stroke-warning fill-warning-soft",
 }
 
 const LEGEND: { status: StateStatus; label: string; swatch: string }[] = [
-  { status: "entered", label: "In progress", swatch: "border-amber-500 bg-amber-500/10 dark:border-amber-400" },
-  { status: "succeeded", label: "Succeeded", swatch: "border-emerald-600 bg-emerald-500/10 dark:border-emerald-400" },
-  { status: "failed", label: "Failed", swatch: "border-red-600 bg-red-500/10 dark:border-red-400" },
-  { status: "caught", label: "Caught error", swatch: "border-dashed border-orange-500 bg-orange-500/10 dark:border-orange-400" },
+  { status: "entered", label: "In progress", swatch: "border-info bg-info-soft" },
+  { status: "succeeded", label: "Succeeded", swatch: "border-success bg-success-soft" },
+  { status: "failed", label: "Failed", swatch: "border-danger bg-danger-soft" },
+  { status: "caught", label: "Caught error", swatch: "border-dashed border-warning bg-warning-soft" },
 ]
 
 function EdgeLabel({ x, y, text }: { x: number; y: number; text: string }) {
@@ -431,7 +432,7 @@ function NodeView({ node, statuses, arrow }: { node: LNode; statuses?: Record<st
     <g>
       {title}
       {st === "entered" && (
-        <rect x={x - 4} y={y - 4} width={w + 8} height={h + 8} rx={node.terminal ? (h + 8) / 2 : 12} fill="none" strokeWidth={2} className="animate-pulse stroke-amber-400/70" />
+        <rect x={x - 4} y={y - 4} width={w + 8} height={h + 8} rx={node.terminal ? (h + 8) / 2 : 12} fill="none" strokeWidth={2} className="stroke-info/60 animate-pulse" />
       )}
       <rect
         x={x}

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Skeleton } from "@/components/ui/skeleton"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
+import { Tag } from "@/components/console/tag"
 import { formatNumber } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
 import { portRange, ruleProtocol, ruleSource } from "@/components/vpc/common"
@@ -96,7 +97,7 @@ export function NetworkFields({ net, idPrefix = "net", error, compact }: { net: 
 
       <div className="flex flex-col gap-2">
         <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <span className="text-sm font-medium">Security groups</span>
+          <span className="text-[13px] font-medium">Security groups</span>
           {!compact && (
             <Link href="/vpc/security-groups/" className="text-primary inline-flex items-center gap-1 text-sm hover:underline">
               Manage security groups <ExternalLink className="size-3.5" />
@@ -110,11 +111,11 @@ export function NetworkFields({ net, idPrefix = "net", error, compact }: { net: 
         ) : groups.length === 0 ? (
           <p className="text-muted-foreground text-sm">This VPC has no security groups.</p>
         ) : (
-          <div className={cn("divide-y overflow-y-auto rounded-md border", compact ? "max-h-44" : "max-h-80")}>
+          <div className={cn("divide-y overflow-y-auto rounded-lg border", compact ? "max-h-44" : "max-h-80")} role="group" aria-label="Security groups">
             {groups.map((g) => {
               const checked = sgIds.includes(g.id)
               return (
-                <label key={g.id} className={cn("flex cursor-pointer items-start gap-3 px-3 py-2", checked && "bg-primary/5 dark:bg-primary/10")}>
+                <label key={g.id} className={cn("flex cursor-pointer items-start gap-3 px-3 py-2 transition-colors", checked ? "bg-brand-soft" : "hover:bg-muted/50")}>
                   <Checkbox className="mt-0.5" checked={checked} onCheckedChange={(v) => setSgIds(v ? [...sgIds, g.id] : sgIds.filter((x) => x !== g.id))} />
                   <span className="flex min-w-0 flex-col gap-0.5">
                     <span className="text-sm">
@@ -125,11 +126,7 @@ export function NetworkFields({ net, idPrefix = "net", error, compact }: { net: 
                         {g.ingress.length === 0 ? (
                           <span className="text-muted-foreground text-xs">No inbound rules</span>
                         ) : (
-                          g.ingress.map((r) => (
-                            <span key={r.id} className="bg-muted rounded border px-1.5 py-0.5 font-mono text-[11px]">
-                              {ruleSummary(r)}
-                            </span>
-                          ))
+                          g.ingress.map((r) => <Tag key={r.id}>{ruleSummary(r)}</Tag>)
                         )}
                       </span>
                     )}

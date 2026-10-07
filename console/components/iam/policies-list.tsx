@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -17,7 +17,7 @@ import { api, seg } from "@/lib/api"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { PolicySummary } from "@/lib/types"
 
-import { IAM, LINK, PolicyTypeBadge, policyHref, policyTypeLabel } from "./common"
+import { IAM, PolicyTypeBadge, policyHref, policyTypeLabel } from "./common"
 
 export function PoliciesList() {
   const { data, error, isLoading, isValidating, mutate } = useApi<PolicySummary[]>(`${IAM}/policies`)
@@ -35,23 +35,15 @@ export function PoliciesList() {
       id: "name",
       header: "Policy name",
       value: (p) => p.name,
-      cell: (p) => (
-        <Link href={policyHref(p.name)} className={LINK}>
-          {p.name}
-        </Link>
-      ),
+      cell: (p) => <CellLink href={policyHref(p.name)}>{p.name}</CellLink>,
     },
     { id: "type", header: "Type", value: (p) => policyTypeLabel(p.managed), cell: (p) => <PolicyTypeBadge managed={p.managed} /> },
-    { id: "path", header: "Path", value: (p) => p.path ?? "/", cell: (p) => <span className="font-mono text-xs">{p.path ?? "/"}</span>, hideBelow: "lg" },
+    { id: "path", header: "Path", value: (p) => p.path ?? "/", cell: (p) => <CellText mono muted>{p.path ?? "/"}</CellText>, hideBelow: "lg" },
     {
       id: "arn",
       header: "ARN",
       value: (p) => p.arn,
-      cell: (p) => (
-        <span className="text-muted-foreground block max-w-[22rem] truncate font-mono text-xs" title={p.arn}>
-          {p.arn}
-        </span>
-      ),
+      cell: (p) => <CellText mono muted>{p.arn}</CellText>,
       hideBelow: "lg",
     },
     {
@@ -61,7 +53,7 @@ export function PoliciesList() {
       cell: (p) => (p.attachment_count ? `Permissions policy (${p.attachment_count})` : <span className="text-muted-foreground">None</span>),
       hideBelow: "sm",
     },
-    { id: "desc", header: "Description", value: (p) => p.description, cell: (p) => <span className="text-muted-foreground line-clamp-2">{p.description || "-"}</span>, hideBelow: "md" },
+    { id: "desc", header: "Description", value: (p) => p.description, cell: (p) => <CellText muted>{p.description}</CellText>, hideBelow: "md" },
     { id: "updated", header: "Last edited", value: (p) => p.updated_at, cell: (p) => <TimeAgo value={p.updated_at} />, hideBelow: "lg" },
   ]
 

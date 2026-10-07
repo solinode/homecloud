@@ -3,14 +3,16 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Check, Globe, Info, Loader2, Lock, Network, Plus, X } from "lucide-react"
+import { Globe, Info, Loader2, Lock, Network, Plus, X } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
@@ -18,7 +20,6 @@ import { api, errorMessage } from "@/lib/api"
 import { formatNumber, pluralize } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { CreateLoadBalancerInput, LoadBalancer, LoadBalancerScheme, Subnet } from "@/lib/types"
-import { cn } from "@/lib/utils"
 import { ListenerFields, draftSummary, emptyListenerDraft, listenerDraftErrors, listenerDraftInput, type ListenerDraft } from "./listener-dialogs"
 import { ELB_PREFIX, LBS_PATH, NAME_RE, lbHref, useTargetGroups, vpcHref } from "./shared"
 
@@ -42,7 +43,6 @@ function sortSubnets(list: Subnet[]) {
   return [...list].sort((a, b) => a.vpc_id.localeCompare(b.vpc_id) || a.availability_zone.localeCompare(b.availability_zone) || a.name.localeCompare(b.name))
 }
 
-const validPort = (s: string) => /^\d+$/.test(s) && Number(s) >= 1 && Number(s) <= 65535
 
 export function CreateLoadBalancer() {
   const router = useRouter()
@@ -164,38 +164,20 @@ export function CreateLoadBalancer() {
                   aria-invalid={!!err("name")}
                 />
               </Field>
-              <div className="flex flex-col gap-2">
-                <span className="text-sm font-medium">Scheme</span>
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2" role="radiogroup" aria-label="Scheme">
-                  {SCHEMES.map((s) => {
-                    const active = s.value === scheme
-                    const Icon = s.icon
-                    return (
-                      <button
-                        key={s.value}
-                        type="button"
-                        role="radio"
-                        aria-checked={active}
-                        onClick={() => setScheme(s.value)}
-                        className={cn(
-                          "relative flex flex-col gap-1.5 rounded-lg border p-3 text-left transition-colors",
-                          active ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
-                        )}
-                      >
-                        {active && (
-                          <span className="bg-primary text-primary-foreground absolute top-2 right-2 flex size-5 items-center justify-center rounded-full">
-                            <Check className="size-3.5" />
-                          </span>
-                        )}
-                        <span className="flex items-center gap-2 pr-6 text-sm font-medium">
-                          <Icon className="text-muted-foreground size-4" /> {s.label}
-                        </span>
-                        <span className="text-muted-foreground text-xs">{s.blurb}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
+              <Field label="Scheme">
+                <OptionGroup label="Scheme">
+                  {SCHEMES.map((s) => (
+                    <OptionCard
+                      key={s.value}
+                      selected={s.value === scheme}
+                      onSelect={() => setScheme(s.value)}
+                      icon={s.icon}
+                      title={s.label}
+                      description={s.blurb}
+                    />
+                  ))}
+                </OptionGroup>
+              </Field>
             </div>
           </Section>
 
@@ -244,21 +226,23 @@ export function CreateLoadBalancer() {
           >
             <div className="flex flex-col gap-3">
               {tgs.data && vpcId && vpcGroups.length === 0 && (
-                <p className="flex gap-2 rounded-md border border-amber-600/30 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300">
-                  <Info className="mt-0.5 size-4 shrink-0" />
-                  <span>
-                    This VPC has no target groups yet.{" "}
-                    <Link href="/elb/target-groups/?create=1" className="font-medium underline">
-                      Create a target group
-                    </Link>{" "}
-                    with your instances first, then come back.
-                  </span>
-                </p>
+                <Alert variant="warning">
+                  <Info />
+                  <AlertDescription>
+                    <span>
+                      This VPC has no target groups yet.{" "}
+                      <Link href="/elb/target-groups/?create=1" className="text-foreground font-medium underline">
+                        Create a target group
+                      </Link>{" "}
+                      with your instances first, then come back.
+                    </span>
+                  </AlertDescription>
+                </Alert>
               )}
               {listeners.map((l, i) => (
-                <div key={i} className="flex flex-col gap-2 rounded-md border p-3">
+                <div key={i} className="bg-muted/30 flex flex-col gap-3 rounded-lg border p-3">
                   <div className="flex items-center justify-between">
-                    <span className="text-muted-foreground text-xs font-semibold">Listener {i + 1}</span>
+                    <span className="hc-eyebrow">Listener {i + 1}</span>
                     <Button
                       type="button"
                       variant="ghost"
@@ -343,13 +327,13 @@ export function CreateLoadBalancer() {
                 {rowsToTags(tagRows) && <SummaryItem label="Tags">{pluralize(Object.keys(rowsToTags(tagRows) ?? {}).length, "tag")}</SummaryItem>}
               </dl>
               {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
-              <div className="flex flex-col gap-2 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+                <Button type="button" variant="outline" asChild>
+                  <Link href="/elb/">Cancel</Link>
+                </Button>
                 <Button type="submit" disabled={pending}>
                   {pending ? <Loader2 className="animate-spin" /> : <Network />}
                   Create load balancer
-                </Button>
-                <Button type="button" variant="outline" asChild>
-                  <Link href="/elb/">Cancel</Link>
                 </Button>
               </div>
               <p className="text-muted-foreground text-xs">Provisioning pulls nginx on first use and usually takes a few seconds.</p>
@@ -364,7 +348,7 @@ export function CreateLoadBalancer() {
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+      <dt className="text-faint mb-0.5 text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )

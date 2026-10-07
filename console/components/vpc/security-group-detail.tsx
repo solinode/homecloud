@@ -1,16 +1,16 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Info, Plus, ShieldOff, Trash2 } from "lucide-react"
+import { Info, Plus, Server, ShieldOff, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
-import { cellLinkClass } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -18,7 +18,8 @@ import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
-import { api, errorMessage } from "@/lib/api"
+import { Tag } from "@/components/console/tag"
+import { api } from "@/lib/api"
 import { formatDate } from "@/lib/format"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
 import type { Instance, SecurityGroup, SecurityGroupRule } from "@/lib/types"
@@ -55,6 +56,66 @@ export function SecurityGroupDetail() {
   const vpc = vpcs.data?.find((v) => v.id === g.vpc_id)
   const users = (instances.data ?? []).filter((i) => i.state !== "terminated" && i.security_groups?.includes(g.id))
 
+  const ruleColumns: Column<SecurityGroupRule>[] = [
+    { id: "id", header: "Rule ID", cell: (r) => <CellText mono>{r.id}</CellText>, value: (r) => r.id, hideBelow: "md" },
+    { id: "type", header: "Type", cell: (r) => <span className="whitespace-nowrap">{ruleType(r)}</span>, value: (r) => ruleType(r) },
+    { id: "protocol", header: "Protocol", cell: (r) => <Tag accent={r.protocol === "-1" ? "brand" : r.protocol === "udp" ? "violet" : "info"}>{ruleProtocol(r)}</Tag>, value: (r) => r.protocol },
+    { id: "ports", header: "Port range", cell: (r) => <span className="font-mono text-[13px] whitespace-nowrap">{portRange(r)}</span>, value: (r) => r.from_port },
+    {
+      id: "source",
+      header: "Source",
+      cell: (r) =>
+        r.source_group ? (
+          <CellLink href={sgHref(r.source_group)} mono>
+            {r.source_group === g.id ? `${r.source_group} (this group)` : r.source_group}
+          </CellLink>
+        ) : (
+          <span className="font-mono text-[13px] whitespace-nowrap">{r.cidr}</span>
+        ),
+      value: (r) => ruleSource(r),
+    },
+    { id: "description", header: "Description", cell: (r) => <CellText muted>{r.description}</CellText>, value: (r) => r.description, hideBelow: "md" },
+    {
+      id: "actions",
+      header: "",
+      className: "text-right",
+      cell: (r) => (
+        <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={(e) => (e.stopPropagation(), setRemoveRule(r))}>
+          <Trash2 /> Remove
+        </Button>
+      ),
+    },
+  ]
+
+  const instanceColumns: Column<Instance>[] = [
+    {
+      id: "id",
+      header: "Instance",
+      cell: (i) => (
+        <CellLink href={`/ec2/instance/?id=${encodeURIComponent(i.id)}`} mono>
+          {i.id}
+        </CellLink>
+      ),
+      value: (i) => i.id,
+    },
+    { id: "name", header: "Name", cell: (i) => <CellText>{i.name}</CellText>, value: (i) => i.name },
+    { id: "state", header: "State", cell: (i) => <StatusBadge status={i.state} />, value: (i) => i.state },
+    { id: "ip", header: "Private IP", cell: (i) => <CellText mono>{i.private_ip}</CellText>, value: (i) => i.private_ip, hideBelow: "sm" },
+    {
+      id: "ports",
+      header: "Published ports",
+      cell: (i) => (
+        <CellText mono>
+          {Object.entries(i.public_ports ?? {})
+            .map(([k, v]) => `${k} -> ${v}`)
+            .join(", ")}
+        </CellText>
+      ),
+      sortable: false,
+      hideBelow: "md",
+    },
+  ]
+
   const onRemoveRule = async () => {
     if (!removeRule) return
     await api.del(`/api/v1/vpc/security-groups/${encodeURIComponent(g.id)}/ingress/${encodeURIComponent(removeRule.id)}`)
@@ -78,22 +139,23 @@ export function SecurityGroupDetail() {
     <div className="flex flex-col gap-5">
       <PageHeader
         breadcrumbs={[{ label: "VPC", href: "/vpc/" }, { label: "Security groups", href: "/vpc/security-groups/" }, { label: g.id }]}
-        title={
-          <>
-            {g.name} <span className="text-muted-foreground font-mono text-base font-normal">{g.id}</span>
-          </>
-        }
+        title={g.name}
+        badge={<Tag title="Security group ID">{g.id}</Tag>}
+        description={g.description || undefined}
         actions={
           <>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={g.name === "default"}
-              title={g.name === "default" ? "The default security group cannot be deleted" : undefined}
-              onClick={() => setDeleteOpen(true)}
-            >
-              <Trash2 /> Delete
-            </Button>
+            <ActionsMenu
+              items={[
+                {
+                  label: "Delete security group",
+                  icon: <Trash2 />,
+                  destructive: true,
+                  disabled: g.name === "default",
+                  hint: g.name === "default" ? "The default security group cannot be deleted" : undefined,
+                  onSelect: () => setDeleteOpen(true),
+                },
+              ]}
+            />
             <Button size="sm" onClick={() => setAddOpen(true)}>
               <Plus /> Add inbound rule
             </Button>
@@ -114,10 +176,10 @@ export function SecurityGroupDetail() {
         />
       </Section>
 
-      <Alert className="border-blue-600/30 bg-blue-50 text-blue-900 dark:border-blue-400/30 dark:bg-blue-500/10 dark:text-blue-100">
+      <Alert variant="info">
         <Info />
         <AlertTitle>How inbound rules work in HomeCloud</AlertTitle>
-        <AlertDescription className="text-blue-900/80 dark:text-blue-100/80">
+        <AlertDescription>
           <p>
             Inbound rules are enforced between the resources of a VPC: a rule allows traffic from an IPv4 CIDR or from every resource that has another security
             group. Changes apply to running resources within seconds.
@@ -129,16 +191,19 @@ export function SecurityGroupDetail() {
         </AlertDescription>
       </Alert>
 
-      <Section
-        flush
-        title={`Inbound rules (${g.ingress.length})`}
+      <DataTable
+        title="Inbound rules"
+        data={g.ingress}
+        columns={ruleColumns}
+        rowId={(r) => r.id}
+        onRefresh={() => mutate()}
+        noSearch={g.ingress.length < 6}
         actions={
           <Button size="sm" variant="outline" onClick={() => setAddOpen(true)}>
             <Plus /> Edit inbound rules
           </Button>
         }
-      >
-        {g.ingress.length === 0 ? (
+        empty={
           <EmptyState
             icon={ShieldOff}
             title="No inbound rules"
@@ -149,49 +214,8 @@ export function SecurityGroupDetail() {
               </Button>
             }
           />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                  <th className="px-4 py-2 font-semibold">Rule ID</th>
-                  <th className="px-3 py-2 font-semibold">Type</th>
-                  <th className="px-3 py-2 font-semibold">Protocol</th>
-                  <th className="px-3 py-2 font-semibold">Port range</th>
-                  <th className="px-3 py-2 font-semibold">Source</th>
-                  <th className="hidden px-3 py-2 font-semibold md:table-cell">Description</th>
-                  <th className="px-4 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {g.ingress.map((r) => (
-                  <tr key={r.id} className="hover:bg-muted/40 border-b last:border-0">
-                    <td className="px-4 py-2 font-mono text-[13px]">{r.id}</td>
-                    <td className="px-3 py-2">{ruleType(r)}</td>
-                    <td className="px-3 py-2">{ruleProtocol(r)}</td>
-                    <td className="px-3 py-2 font-mono text-[13px]">{portRange(r)}</td>
-                    <td className="px-3 py-2 font-mono text-[13px]">
-                      {r.source_group ? (
-                        <Link href={sgHref(r.source_group)} className={cellLinkClass()}>
-                          {r.source_group === g.id ? `${r.source_group} (this group)` : r.source_group}
-                        </Link>
-                      ) : (
-                        r.cidr
-                      )}
-                    </td>
-                    <td className="text-muted-foreground hidden px-3 py-2 md:table-cell">{r.description || "-"}</td>
-                    <td className="px-4 py-2 text-right">
-                      <Button variant="ghost" size="sm" className="text-destructive hover:text-destructive" onClick={() => setRemoveRule(r)}>
-                        <Trash2 /> Remove
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Section>
+        }
+      />
 
       <Section title="Outbound rules">
         {vpc && !vpc.internet_access ? (
@@ -209,48 +233,17 @@ export function SecurityGroupDetail() {
         )}
       </Section>
 
-      <Section flush title={`Instances using this group (${users.length})`}>
-        {instances.error ? (
-          <p className="text-muted-foreground p-4 text-sm">{errorMessage(instances.error)}</p>
-        ) : users.length === 0 ? (
-          <p className="text-muted-foreground p-4 text-sm">{instances.isLoading ? "Loading..." : "No instances use this security group."}</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                  <th className="px-4 py-2 font-semibold">Instance</th>
-                  <th className="px-3 py-2 font-semibold">Name</th>
-                  <th className="px-3 py-2 font-semibold">State</th>
-                  <th className="px-3 py-2 font-semibold">Private IP</th>
-                  <th className="hidden px-4 py-2 font-semibold md:table-cell">Published ports</th>
-                </tr>
-              </thead>
-              <tbody>
-                {users.map((i) => (
-                  <tr key={i.id} className="border-b last:border-0">
-                    <td className="px-4 py-2">
-                      <Link href={`/ec2/instance/?id=${encodeURIComponent(i.id)}`} className={`${cellLinkClass()} font-mono text-[13px]`}>
-                        {i.id}
-                      </Link>
-                    </td>
-                    <td className="px-3 py-2">{i.name || "-"}</td>
-                    <td className="px-3 py-2">
-                      <StatusBadge status={i.state} />
-                    </td>
-                    <td className="px-3 py-2 font-mono text-[13px]">{i.private_ip || "-"}</td>
-                    <td className="hidden px-4 py-2 font-mono text-[13px] md:table-cell">
-                      {Object.entries(i.public_ports ?? {})
-                        .map(([k, v]) => `${k} -> ${v}`)
-                        .join(", ") || "-"}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Section>
+      <DataTable
+        title="Instances using this group"
+        data={instances.data ? users : undefined}
+        columns={instanceColumns}
+        rowId={(i) => i.id}
+        loading={instances.isLoading}
+        error={instances.error}
+        onRetry={() => instances.mutate()}
+        noSearch={users.length < 6}
+        empty={<EmptyState icon={Server} title="No instances use this security group" description="Instances get security groups when they are launched." />}
+      />
 
       <AddRulesDialog
         open={addOpen}

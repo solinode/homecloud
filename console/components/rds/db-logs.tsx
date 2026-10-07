@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { TerminalPane, term } from "@/components/console/code-block"
 import { ErrorState } from "@/components/console/error-state"
 import { Section } from "@/components/console/section"
 import { seg } from "@/lib/api"
@@ -19,13 +20,23 @@ import { DB_INSTANCES_PATH } from "./shared"
 // Docker log lines start with an RFC 3339 timestamp.
 const TS = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z /gm
 
+const ERR_LINE = /\b(ERROR|FATAL|PANIC|CRITICAL)\b/i
+const WARN_LINE = /\b(WARNING|WARN)\b/i
+
+/** lineClass tints error and warning lines of the engine log. */
+function lineClass(l: string): string | undefined {
+  if (ERR_LINE.test(l)) return term.error
+  if (WARN_LINE.test(l)) return term.warning
+  return undefined
+}
+
 /** DbLogs shows the engine's container log (the database's error/general log). */
 export function DbLogs({ inst, noun }: { inst: DbInstance; noun: string }) {
   const [tail, setTail] = useState("500")
   const [auto, setAuto] = useState(false)
   const [timestamps, setTimestamps] = useState(false)
   const [fetchedAt, setFetchedAt] = useState<number | null>(null)
-  const preRef = useRef<HTMLPreElement>(null)
+  const paneRef = useRef<HTMLDivElement>(null)
   const stick = useRef(true)
 
   const { data, error, isLoading, isValidating, mutate } = useApi<{ output: string }>(`${DB_INSTANCES_PATH}/${seg(inst.id)}/logs`, {
@@ -43,9 +54,20 @@ export function DbLogs({ inst, noun }: { inst: DbInstance; noun: string }) {
     return timestamps ? out : out.replace(TS, "")
   }, [data, timestamps])
 
+  const lines = useMemo(() => text.replace(/\n$/, "").split("\n"), [text])
+
   // Keep the view pinned to the bottom unless the user scrolled up.
   useEffect(() => {
-    const el = preRef.current
+    const el = paneRef.current
+    if (!el) return
+    const onScroll = () => {
+      stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
+    }
+    el.addEventListener("scroll", onScroll)
+    return () => el.removeEventListener("scroll", onScroll)
+  }, [error])
+  useEffect(() => {
+    const el = paneRef.current
     if (el && stick.current) el.scrollTop = el.scrollHeight
   }, [text])
 
@@ -102,22 +124,19 @@ export function DbLogs({ inst, noun }: { inst: DbInstance; noun: string }) {
         <ErrorState error={error} onRetry={() => mutate()} />
       ) : (
         <div className="flex flex-col gap-2">
-          <pre
-            ref={preRef}
-            onScroll={(e) => {
-              const el = e.currentTarget
-              stick.current = el.scrollHeight - el.scrollTop - el.clientHeight < 40
-            }}
-            className="h-[460px] overflow-auto rounded-md border border-zinc-800 bg-zinc-950 p-3 font-mono text-[12.5px] leading-relaxed whitespace-pre-wrap text-zinc-100"
-          >
+          <TerminalPane ref={paneRef} title={`${inst.id} · ${inst.engine}`} copyValue={text} height="460px" bodyClassName="break-all whitespace-pre-wrap">
             {isLoading && !data ? (
-              <span className="text-zinc-500">Loading logs...</span>
+              <span className={term.muted}>Loading logs...</span>
             ) : text ? (
-              text
+              lines.map((l, i) => (
+                <div key={i} className={lineClass(l)}>
+                  {l || " "}
+                </div>
+              ))
             ) : (
-              <span className="text-zinc-500">{inst.container_id ? "No log output yet." : `The ${noun} has no container yet.`}</span>
+              <span className={term.muted}>{inst.container_id ? "No log output yet." : `The ${noun} has no container yet.`}</span>
             )}
-          </pre>
+          </TerminalPane>
           <p className="text-muted-foreground text-xs">
             {fetchedAt ? `Last updated ${formatTime(fetchedAt)}` : ""}
             {auto ? " · refreshing every 5 seconds" : ""}

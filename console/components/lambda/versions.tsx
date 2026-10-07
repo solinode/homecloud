@@ -1,10 +1,9 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { GitBranch, Loader2, Plus, Tag } from "lucide-react"
+import { GitBranch, Loader2, Plus, Tag as TagIcon } from "lucide-react"
 import { toast } from "sonner"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -14,16 +13,17 @@ import { Textarea } from "@/components/ui/textarea"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage, seg } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { LambdaAlias, LambdaFunction } from "@/lib/types"
 
-import { LAMBDA_PATH, fnPath } from "./common"
+import { LAMBDA_PATH, RuntimeBadge, fnPath } from "./common"
 
 const LATEST = "$LATEST"
 
@@ -66,7 +66,7 @@ export function VersionsTab({ fn }: { fn: LambdaFunction }) {
       id: "version",
       header: "Version",
       value: (v) => (v.version === LATEST ? Number.MAX_SAFE_INTEGER : Number(v.version)),
-      cell: (v) => <span className="font-mono text-[13px] font-medium">{v.version}</span>,
+      cell: (v) => (v.version === LATEST ? <Tag accent="brand">{LATEST}</Tag> : <span className="font-mono text-[13px] font-medium">{v.version}</span>),
     },
     {
       id: "aliases",
@@ -75,9 +75,9 @@ export function VersionsTab({ fn }: { fn: LambdaFunction }) {
       cell: (v) => (
         <span className="flex flex-wrap gap-1">
           {(aliasesByVersion.get(v.version ?? "") ?? []).map((a) => (
-            <Badge key={a} variant="secondary" className="font-normal">
-              <Tag className="size-3" /> {a}
-            </Badge>
+            <Tag key={a} accent="brand">
+              <TagIcon /> {a}
+            </Tag>
           ))}
         </span>
       ),
@@ -87,10 +87,10 @@ export function VersionsTab({ fn }: { fn: LambdaFunction }) {
       header: "Description",
       value: (v) => (v.version === LATEST ? "" : (v.version_description ?? v.description)),
       cell: (v) =>
-        v.version === LATEST ? <span className="text-muted-foreground">Unpublished, editable code</span> : v.version_description || v.description || "-",
+        v.version === LATEST ? <CellText muted>Unpublished, editable code</CellText> : <CellText max="20rem">{v.version_description || v.description}</CellText>,
     },
-    { id: "runtime", header: "Runtime", value: (v) => v.runtime || v.image_uri || "", cell: (v) => <span className="font-mono text-xs">{v.runtime || "Image"}</span>, hideBelow: "md" },
-    { id: "size", header: "Code size", value: (v) => v.code_size, cell: (v) => formatBytes(v.code_size), hideBelow: "lg" },
+    { id: "runtime", header: "Runtime", value: (v) => v.runtime || v.image_uri || "", cell: (v) => <RuntimeBadge runtime={v.runtime || "Container image"} />, hideBelow: "md" },
+    { id: "size", header: "Code size", value: (v) => v.code_size, cell: (v) => <span className="whitespace-nowrap tabular-nums">{formatBytes(v.code_size)}</span>, hideBelow: "lg" },
     { id: "modified", header: "Last modified", value: (v) => v.last_modified, cell: (v) => <TimeAgo value={v.last_modified} />, hideBelow: "sm" },
     {
       id: "arn",
@@ -190,7 +190,7 @@ function PublishDialog({ open, onOpenChange, fn }: { open: boolean; onOpenChange
               version is returned instead.
             </DialogDescription>
           </DialogHeader>
-          <Field label="Version description" htmlFor="pub-desc" optional>
+          <Field label="Version description" htmlFor="pub-desc" optional help="Up to 256 characters, e.g. what changed.">
             <Textarea id="pub-desc" rows={2} maxLength={256} value={description} onChange={(e) => setDescription(e.target.value)} autoFocus />
           </Field>
           <DialogFooter>
@@ -218,9 +218,9 @@ export function AliasesTab({ fn }: { fn: LambdaFunction }) {
   const sel = aliases.data?.find((a) => a.name === selected[0]) ?? null
 
   const columns: Column<LambdaAlias>[] = [
-    { id: "name", header: "Name", value: (a) => a.name, cell: (a) => <span className="font-medium">{a.name}</span> },
-    { id: "version", header: "Versions", value: (a) => a.function_version, cell: (a) => <span className="font-mono text-[13px]">{aliasTargets(a)}</span> },
-    { id: "description", header: "Description", value: (a) => a.description, cell: (a) => a.description || "-", hideBelow: "md" },
+    { id: "name", header: "Name", value: (a) => a.name, cell: (a) => <CellText className="font-medium">{a.name}</CellText> },
+    { id: "version", header: "Versions", value: (a) => a.function_version, cell: (a) => <CellText mono>{aliasTargets(a)}</CellText> },
+    { id: "description", header: "Description", value: (a) => a.description, cell: (a) => <CellText max="20rem">{a.description}</CellText>, hideBelow: "md" },
     { id: "arn", header: "ARN", value: (a) => a.arn, cell: (a) => <CopyableText value={a.arn} display={`…:${a.name}`} />, hideBelow: "sm" },
   ]
 
@@ -257,7 +257,7 @@ export function AliasesTab({ fn }: { fn: LambdaFunction }) {
         }
         empty={
           <EmptyState
-            icon={Tag}
+            icon={TagIcon}
             title="No aliases"
             description="Create an alias such as prod or live that points to a published version."
             action={
@@ -364,14 +364,14 @@ function AliasDialog({ state, onClose, fn }: { state: { alias: LambdaAlias | nul
             <DialogDescription>Invoke {fn.name}:alias, or use the alias ARN in triggers, to run the version it points to.</DialogDescription>
           </DialogHeader>
           {!editing && (
-            <Field label="Name" htmlFor="alias-name" error={e("name")}>
+            <Field label="Name" htmlFor="alias-name" error={e("name")} help="1-128 letters, digits, hyphens or underscores. Cannot be only digits.">
               <Input id="alias-name" value={name} onChange={(ev) => setName(ev.target.value)} placeholder="prod" className="font-mono" autoFocus spellCheck={false} />
             </Field>
           )}
           <Field label="Description" htmlFor="alias-desc" optional>
             <Input id="alias-desc" value={description} onChange={(ev) => setDescription(ev.target.value)} maxLength={256} />
           </Field>
-          <Field label="Version" htmlFor="alias-version" error={e("version")}>
+          <Field label="Version" htmlFor="alias-version" error={e("version")} help="The version that receives the invocations.">
             <Select value={version} onValueChange={setVersion} disabled={!versions.data}>
               <SelectTrigger id="alias-version" className="w-full">
                 <SelectValue placeholder={versions.data ? "Choose a version" : "Loading versions..."} />
@@ -380,7 +380,7 @@ function AliasDialog({ state, onClose, fn }: { state: { alias: LambdaAlias | nul
                 {(versions.data ?? []).map((v) => (
                   <SelectItem key={v.version} value={v.version ?? LATEST}>
                     <span className="font-mono">{v.version}</span>
-                    {v.version_description && <span className="text-muted-foreground text-xs">{v.version_description}</span>}
+                    {v.version_description && <span className="text-muted-foreground ml-2 text-xs">{v.version_description}</span>}
                   </SelectItem>
                 ))}
               </SelectContent>

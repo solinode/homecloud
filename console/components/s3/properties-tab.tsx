@@ -4,22 +4,26 @@ import { useEffect, useState } from "react"
 import { AlertTriangle, ExternalLink, Info, Loader2, Pencil, Plus, X } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { Field } from "@/components/console/form-field"
 import { JsonEditor } from "@/components/console/json-editor"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { StatusBadge } from "@/components/console/status-badge"
+import { TimeAgo } from "@/components/console/time-ago"
 import { TagList } from "@/components/console/tags-editor"
 import { api, errorMessage, seg } from "@/lib/api"
-import { formatBytes, formatDate, formatNumber } from "@/lib/format"
+import { formatBytes, formatNumber } from "@/lib/format"
 import { useAction } from "@/lib/hooks"
-import type { Bucket, BucketDetail } from "@/lib/types"
+import type { Bucket, BucketDetail, LifecycleRule } from "@/lib/types"
 
 import { S3AccessCard } from "./common"
 
@@ -125,10 +129,10 @@ function AccessSection({ bucket, onChanged }: Props) {
           {bucket.public ? <StatusBadge status="public" label="Public" tone="warning" /> : <StatusBadge status="private" label="On" tone="success" />}
         </div>
         {bucket.public && (
-          <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-            <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-            Objects in this bucket are publicly readable by anyone who can reach the S3 endpoint.
-          </div>
+          <Alert variant="warning">
+            <AlertTriangle />
+            <AlertDescription>Objects in this bucket are publicly readable by anyone who can reach the S3 endpoint.</AlertDescription>
+          </Alert>
         )}
       </div>
       <ConfirmDialog
@@ -224,6 +228,32 @@ function WebsiteSection({ bucket, onChanged }: Props) {
   )
 }
 
+const lifecycleColumns: Column<LifecycleRule>[] = [
+  { id: "id", header: "Rule name", value: (r) => r.id, cell: (r) => <CellText className="font-medium">{r.id}</CellText> },
+  {
+    id: "status",
+    header: "Status",
+    value: (r) => r.status || "Enabled",
+    cell: (r) => <StatusBadge status={(r.status || "Enabled").toLowerCase()} label={r.status || "Enabled"} />,
+  },
+  {
+    id: "scope",
+    header: "Scope",
+    value: (r) => r.prefix,
+    cell: (r) => (r.prefix ? <CellText mono title={r.prefix}>{`Prefix: ${r.prefix}`}</CellText> : <CellText muted>Entire bucket</CellText>),
+  },
+  {
+    id: "expiration",
+    header: "Expiration",
+    value: (r) => r.expiration_days,
+    cell: (r) => (
+      <span className="whitespace-nowrap">
+        {r.expiration_days} {r.expiration_days === 1 ? "day" : "days"} after creation
+      </span>
+    ),
+  },
+]
+
 interface RuleRow {
   id: string
   prefix: string
@@ -274,7 +304,7 @@ function LifecycleSection({ bucket, onChanged }: Props) {
       flush
     >
       {editing ? (
-        <div className="flex flex-col gap-3 p-4">
+        <div className="flex flex-col gap-3 p-5">
           {rows.length > 0 && (
             <div className="text-muted-foreground hidden grid-cols-[1fr_1fr_9rem_2rem] gap-2 text-xs font-medium sm:grid">
               <span>Rule name</span>
@@ -311,34 +341,15 @@ function LifecycleSection({ bucket, onChanged }: Props) {
           </div>
         </div>
       ) : current.length === 0 ? (
-        <p className="text-muted-foreground p-4 text-sm">There are no lifecycle rules for this bucket.</p>
+        <p className="text-muted-foreground p-5 text-sm">There are no lifecycle rules for this bucket.</p>
       ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                <th className="px-4 py-2 font-semibold">Rule name</th>
-                <th className="px-3 py-2 font-semibold">Status</th>
-                <th className="px-3 py-2 font-semibold">Scope</th>
-                <th className="px-4 py-2 font-semibold">Expiration</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(bucket.lifecycle_rules ?? []).map((r) => (
-                <tr key={r.id} className="border-b last:border-0">
-                  <td className="px-4 py-2 font-medium">{r.id}</td>
-                  <td className="px-3 py-2">
-                    <StatusBadge status={(r.status || "Enabled").toLowerCase()} label={r.status || "Enabled"} />
-                  </td>
-                  <td className="px-3 py-2">{r.prefix ? <span className="font-mono text-[13px]">Prefix: {r.prefix}</span> : "Entire bucket"}</td>
-                  <td className="px-4 py-2 whitespace-nowrap">
-                    {r.expiration_days} {r.expiration_days === 1 ? "day" : "days"} after creation
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          data={bucket.lifecycle_rules ?? []}
+          columns={lifecycleColumns}
+          rowId={(r) => r.id}
+          noSearch
+          className="rounded-none border-0 shadow-none"
+        />
       )}
     </Section>
   )
@@ -355,12 +366,33 @@ export function PropertiesTab({ bucket, listing, onChanged }: Props) {
   }
   return (
     <div className="flex flex-col gap-4">
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
+        <StatTile
+          label="Objects"
+          value={
+            <>
+              {formatNumber(bucket.object_count)}
+              {bucket.stats_truncated && "+"}
+            </>
+          }
+        />
+        <StatTile
+          label="Total size"
+          value={
+            <>
+              {formatBytes(bucket.size_bytes)}
+              {bucket.stats_truncated && "+"}
+            </>
+          }
+        />
+        <StatTile label="Lifecycle rules" value={(bucket.lifecycle_rules ?? []).length} caption={bucket.versioning === "Enabled" ? "Versioning enabled" : "Versioning off"} />
+      </div>
       <Section title="Bucket overview">
         <KeyValueGrid
           items={[
             { label: "AWS Region", value: <span className="font-mono text-[13px]">{bucket.region}</span> },
             { label: "Amazon Resource Name (ARN)", value: <CopyableText value={bucket.arn} /> },
-            { label: "Creation date", value: listing ? formatDate(listing.created_at) : "" },
+            { label: "Creation date", value: listing ? <TimeAgo value={listing.created_at} /> : "" },
             {
               label: "Total objects",
               value: (

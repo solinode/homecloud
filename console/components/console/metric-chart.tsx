@@ -89,10 +89,10 @@ export function MetricChart({
   }, [data, statKey])
 
   if (isLoading && !data) return <Skeleton className={cn("w-full rounded-md", className)} style={{ height }} />
-  if (error) return <div className={cn("text-destructive flex items-center justify-center text-sm", className)} style={{ height }}>{error.message}</div>
+  if (error) return <div className={cn("text-danger flex items-center justify-center text-sm", className)} style={{ height }}>{error.message}</div>
   if (!hasData)
     return (
-      <div className={cn("text-muted-foreground flex flex-col items-center justify-center gap-1 rounded-md border border-dashed text-sm", className)} style={{ height }}>
+      <div className={cn("text-muted-foreground bg-muted/30 flex flex-col items-center justify-center gap-1 rounded-lg border border-dashed text-sm", className)} style={{ height }}>
         <span>No datapoints in this time range</span>
         <span className="text-xs">Metrics are sampled every 30 seconds while a resource is running.</span>
       </div>
@@ -104,22 +104,24 @@ export function MetricChart({
     <div className={cn("w-full", className)} style={{ height }}>
       <ResponsiveContainer width="100%" height="100%">
         <LineChart data={rows} margin={{ top: 8, right: 12, bottom: 0, left: 0 }}>
-          <CartesianGrid stroke="var(--border)" strokeDasharray="3 3" vertical={false} />
+          <CartesianGrid stroke="var(--chart-grid)" vertical={false} />
           <XAxis
             dataKey="t"
             type="number"
             scale="time"
             domain={[now - rangeMinutes * 60_000, now]}
             tickFormatter={(t: number) => formatTime(t).slice(0, 5)}
-            stroke="var(--muted-foreground)"
+            stroke="var(--faint)"
             fontSize={11}
+            fontFamily="var(--font-geist-mono), ui-monospace, monospace"
             tickLine={false}
-            axisLine={{ stroke: "var(--border)" }}
+            axisLine={{ stroke: "var(--border-strong)" }}
             minTickGap={40}
           />
           <YAxis
-            stroke="var(--muted-foreground)"
+            stroke="var(--faint)"
             fontSize={11}
+            fontFamily="var(--font-geist-mono), ui-monospace, monospace"
             tickLine={false}
             axisLine={false}
             width={64}
@@ -127,11 +129,12 @@ export function MetricChart({
             domain={unit === "Percent" ? [0, (max: number) => Math.max(10, Math.ceil(max / 10) * 10)] : [0, "auto"]}
           />
           <Tooltip
-            cursor={{ stroke: "var(--muted-foreground)", strokeDasharray: "3 3" }}
+            cursor={{ stroke: "var(--border-strong)" }}
             contentStyle={{
               background: "var(--popover)",
-              border: "1px solid var(--border)",
-              borderRadius: 8,
+              border: "1px solid var(--border-strong)",
+              boxShadow: "var(--shadow-md-v)",
+              borderRadius: 10,
               fontSize: 12,
               color: "var(--popover-foreground)",
             }}
@@ -149,7 +152,7 @@ export function MetricChart({
               formatter={(value: string) => <span className="text-foreground text-xs">{labels[Number(value.slice(1))] ?? value}</span>}
             />
           )}
-          {threshold !== undefined && <ReferenceLine y={threshold} stroke="var(--destructive)" strokeDasharray="4 4" />}
+          {threshold !== undefined && <ReferenceLine y={threshold} stroke="var(--destructive-foreground)" strokeDasharray="4 4" />}
           {queries.map((_, i) => (
             <Line
               key={i}

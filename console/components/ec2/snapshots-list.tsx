@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { FormDialog } from "@/components/console/form-dialog"
@@ -63,16 +63,16 @@ export function CreateSnapshotDialog({ onClose, volumeId }: { onClose: () => voi
 }
 
 const columns: Column<Snapshot>[] = [
-  { id: "id", header: "Snapshot ID", cell: (s) => <span className="font-mono text-[13px] font-medium">{s.id}</span>, value: (s) => s.id },
-  { id: "volume", header: "Volume ID", cell: (s) => <span className="font-mono text-[13px]">{s.volume_id}</span>, value: (s) => s.volume_id },
-  { id: "size", header: "Size", cell: (s) => `${s.volume_size} GiB`, value: (s) => s.volume_size, hideBelow: "sm" },
+  { id: "id", header: "Snapshot ID", cell: (s) => <CellText mono className="font-medium">{s.id}</CellText>, value: (s) => s.id },
+  { id: "volume", header: "Volume ID", cell: (s) => <CellText mono>{s.volume_id}</CellText>, value: (s) => s.volume_id },
+  { id: "size", header: "Size", cell: (s) => <span className="whitespace-nowrap tabular-nums">{s.volume_size} GiB</span>, value: (s) => s.volume_size, hideBelow: "sm" },
   {
     id: "state",
     header: "Status",
     cell: (s) => <StatusBadge status={s.state} />,
     value: (s) => s.state,
   },
-  { id: "desc", header: "Description", cell: (s) => s.description || <span className="text-muted-foreground">-</span>, value: (s) => s.description, hideBelow: "md" },
+  { id: "desc", header: "Description", cell: (s) => <CellText muted>{s.description}</CellText>, value: (s) => s.description, hideBelow: "md" },
   { id: "started", header: "Started", cell: (s) => <TimeAgo value={s.start_time} />, value: (s) => s.start_time, hideBelow: "lg" },
 ]
 
@@ -113,7 +113,18 @@ export function SnapshotsList() {
             </Button>
           </>
         }
-        empty={<EmptyState icon={Camera} title="No snapshots" description="Create a snapshot of a volume." />}
+        empty={
+          <EmptyState
+            icon={Camera}
+            title="No snapshots"
+            description="Create a snapshot of a volume."
+            action={
+              <Button size="sm" onClick={() => setDialog("create")}>
+                <Plus /> Create snapshot
+              </Button>
+            }
+          />
+        }
       />
       {dialog === "create" && <CreateSnapshotDialog onClose={() => setDialog(null)} />}
       {sel && (

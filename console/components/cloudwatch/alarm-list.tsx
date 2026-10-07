@@ -11,7 +11,7 @@ import { AlarmTabs } from "./alarm-history"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { PageHeader } from "@/components/console/page-header"
@@ -62,14 +62,14 @@ export function AlarmList() {
 
   const columns = useMemo<Column<Alarm>[]>(
     () => [
-      { id: "name", header: "Name", value: (a) => a.name, cell: (a) => <span className="text-primary font-medium">{a.name}</span> },
+      { id: "name", header: "Name", value: (a) => a.name, cell: (a) => <CellText className="text-primary font-medium">{a.name}</CellText> },
       { id: "state", header: "State", value: (a) => STATE_ORDER[a.state], cell: (a) => <AlarmStateBadge state={a.state} /> },
       {
         id: "condition",
         header: "Conditions",
         value: (a) => alarmCondition(a),
         sortable: false,
-        cell: (a) => <span className="block max-w-80 truncate" title={alarmCondition(a)}>{alarmCondition(a)}</span>,
+        cell: (a) => <CellText max="20rem">{alarmCondition(a)}</CellText>,
         hideBelow: "md",
       },
       {

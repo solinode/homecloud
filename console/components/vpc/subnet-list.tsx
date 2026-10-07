@@ -8,9 +8,10 @@ import { Button } from "@/components/ui/button"
 import { Progress } from "@/components/ui/progress"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api } from "@/lib/api"
 import { formatNumber } from "@/lib/format"
@@ -33,8 +34,8 @@ export function SubnetList() {
 
   const columns = useMemo<Column<Subnet>[]>(
     () => [
-      { id: "name", header: "Name", value: (s) => s.name, cell: (s) => <span className="font-medium">{s.name || <span className="text-muted-foreground font-normal">-</span>}</span> },
-      { id: "id", header: "Subnet ID", value: (s) => s.id, cell: (s) => <span className="font-mono text-[13px]">{s.id}</span> },
+      { id: "name", header: "Name", value: (s) => s.name, cell: (s) => <CellText className="font-medium">{s.name}</CellText> },
+      { id: "id", header: "Subnet ID", value: (s) => s.id, cell: (s) => <CellText mono>{s.id}</CellText> },
       {
         id: "vpc",
         header: "VPC",
@@ -46,8 +47,8 @@ export function SubnetList() {
         ),
         hideBelow: "md",
       },
-      { id: "cidr", header: "IPv4 CIDR", value: (s) => s.cidr, cell: (s) => <span className="font-mono text-[13px]">{s.cidr}</span> },
-      { id: "az", header: "Availability Zone", value: (s) => s.availability_zone, cell: (s) => s.availability_zone, hideBelow: "sm" },
+      { id: "cidr", header: "IPv4 CIDR", value: (s) => s.cidr, cell: (s) => <span className="font-mono text-[13px] whitespace-nowrap">{s.cidr}</span> },
+      { id: "az", header: "Availability Zone", value: (s) => s.availability_zone, cell: (s) => <span className="whitespace-nowrap">{s.availability_zone}</span>, hideBelow: "sm" },
       {
         id: "ips",
         header: "Available IPv4",
@@ -56,7 +57,7 @@ export function SubnetList() {
           const total = s.available_ips + s.used_ips
           return (
             <div className="flex min-w-32 flex-col gap-1">
-              <span className="tabular-nums">
+              <span className="tabular-nums whitespace-nowrap">
                 {formatNumber(s.available_ips, 0)}
                 <span className="text-muted-foreground"> ({formatNumber(s.used_ips, 0)} used)</span>
               </span>
@@ -65,7 +66,16 @@ export function SubnetList() {
           )
         },
       },
-      { id: "default", header: "Default subnet", value: (s) => (s.default ? "Yes" : "No"), cell: (s) => (s.default ? "Yes" : "No"), hideBelow: "lg" },
+      { id: "default", header: "Default subnet", value: (s) => (s.default ? "Yes" : "No"), cell: (s) =>
+          s.default ? (
+            <Tag accent="brand" mono={false}>
+              Default
+            </Tag>
+          ) : (
+            <span className="text-muted-foreground">No</span>
+          ),
+        hideBelow: "lg",
+      },
       { id: "created", header: "Created", value: (s) => s.created_at, cell: (s) => <TimeAgo value={s.created_at} />, hideBelow: "lg" },
     ],
     [vpcs.data],

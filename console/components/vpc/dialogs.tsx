@@ -118,7 +118,7 @@ export function CreateVpcDialog({
               spellCheck={false}
             />
           </Field>
-          <div className="flex items-start justify-between gap-4 rounded-md border p-3">
+          <div className="bg-muted/30 flex items-start justify-between gap-4 rounded-lg border p-3">
             <div className="flex flex-col gap-0.5">
               <label htmlFor="vpc-internet" className="text-sm font-medium">
                 Internet access
@@ -357,10 +357,9 @@ export function CreateSecurityGroupDialog({
           <Field label="Description" htmlFor="sg-desc" optional>
             <Textarea id="sg-desc" rows={2} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="Allows HTTP and HTTPS from anywhere" maxLength={255} />
           </Field>
-          <div className="flex flex-col gap-2">
-            <h3 className="text-sm font-semibold">Inbound rules</h3>
+          <Field label="Inbound rules" optional help="You can add or remove rules after the group is created.">
             <RulesEditor rules={rules} onChange={setRules} showErrors={touched} groups={groups?.filter((g) => g.vpc_id === vpcId)} />
-          </div>
+          </Field>
           <Alert>
             <Info />
             <AlertDescription>

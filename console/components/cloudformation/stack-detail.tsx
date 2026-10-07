@@ -3,19 +3,23 @@
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Info, Loader2, Pencil, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, CheckCircle2, ChevronDown, ChevronRight, ExternalLink, Info, Loader2, Pencil, RefreshCw, Trash2 } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, api } from "@/lib/api"
 import { formatDate, pluralize } from "@/lib/format"
@@ -38,7 +42,6 @@ import {
   useDeleteStack,
   valueText,
 } from "./common"
-import { TemplateEditor } from "./template-editor"
 
 const TABS = ["events", "resources", "outputs", "parameters", "template"] as const
 type Tab = (typeof TABS)[number]
@@ -97,6 +100,8 @@ export function StackDetail() {
   const status = st.status
   const failed = status.endsWith("_FAILED") || status.includes("ROLLBACK")
   const resources = Object.values(st.resources ?? {})
+  const failedResources = resources.filter((r) => r.status.endsWith("_FAILED")).length
+  const inProgressResources = resources.filter((r) => isInProgress(r.status)).length
 
   return (
     <div className="flex flex-col gap-4">
@@ -108,26 +113,30 @@ export function StackDetail() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating} aria-label="Refresh">
-              {isValidating ? <Loader2 className="animate-spin" /> : null}
+              {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Refresh
             </Button>
+            <ActionsMenu
+              items={[
+                { label: "View events", onSelect: () => setParam("tab", null) },
+                { label: "View template", onSelect: () => setParam("tab", "template") },
+                { separator: true },
+                {
+                  label: "Delete stack",
+                  destructive: true,
+                  icon: <Trash2 />,
+                  disabled: !canDelete(status),
+                  onSelect: () => del.open(st.name, resources.length),
+                },
+              ]}
+            />
             <Button
-              variant="outline"
               size="sm"
               disabled={!canUpdate(status)}
               title={status === "ROLLBACK_COMPLETE" ? "A stack whose creation was rolled back can only be deleted" : undefined}
               onClick={() => router.push(updateStackHref(st.name))}
             >
               <Pencil /> Update stack
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              className="text-destructive hover:text-destructive"
-              disabled={!canDelete(status)}
-              onClick={() => del.open(st.name, resources.length)}
-            >
-              <Trash2 /> Delete
             </Button>
           </>
         }
@@ -146,10 +155,24 @@ export function StackDetail() {
         </Alert>
       )}
       {isInProgress(status) && (
-        <p className="text-muted-foreground flex items-center gap-2 text-sm">
-          <Loader2 className="size-4 animate-spin" /> {stackStatusSentence(status)} This page refreshes automatically.
-        </p>
+        <Alert variant="info">
+          <Loader2 className="animate-spin" />
+          <AlertTitle>{stackStatusSentence(status)}</AlertTitle>
+          <AlertDescription>This page refreshes automatically.</AlertDescription>
+        </Alert>
       )}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile
+          label="Resources"
+          value={resources.length}
+          tone={failedResources ? "danger" : inProgressResources ? "warning" : resources.length ? "success" : undefined}
+          caption={failedResources ? `${failedResources} failed` : inProgressResources ? `${inProgressResources} in progress` : resources.length ? "No failures" : "None yet"}
+        />
+        <StatTile label="Events" value={(st.events ?? []).length} caption={<>Last <TimeAgo value={st.updated_at} /></>} />
+        <StatTile label="Outputs" value={Object.keys(st.outputs ?? {}).length} caption="Resolved after create/update" />
+        <StatTile label="Parameters" value={Object.keys(st.parameters ?? {}).length} caption={templateFormat(st.template) + " template"} />
+      </div>
 
       <Section title="Stack info">
         <KeyValueGrid
@@ -245,13 +268,13 @@ function PhysicalId({ type, id }: { type: string; id: string }) {
   return (
     <span className="inline-flex max-w-full items-center gap-1">
       {href ? (
-        <Link href={href} className="text-primary truncate font-mono text-[13px] hover:underline" title={meta?.listOnly ? `${id} (opens the ${meta.service} list)` : id}>
+        <CellLink href={href} mono max="18rem" title={meta?.listOnly ? `${id} (opens the ${meta.service} list)` : id}>
           {id}
-        </Link>
+        </CellLink>
       ) : (
-        <span className="truncate font-mono text-[13px]" title={id}>
+        <CellText mono max="18rem">
           {id}
-        </span>
+        </CellText>
       )}
       <CopyButton value={id} label="Copy physical ID" />
     </span>
@@ -277,10 +300,10 @@ const eventColumns: Column<EventRow>[] = [
   {
     id: "logical",
     header: "Logical ID",
-    cell: (e) => <span className={cn("font-medium", e.type === STACK_TYPE && "text-primary")}>{e.logical_id}</span>,
+    cell: (e) => <CellText className={cn("font-medium", e.type === STACK_TYPE && "text-primary")}>{e.logical_id}</CellText>,
     value: (e) => e.logical_id,
   },
-  { id: "type", header: "Type", cell: (e) => <span className="font-mono text-[13px] whitespace-nowrap">{e.type}</span>, value: (e) => e.type, hideBelow: "md" },
+  { id: "type", header: "Type", cell: (e) => <Tag>{e.type}</Tag>, value: (e) => e.type, hideBelow: "md" },
   { id: "status", header: "Status", cell: (e) => <StackStatusBadge status={e.status} />, value: (e) => e.status },
   {
     id: "reason",
@@ -344,9 +367,9 @@ function ResourcesTab({ stack, refreshing, onRefresh }: { stack: Stack; refreshi
       ),
       className: "w-8 pr-0",
     },
-    { id: "logical", header: "Logical ID", cell: (r) => <span className="font-medium">{r.logical_id}</span>, value: (r) => r.logical_id },
+    { id: "logical", header: "Logical ID", cell: (r) => <CellText className="font-medium">{r.logical_id}</CellText>, value: (r) => r.logical_id },
     { id: "physical", header: "Physical ID", cell: (r) => <PhysicalId type={r.type} id={r.physical_id} />, value: (r) => r.physical_id },
-    { id: "type", header: "Type", cell: (r) => <span className="font-mono text-[13px] whitespace-nowrap">{r.type}</span>, value: (r) => r.type, hideBelow: "md" },
+    { id: "type", header: "Type", cell: (r) => <Tag>{r.type}</Tag>, value: (r) => r.type, hideBelow: "md" },
     { id: "status", header: "Status", cell: (r) => <StackStatusBadge status={r.status} />, value: (r) => r.status },
     {
       id: "reason",
@@ -407,17 +430,11 @@ function ResourceDetails({ r }: { r: StackResource }) {
 
 function JsonBlock({ title, value }: { title: string; value: unknown }) {
   const text = value && Object.keys(value as object).length ? JSON.stringify(value, null, 2) : ""
+  if (text) return <CodeBlock title={title} code={text} copyLabel={`Copy ${title.toLowerCase()}`} maxHeight="18rem" />
   return (
     <div className="flex min-w-0 flex-col gap-1">
-      <div className="flex items-center justify-between gap-2">
-        <span className="text-muted-foreground text-xs font-medium">{title}</span>
-        {text && <CopyButton value={text} label={`Copy ${title.toLowerCase()}`} />}
-      </div>
-      {text ? (
-        <pre className="bg-background max-h-72 overflow-auto rounded-md border p-2 font-mono text-[12.5px]">{text}</pre>
-      ) : (
-        <p className="text-muted-foreground text-sm">None</p>
-      )}
+      <span className="hc-eyebrow">{title}</span>
+      <p className="text-muted-foreground text-sm">None</p>
     </div>
   )
 }
@@ -431,7 +448,7 @@ interface OutputRow {
 }
 
 const outputColumns: Column<OutputRow>[] = [
-  { id: "key", header: "Key", cell: (o) => <span className="font-medium">{o.key}</span>, value: (o) => o.key },
+  { id: "key", header: "Key", cell: (o) => <CellText className="font-medium">{o.key}</CellText>, value: (o) => o.key },
   {
     id: "value",
     header: "Value",
@@ -489,7 +506,7 @@ interface ParamRow {
 }
 
 const paramColumns: Column<ParamRow>[] = [
-  { id: "key", header: "Key", cell: (p) => <span className="font-mono text-[13px] font-medium">{p.key}</span>, value: (p) => p.key },
+  { id: "key", header: "Key", cell: (p) => <CellText mono className="font-medium">{p.key}</CellText>, value: (p) => p.key },
   {
     id: "value",
     header: "Value",
@@ -505,7 +522,7 @@ const paramColumns: Column<ParamRow>[] = [
       ),
     value: (p) => (p.noEcho ? "" : p.value),
   },
-  { id: "type", header: "Type", cell: (p) => <span className="text-muted-foreground">{p.type || "-"}</span>, value: (p) => p.type, hideBelow: "sm" },
+  { id: "type", header: "Type", cell: (p) => (p.type ? <Tag>{p.type}</Tag> : <span className="text-muted-foreground">-</span>), value: (p) => p.type, hideBelow: "sm" },
   {
     id: "description",
     header: "Description",
@@ -548,15 +565,17 @@ function TemplateTab({ stack, onUpdate }: { stack: Stack; onUpdate: () => void }
       title="Template"
       description={`${templateFormat(stack.template)} · ${pluralize(stack.template.split("\n").length, "line")}. The template of the last create or update.`}
       actions={
-        <>
-          <CopyButton value={stack.template} size="sm" label="Copy" toastMessage="Template copied" />
-          <Button size="sm" onClick={onUpdate} disabled={!canUpdate(stack.status)}>
-            <Pencil /> Update stack
-          </Button>
-        </>
+        <Button size="sm" onClick={onUpdate} disabled={!canUpdate(stack.status)}>
+          <Pencil /> Update stack
+        </Button>
       }
     >
-      <TemplateEditor value={stack.template} readOnly minRows={8} maxHeight="max-h-[70vh]" />
+      <CodeBlock
+        title={`template.${templateFormat(stack.template) === "JSON" ? "json" : "yaml"}`}
+        code={stack.template}
+        copyLabel="Copy template"
+        maxHeight="70vh"
+      />
     </Section>
   )
 }

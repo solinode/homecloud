@@ -3,14 +3,15 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { roleHref } from "@/components/iam/role-common"
-import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight, Loader2, Play, RefreshCw, Square } from "lucide-react"
+import { AlertCircle, ArrowLeft, ChevronDown, ChevronRight, History, Loader2, Play, RefreshCw, Square } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -99,22 +100,23 @@ export function ExecutionDetail() {
               {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setRerun(true)}>
-              <Play /> New execution
-            </Button>
             {running && (
-              <Button variant="destructive" size="sm" onClick={() => setStopping(true)}>
+              <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setStopping(true)}>
                 <Square /> Stop execution
               </Button>
             )}
+            <Button size="sm" onClick={() => setRerun(true)}>
+              <Play /> New execution
+            </Button>
           </>
         }
       />
 
       {running && (
-        <p className="text-muted-foreground flex items-center gap-2 text-sm">
-          <Loader2 className="size-4 animate-spin" /> The execution is running. This page refreshes every second.
-        </p>
+        <Alert variant="info">
+          <Loader2 className="animate-spin" />
+          <AlertDescription>The execution is running. This page refreshes every second.</AlertDescription>
+        </Alert>
       )}
       {failed && (x.error || x.cause) && (
         <Alert variant={x.status === "ABORTED" ? "default" : "destructive"}>
@@ -136,9 +138,9 @@ export function ExecutionDetail() {
             {
               label: "State machine",
               value: (
-                <Link href={machineHref(x.state_machine)} className={cellLinkClass()}>
+                <CellLink href={machineHref(x.state_machine)} className="w-fit">
                   {x.state_machine}
-                </Link>
+                </CellLink>
               ),
             },
             { label: "Execution ID", value: <CopyableText value={x.id} display={`${x.id.slice(0, 16)}…`} /> },
@@ -148,9 +150,9 @@ export function ExecutionDetail() {
             {
               label: "Execution role",
               value: x.role_arn ? (
-                <Link href={roleHref(x.role_arn.split("/").pop() ?? "")} className={cellLinkClass()}>
-                  {x.role_arn.split("/").pop()}
-                </Link>
+                <CellLink href={roleHref(x.role_arn.split("/").pop() ?? "")} className="w-fit">
+                  {x.role_arn.split("/").pop() ?? ""}
+                </CellLink>
               ) : (
                 ""
               ),
@@ -220,7 +222,7 @@ function JsonSection({ title, value }: { title: string; value: unknown }) {
   const json = pretty(value)
   return (
     <Section title={title} actions={<CopyButton value={json} size="sm" toastMessage={`${title} copied`} />} bodyClassName="p-3">
-      <pre className="bg-muted/30 max-h-96 overflow-auto rounded-md border p-3 font-mono text-[12.5px] leading-5">{json}</pre>
+      <CodeBlock code={json} maxHeight="24rem" noCopy />
     </Section>
   )
 }
@@ -229,11 +231,11 @@ function JsonSection({ title, value }: { title: string; value: unknown }) {
 
 function eventTone(e: SfnHistoryEvent): string {
   const t = e.type
-  if (t.endsWith("StateExited") && e.details && typeof e.details === "object" && "caught" in e.details) return "text-orange-600 dark:text-orange-400"
-  if (/(Failed|TimedOut|Aborted)$/.test(t)) return "text-red-600 dark:text-red-400"
-  if (/(Succeeded|Exited)$/.test(t)) return "text-emerald-700 dark:text-emerald-400"
-  if (/(Retrying|Waiting)$/.test(t)) return "text-amber-700 dark:text-amber-400"
-  return "text-blue-700 dark:text-blue-400"
+  if (t.endsWith("StateExited") && e.details && typeof e.details === "object" && "caught" in e.details) return "text-warning"
+  if (/(Failed|TimedOut|Aborted)$/.test(t)) return "text-danger"
+  if (/(Succeeded|Exited)$/.test(t)) return "text-success"
+  if (/(Retrying|Waiting)$/.test(t)) return "text-warning"
+  return "text-info"
 }
 
 function elapsed(ts: string, start: number): string {
@@ -310,13 +312,13 @@ function EventHistory({ history, start }: { history: SfnHistoryEvent[]; start: s
           <span className="flex min-w-0 flex-col">
             <span className="text-muted-foreground text-xs">{r.type}</span>
             {href ? (
-              <Link href={href} className={cn(cellLinkClass(), "max-w-60 truncate")} onClick={(ev) => ev.stopPropagation()} title={r.name}>
+              <CellLink href={href} title={r.name} max="15rem">
                 {shortName(r.name)}
-              </Link>
+              </CellLink>
             ) : (
-              <span className="max-w-60 truncate" title={r.name}>
+              <CellText title={r.name} max="15rem">
                 {shortName(r.name)}
-              </span>
+              </CellText>
             )}
           </span>
         )
@@ -353,16 +355,10 @@ function EventHistory({ history, start }: { history: SfnHistoryEvent[]; start: s
       onRowClick={(e) => e.details !== undefined && toggle(e.id)}
       expanded={(e) =>
         open.has(e.id) && e.details !== undefined ? (
-          <div className="flex min-w-0 flex-col gap-2">
-            <div className="flex items-center justify-between gap-2">
-              <span className="text-muted-foreground text-xs font-medium">Details</span>
-              <CopyButton value={pretty(e.details)} label="Copy details" />
-            </div>
-            <pre className="bg-card max-h-80 max-w-[calc(100vw-4rem)] overflow-auto rounded-md border p-3 font-mono text-[12.5px] leading-5">{pretty(e.details)}</pre>
-          </div>
+          <CodeBlock title="Details" code={pretty(e.details)} copyLabel="Copy details" maxHeight="20rem" className="max-w-[calc(100vw-4rem)]" />
         ) : null
       }
-      empty={<p className="text-muted-foreground p-8 text-center text-sm">No events recorded yet.</p>}
+      empty={<EmptyState icon={History} title="No events yet" description="Events appear here as the execution enters and leaves states." />}
     />
   )
 }

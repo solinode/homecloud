@@ -1,12 +1,11 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import Link from "next/link"
 import { ListChecks, Play, Square } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -30,9 +29,9 @@ const columns: Column<EcsTask>[] = [
     id: "id",
     header: "Task",
     cell: (t) => (
-      <Link href={taskHref(t.id)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] font-medium hover:underline" title={t.id}>
+      <CellLink href={taskHref(t.id)} mono title={t.id}>
         {shortId(t.id)}
-      </Link>
+      </CellLink>
     ),
     value: (t) => t.id,
   },
@@ -42,9 +41,9 @@ const columns: Column<EcsTask>[] = [
     header: "Group",
     cell: (t) =>
       t.service ? (
-        <Link href={serviceHref(t.service)} onClick={(e) => e.stopPropagation()} className="text-primary text-sm whitespace-nowrap hover:underline">
-          service:{t.service}
-        </Link>
+        <CellLink href={serviceHref(t.service)} max="16rem">
+          {`service:${t.service}`}
+        </CellLink>
       ) : (
         <span className="text-muted-foreground text-sm">standalone</span>
       ),
@@ -54,7 +53,7 @@ const columns: Column<EcsTask>[] = [
   {
     id: "ip",
     header: "Private IP",
-    cell: (t) => <span className="font-mono text-[13px]">{t.private_ip || "-"}</span>,
+    cell: (t) => <CellText mono>{t.private_ip}</CellText>,
     value: (t) => t.private_ip,
     hideBelow: "sm",
   },

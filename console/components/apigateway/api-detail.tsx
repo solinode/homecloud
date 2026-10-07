@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, ArrowLeft, ExternalLink, Loader2, Pencil, Play, Plus, Route as RouteIcon, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, ExternalLink, Loader2, Pencil, Play, Plus, RefreshCw, Route as RouteIcon, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -11,9 +11,10 @@ import { Input } from "@/components/ui/input"
 import { Switch } from "@/components/ui/switch"
 import { Textarea } from "@/components/ui/textarea"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
-import { cellLinkClass } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
@@ -21,6 +22,8 @@ import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { functionHref } from "@/components/lambda/common"
 import { ApiError, api, errorMessage, seg } from "@/lib/api"
@@ -74,6 +77,78 @@ export function ApiDetail() {
 
   const routes = [...(a.routes ?? [])].sort((x, y) => x.path.localeCompare(y.path) || x.method.localeCompare(y.method))
   const fnNames = new Set((functions.data ?? []).map((f) => f.name))
+  const jwtRoutes = routes.filter((r) => r.authorization === "JWT").length
+  const routeFns = new Set(routes.map((r) => r.function_name))
+  const missingFns = functions.data ? [...routeFns].filter((f) => !fnNames.has(f)).length : 0
+
+  const routeColumns: Column<ApiRoute>[] = [
+    { id: "method", header: "Method", value: (r) => r.method, cell: (r) => <MethodBadge method={r.method} /> },
+    { id: "path", header: "Path", value: (r) => r.path, cell: (r) => <CellText mono>{r.path}</CellText> },
+    {
+      id: "integration",
+      header: "Integration",
+      value: (r) => r.function_name,
+      cell: (r) => (
+        <span className="inline-flex max-w-full items-center gap-1.5 whitespace-nowrap">
+          <span className="text-muted-foreground text-xs">Lambda</span>
+          <CellLink href={functionHref(r.function_name)} max="16rem">
+            {r.function_name}
+          </CellLink>
+          {functions.data && !fnNames.has(r.function_name) && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <AlertCircle className="text-danger size-4 shrink-0" aria-label="Function missing" />
+              </TooltipTrigger>
+              <TooltipContent>The function no longer exists; requests to this route fail.</TooltipContent>
+            </Tooltip>
+          )}
+        </span>
+      ),
+    },
+    {
+      id: "auth",
+      header: "Authorization",
+      value: (r) => r.authorization ?? "NONE",
+      cell: (r) => (
+        <button
+          type="button"
+          onClick={() => setAuthRoute(r)}
+          className="focus-visible:ring-ring/50 rounded-md focus-visible:ring-2 focus-visible:outline-none"
+          title={r.authorization === "JWT" ? "Requires a Cognito JWT. Click to make public." : "Public. Click to require a JWT."}
+          aria-label={`Change authorization of ${r.method} ${r.path}`}
+        >
+          <AuthBadge authorization={r.authorization} className="hover:border-border-strong cursor-pointer" />
+        </button>
+      ),
+    },
+    {
+      id: "url",
+      header: "Invoke URL",
+      cell: (r) => <CopyableText value={`${a.endpoint}${r.path}`} className="max-w-md" />,
+      hideBelow: "lg",
+    },
+    {
+      id: "actions",
+      header: "",
+      headerClassName: "w-px",
+      cell: (r) => (
+        <div className="flex justify-end gap-1">
+          <Button variant="ghost" size="sm" onClick={() => setPreset({ method: r.method, path: r.path, nonce: Date.now() })}>
+            <Play /> Try
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="text-destructive hover:text-destructive size-8"
+            onClick={() => setDeletingRoute(r)}
+            aria-label={`Delete route ${r.method} ${r.path}`}
+          >
+            <Trash2 />
+          </Button>
+        </div>
+      ),
+    },
+  ]
 
   const toggleCors = async (v: boolean) => {
     setCorsPending(true)
@@ -94,21 +169,47 @@ export function ApiDetail() {
         title={a.name}
         description={a.description || undefined}
         breadcrumbs={crumbs}
+        badge={<Tag mono={false}>HTTP API</Tag>}
         actions={
           <>
-            <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating} aria-label="Refresh">
-              {isValidating ? <Loader2 className="animate-spin" /> : null}
+            <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating}>
+              {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Refresh
             </Button>
             <Button variant="outline" size="sm" onClick={() => setEditing(true)}>
               <Pencil /> Edit
             </Button>
-            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(true)}>
-              <Trash2 /> Delete
+            <ActionsMenu
+              items={[
+                { label: "Edit name and description", icon: <Pencil />, onSelect: () => setEditing(true) },
+                { label: "Add route", icon: <Plus />, onSelect: () => setAdding(true) },
+                { separator: true },
+                { label: "Delete API", icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(true) },
+              ]}
+            />
+            <Button size="sm" onClick={() => setAdding(true)}>
+              <Plus /> Add route
             </Button>
           </>
         }
       />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Routes" value={routes.length} caption="Method + path pairs" />
+        <StatTile
+          label="JWT routes"
+          value={jwtRoutes}
+          tone={jwtRoutes > 0 && !a.authorizer ? "warning" : undefined}
+          caption={a.authorizer ? "Cognito authorizer set" : "No authorizer"}
+        />
+        <StatTile
+          label="Functions"
+          value={routeFns.size}
+          tone={missingFns > 0 ? "danger" : undefined}
+          caption={missingFns > 0 ? `${missingFns} missing` : "Lambda targets"}
+        />
+        <StatTile label="CORS" value={a.cors ? "On" : "Off"} caption={a.cors ? "Allow-Origin: *" : "Same origin only"} />
+      </div>
 
       <Section title="API details">
         <KeyValueGrid
@@ -148,17 +249,20 @@ export function ApiDetail() {
 
       <AuthorizerSection api={a} />
 
-      <Section
-        title={`Routes (${routes.length})`}
+      <DataTable
+        title="Routes"
         description="The most specific route wins: literal segments beat {params}, which beat {proxy+}; a specific method beats ANY."
+        data={routes}
+        columns={routeColumns}
+        rowId={(r) => r.id}
+        searchPlaceholder="Filter by method, path or function"
+        noSearch={routes.length < 8}
         actions={
-          <Button size="sm" onClick={() => setAdding(true)}>
+          <Button size="sm" variant="outline" onClick={() => setAdding(true)}>
             <Plus /> Add route
           </Button>
         }
-        flush
-      >
-        {routes.length === 0 ? (
+        empty={
           <EmptyState
             icon={RouteIcon}
             title="No routes"
@@ -169,79 +273,8 @@ export function ApiDetail() {
               </Button>
             }
           />
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="bg-muted/40 border-b">
-                  <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Method</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Path</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Integration</th>
-                  <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Authorization</th>
-                  <th className="text-muted-foreground hidden px-3 py-2 text-left text-xs font-semibold lg:table-cell">Invoke URL</th>
-                  <th className="px-4 py-2" />
-                </tr>
-              </thead>
-              <tbody>
-                {routes.map((r) => (
-                  <tr key={r.id} className="hover:bg-muted/40 border-b last:border-0">
-                    <td className="px-4 py-2">
-                      <MethodBadge method={r.method} />
-                    </td>
-                    <td className="px-3 py-2 font-mono text-[13px] whitespace-nowrap">{r.path}</td>
-                    <td className="px-3 py-2">
-                      <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
-                        <span className="text-muted-foreground text-xs">Lambda</span>
-                        <Link href={functionHref(r.function_name)} className={cellLinkClass()}>
-                          {r.function_name}
-                        </Link>
-                        {functions.data && !fnNames.has(r.function_name) && (
-                          <Tooltip>
-                            <TooltipTrigger asChild>
-                              <AlertCircle className="text-destructive size-4" aria-label="Function missing" />
-                            </TooltipTrigger>
-                            <TooltipContent>The function no longer exists; requests to this route fail.</TooltipContent>
-                          </Tooltip>
-                        )}
-                      </span>
-                    </td>
-                    <td className="px-3 py-2">
-                      <button
-                        type="button"
-                        onClick={() => setAuthRoute(r)}
-                        className="rounded-full focus-visible:ring-2 focus-visible:outline-none"
-                        title={r.authorization === "JWT" ? "Requires a Cognito JWT. Click to make public." : "Public. Click to require a JWT."}
-                        aria-label={`Change authorization of ${r.method} ${r.path}`}
-                      >
-                        <AuthBadge authorization={r.authorization} className="hover:ring-primary/40 cursor-pointer" />
-                      </button>
-                    </td>
-                    <td className="hidden px-3 py-2 lg:table-cell">
-                      <CopyableText value={`${a.endpoint}${r.path}`} className="max-w-md" />
-                    </td>
-                    <td className="px-4 py-2">
-                      <div className="flex justify-end gap-1">
-                        <Button variant="ghost" size="sm" onClick={() => setPreset({ method: r.method, path: r.path, nonce: Date.now() })}>
-                          <Play /> Try
-                        </Button>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="text-destructive hover:text-destructive size-8"
-                          onClick={() => setDeletingRoute(r)}
-                          aria-label={`Delete route ${r.method} ${r.path}`}
-                        >
-                          <Trash2 />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </Section>
+        }
+      />
 
       <TryIt api={a} preset={preset} />
 

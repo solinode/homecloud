@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Loader2, Plus, UsersRound } from "lucide-react"
 import { toast } from "sonner"
@@ -12,7 +11,7 @@ import { Input } from "@/components/ui/input"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyButton } from "@/components/console/copy-button"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
@@ -22,7 +21,7 @@ import { pluralize } from "@/lib/format"
 import { revalidate, useQueryParam } from "@/lib/hooks"
 import type { CreateUserPoolInput, PasswordPolicy, UserPool } from "@/lib/types"
 
-import { COGNITO_PATH, DEFAULT_POLICY, NAME_RE, POOLS_PATH, PasswordPolicyFields, SwitchRow, minLengthError, poolHref, poolPath, usePools } from "./shared"
+import { COGNITO_PATH, DEFAULT_POLICY, NAME_RE, POOLS_PATH, PasswordPolicyFields, SignUpBadge, SwitchRow, minLengthError, poolHref, poolPath, usePools } from "./shared"
 
 export function PoolsList() {
   const router = useRouter()
@@ -36,11 +35,7 @@ export function PoolsList() {
     {
       id: "name",
       header: "User pool name",
-      cell: (p) => (
-        <Link href={poolHref(p.id)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-          {p.name}
-        </Link>
-      ),
+      cell: (p) => <CellLink href={poolHref(p.id)}>{p.name}</CellLink>,
       value: (p) => p.name,
     },
     {
@@ -59,11 +54,7 @@ export function PoolsList() {
     {
       id: "signup",
       header: "Self sign-up",
-      cell: (p) => (
-        <span className="whitespace-nowrap">
-          {p.self_sign_up ? (p.auto_confirm ? "Auto-confirmed" : "Needs confirmation") : <span className="text-muted-foreground">Disabled</span>}
-        </span>
-      ),
+      cell: (p) => <SignUpBadge pool={p} />,
       value: (p) => (p.self_sign_up ? 1 : 0),
       hideBelow: "md",
     },

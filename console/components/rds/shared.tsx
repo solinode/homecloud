@@ -1,6 +1,7 @@
 "use client"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tag, engineAccent, type TagAccent } from "@/components/console/tag"
 import { formatMemoryMB } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
 import type { DbClass, DbEngine, DbEngines, DbInstance, DbKind } from "@/lib/types"
@@ -152,36 +153,56 @@ export function publicText(i: DbInstance) {
 
 // ---- engine "logos" ----
 
-const ENGINE_STYLE: Record<string, { mono: string; cls: string; label: string }> = {
-  postgres: { mono: "Pg", cls: "bg-sky-700 text-white", label: "PostgreSQL" },
-  mysql: { mono: "My", cls: "bg-orange-500 text-white", label: "MySQL" },
-  mariadb: { mono: "Ma", cls: "bg-amber-800 text-white", label: "MariaDB" },
-  mongodb: { mono: "Mo", cls: "bg-emerald-600 text-white", label: "MongoDB" },
-  redis: { mono: "R", cls: "bg-red-600 text-white", label: "Redis" },
-  valkey: { mono: "Vk", cls: "bg-indigo-600 text-white", label: "Valkey" },
-  memcached: { mono: "Mc", cls: "bg-teal-600 text-white", label: "Memcached" },
+const ENGINE_STYLE: Record<string, { mono: string; label: string }> = {
+  postgres: { mono: "Pg", label: "PostgreSQL" },
+  mysql: { mono: "My", label: "MySQL" },
+  mariadb: { mono: "Ma", label: "MariaDB" },
+  mongodb: { mono: "Mo", label: "MongoDB" },
+  redis: { mono: "R", label: "Redis" },
+  valkey: { mono: "Vk", label: "Valkey" },
+  memcached: { mono: "Mc", label: "Memcached" },
 }
 
-/** EngineLogo is a small colored tile with the engine's monogram. */
+/** dbEngineAccent is engineAccent plus MongoDB (green, like its brand). */
+export const dbEngineAccent = (engine: string): TagAccent => (engine === "mongodb" ? "success" : engineAccent(engine))
+
+const ACCENT_TEXT: Record<TagAccent, string> = {
+  neutral: "text-muted-foreground",
+  brand: "text-primary",
+  info: "text-info",
+  success: "text-success",
+  warning: "text-warning",
+  danger: "text-danger",
+  violet: "text-violet",
+}
+
+/** EngineLogo is a small neutral tile with the engine's monogram, tinted with the engine accent. */
 export function EngineLogo({ engine, size = "sm", className }: { engine: string; size?: "xs" | "sm" | "lg"; className?: string }) {
-  const s = ENGINE_STYLE[engine] ?? { mono: engine.slice(0, 2), cls: "bg-slate-500 text-white" }
+  const mono = ENGINE_STYLE[engine]?.mono ?? engine.slice(0, 2)
   const dim = { xs: "size-5 text-[9px] rounded", sm: "size-6 text-[10px] rounded-md", lg: "size-10 text-sm rounded-lg" }[size]
   return (
-    <span aria-hidden className={cn("inline-flex shrink-0 items-center justify-center font-bold tracking-tight select-none", dim, s.cls, className)}>
-      {s.mono}
+    <span
+      aria-hidden
+      className={cn(
+        "bg-muted inline-flex shrink-0 items-center justify-center border font-mono font-bold tracking-tight select-none",
+        dim,
+        ACCENT_TEXT[dbEngineAccent(engine)],
+        className,
+      )}
+    >
+      {mono}
     </span>
   )
 }
 
-/** EngineCell renders "[logo] PostgreSQL 16". */
+/** EngineCell renders "[PostgreSQL] 16": the engine as a Tag, then the version. */
 export function EngineCell({ engine, version, engines }: { engine: string; version?: string; engines?: DbEngine[] }) {
   return (
-    <span className="inline-flex items-center gap-2 whitespace-nowrap">
-      <EngineLogo engine={engine} size="xs" />
-      <span>
+    <span className="inline-flex items-center gap-1.5 whitespace-nowrap">
+      <Tag accent={dbEngineAccent(engine)} mono={false}>
         {engineLabel(engines, engine).replace(" (DocumentDB compatible)", "")}
-        {version && <span className="text-muted-foreground"> {version}</span>}
-      </span>
+      </Tag>
+      {version && <span className="text-muted-foreground font-mono text-[12.5px]">{version}</span>}
     </span>
   )
 }

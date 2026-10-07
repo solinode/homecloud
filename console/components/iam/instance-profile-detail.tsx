@@ -3,12 +3,15 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useState } from "react"
-import { Loader2, Plus, Trash2, UserCog } from "lucide-react"
+import { AlertTriangle, Loader2, Plus, Trash2, UserCog } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
+import { StatusBadge } from "@/components/console/status-badge"
 import { CopyableText } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
@@ -68,10 +71,22 @@ export function InstanceProfileDetail() {
       <PageHeader
         title={profile.name}
         breadcrumbs={crumbs}
+        badge={roleName ? <StatusBadge status="has-role" tone="success" label="Role attached" /> : <StatusBadge status="no-role" tone="warning" label="No role" />}
         actions={
-          <Button variant="outline" size="sm" onClick={() => setConfirmDelete(true)}>
-            <Trash2 /> Delete
-          </Button>
+          <>
+            <ActionsMenu
+              items={[
+                { label: "Remove role", disabled: !roleName, onSelect: () => setConfirmRemove(true) },
+                { separator: true },
+                { label: "Delete instance profile", icon: <Trash2 />, destructive: true, onSelect: () => setConfirmDelete(true) },
+              ]}
+            />
+            {!roleName && (
+              <Button size="sm" onClick={() => setAddOpen(true)}>
+                <Plus /> Add role
+              </Button>
+            )}
+          </>
         }
       />
       <Section title="Summary">
@@ -121,9 +136,12 @@ export function InstanceProfileDetail() {
               />
             )}
             {role && !role.trusted_services?.includes("ec2.amazonaws.com") && (
-              <p className="rounded-md border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
-                The role&apos;s trust policy does not allow ec2.amazonaws.com, so instances cannot assume it. Edit the role&apos;s trust relationships to add EC2.
-              </p>
+              <Alert variant="warning">
+                <AlertTriangle />
+                <AlertDescription>
+                  The role&apos;s trust policy does not allow ec2.amazonaws.com, so instances cannot assume it. Edit the role&apos;s trust relationships to add EC2.
+                </AlertDescription>
+              </Alert>
             )}
             {roleQ.error && <p className="text-destructive text-xs">{errorMessage(roleQ.error)}</p>}
           </div>

@@ -8,10 +8,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
-import { CopyButton, CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CodeBlock } from "@/components/console/code-block"
+import { CopyableText } from "@/components/console/copy-button"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
-import { JsonEditor } from "@/components/console/json-editor"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
@@ -74,13 +74,7 @@ function EventDetail({ e }: { e: TrailEvent }) {
           { label: "Latency", value: `${e.latency_ms} ms` },
         ]}
       />
-      <div className="flex flex-col gap-2">
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold">Event record</h3>
-          <CopyButton value={json} size="sm" label="Copy JSON" toastMessage="Event JSON copied" />
-        </div>
-        <JsonEditor value={json} readOnly rows={4} />
-      </div>
+      <CodeBlock code={json} title={`Event record · ${e.id}`} copyLabel="Copy JSON" maxHeight="24rem" />
     </div>
   )
 }
@@ -127,22 +121,27 @@ export function EventHistory() {
           </span>
         ),
       },
-      { id: "user", header: "User name", value: (e) => e.user, cell: (e) => e.user || <span className="text-muted-foreground">anonymous</span> },
-      { id: "action", header: "Event name", value: (e) => e.action, cell: (e) => <span className="font-mono text-[13px] whitespace-nowrap">{e.action}</span> },
+      {
+        id: "user",
+        header: "User name",
+        value: (e) => e.user,
+        cell: (e) => (e.user ? <CellText max="14rem">{e.user}</CellText> : <span className="text-muted-foreground">anonymous</span>),
+      },
+      { id: "action", header: "Event name", value: (e) => e.action, cell: (e) => <CellText mono>{e.action}</CellText> },
       {
         id: "resource",
         header: "Resource",
         value: (e) => e.resource,
         cell: (e) => (
-          <span className="block max-w-72 truncate font-mono text-[13px]" title={e.resource}>
+          <CellText mono max="18rem">
             {e.resource}
-          </span>
+          </CellText>
         ),
         hideBelow: "md",
       },
-      { id: "ip", header: "Source IP", value: (e) => e.source_ip, cell: (e) => <span className="font-mono text-[13px]">{e.source_ip}</span>, hideBelow: "lg" },
+      { id: "ip", header: "Source IP", value: (e) => e.source_ip, cell: (e) => <CellText mono>{e.source_ip}</CellText>, hideBelow: "lg" },
       { id: "result", header: "Result", value: (e) => e.status, cell: (e) => <ResultBadge status={e.status} /> },
-      { id: "latency", header: "Latency", value: (e) => e.latency_ms, cell: (e) => <span className="tabular-nums">{e.latency_ms} ms</span>, hideBelow: "lg", className: "text-right" },
+      { id: "latency", header: "Latency", value: (e) => e.latency_ms, cell: (e) => <span className="tabular-nums whitespace-nowrap">{e.latency_ms} ms</span>, hideBelow: "lg", className: "text-right", headerClassName: "text-right" },
     ],
     [open],
   )
@@ -185,7 +184,7 @@ export function EventHistory() {
         pageSize={50}
         onRowClick={(e) => setOpen(open === e.id ? null : e.id)}
         expanded={(e) => (open === e.id ? <EventDetail e={e} /> : null)}
-        rowClassName={(e) => (e.status >= 400 ? "bg-red-50/40 dark:bg-red-500/5" : undefined)}
+        rowClassName={(e) => (e.status >= 400 ? "bg-danger-soft" : undefined)}
         filters={
           <>
             <Select value={user || "__all"} onValueChange={(v) => setUser(v === "__all" ? "" : v)}>

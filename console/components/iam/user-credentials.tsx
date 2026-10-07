@@ -6,12 +6,14 @@ import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ActionsMenu } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { CopyButton, CopyableText } from "@/components/console/copy-button"
+import { CopyableText } from "@/components/console/copy-button"
+import { Field } from "@/components/console/form-field"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -186,7 +188,7 @@ export function UserCredentials({ user, onChanged }: { user: IamUser; onChanged:
           <div className="flex flex-col gap-2">
             <p>Applications that use this key stop working immediately. This cannot be undone.</p>
             {sel?.status === "Active" && (
-              <p className="flex items-start gap-2 text-amber-700 dark:text-amber-300">
+              <p className="text-warning flex items-start gap-2">
                 <AlertTriangle className="mt-0.5 size-4 shrink-0" /> This key is active. We recommend deactivating it first and deleting it once you are sure nothing uses it.
               </p>
             )}
@@ -232,32 +234,23 @@ function NewKeyDialog({ value, onClose }: { value: NewAccessKey | null; onClose:
               <DialogTitle>Retrieve access key</DialogTitle>
               <DialogDescription>Access key created for {k.user_name}.</DialogDescription>
             </DialogHeader>
-            <div className="flex items-start gap-2 rounded-md border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-500/10 dark:text-amber-200">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <span>
+            <Alert variant="warning">
+              <AlertTriangle />
+              <AlertDescription>
                 This is the only time the secret access key can be viewed or downloaded. You cannot recover it later. You can create a new access key at any time.
-              </span>
+              </AlertDescription>
+            </Alert>
+            <div className="bg-muted/40 rounded-lg border p-4">
+              <KeyValueGrid
+                columns={2}
+                items={[
+                  { label: "Access key ID", value: <CopyableText value={k.access_key_id} className="text-[13px]" />, wide: true },
+                  { label: "Secret access key", value: <SecretValue value={k.secret_access_key} label="Secret access key" />, wide: true },
+                ]}
+              />
             </div>
-            <div className="grid gap-3 rounded-md border p-3 text-sm">
-              <div>
-                <p className="text-muted-foreground mb-1 text-xs">Access key ID</p>
-                <div className="flex items-center gap-1">
-                  <code className="bg-muted flex-1 rounded px-2 py-1 font-mono text-[13px] break-all">{k.access_key_id}</code>
-                  <CopyButton value={k.access_key_id} toastMessage="Access key ID copied" />
-                </div>
-              </div>
-              <div>
-                <p className="text-muted-foreground mb-1 text-xs">Secret access key</p>
-                <SecretValue value={k.secret_access_key} label="Secret access key" />
-              </div>
-            </div>
-            <div className="flex flex-col gap-1.5">
-              <div className="flex items-center justify-between">
-                <p className="text-sm font-medium">Use it from a terminal</p>
-                <CopyButton value={snippet} size="sm" label="Copy" toastMessage="Snippet copied" />
-              </div>
-              <pre className="bg-muted/50 overflow-x-auto rounded-md border p-3 font-mono text-xs leading-5">{snippet}</pre>
-            </div>
+            <CodeBlock title="Use it from a terminal" code={snippet} prompt={false} />
+
             <DialogFooter className="gap-2">
               <Button
                 variant="outline"
@@ -323,31 +316,25 @@ function ConsoleAccessDialog({ open, onOpenChange, user, onDone }: { open: boole
             Console access for <span className="text-foreground font-medium">{user.name}</span> is currently {user.console_access ? "enabled" : "disabled"}.
           </DialogDescription>
         </DialogHeader>
-        <RadioGroup value={mode} onValueChange={(v) => setMode(v as typeof mode)} className="gap-3">
-          <div className="flex items-start gap-2">
-            <RadioGroupItem value="enable" id="ca-enable" className="mt-0.5" />
-            <div className="flex flex-col gap-0.5">
-              <Label htmlFor="ca-enable">{user.console_access ? "Reset password" : "Enable console access"}</Label>
-              <span className="text-muted-foreground text-xs">Set a new console password. Existing sessions stay signed in.</span>
-            </div>
-          </div>
-          <div className="flex items-start gap-2">
-            <RadioGroupItem value="disable" id="ca-disable" className="mt-0.5" disabled={user.root || !user.console_access} />
-            <div className="flex flex-col gap-0.5">
-              <Label htmlFor="ca-disable" className={user.root || !user.console_access ? "opacity-50" : undefined}>
-                Disable console access
-              </Label>
-              <span className="text-muted-foreground text-xs">
-                {user.root ? "The root user must keep console access." : "Removes the console password. Access keys keep working."}
-              </span>
-            </div>
-          </div>
-        </RadioGroup>
+        <OptionGroup label="Console access" columns={1}>
+          <OptionCard
+            selected={mode === "enable"}
+            onSelect={() => setMode("enable")}
+            title={user.console_access ? "Reset password" : "Enable console access"}
+            description="Set a new console password. Existing sessions stay signed in."
+          />
+          <OptionCard
+            selected={mode === "disable"}
+            onSelect={() => setMode("disable")}
+            disabled={user.root || !user.console_access}
+            title="Disable console access"
+            description={user.root ? "The root user must keep console access." : "Removes the console password. Access keys keep working."}
+          />
+        </OptionGroup>
         {mode === "enable" && (
-          <div className="flex flex-col gap-2 rounded-md border p-3">
-            <Label>Console password</Label>
+          <Field label="Console password">
             <PasswordChooser value={pw} onChange={setPw} showErrors={touched} />
-          </div>
+          </Field>
         )}
         <DialogFooter>
           <Button variant="outline" onClick={() => onOpenChange(false)} disabled={pending}>
@@ -374,19 +361,15 @@ function PasswordResultDialog({ user, password, onClose }: { user: string; passw
               <DialogTitle>Console password</DialogTitle>
               <DialogDescription>Share these sign-in details with {user} securely. The password is not shown again.</DialogDescription>
             </DialogHeader>
-            <div className="bg-muted/30 grid gap-3 rounded-md border p-3 text-sm">
-              <div>
-                <p className="text-muted-foreground mb-1 text-xs">Console sign-in URL</p>
-                <CopyableText value={url} />
-              </div>
-              <div>
-                <p className="text-muted-foreground mb-1 text-xs">User name</p>
-                <CopyableText value={user} />
-              </div>
-              <div>
-                <p className="text-muted-foreground mb-1 text-xs">Console password</p>
-                <SecretValue value={password} label="Password" />
-              </div>
+            <div className="bg-muted/40 rounded-lg border p-4">
+              <KeyValueGrid
+                columns={2}
+                items={[
+                  { label: "Console sign-in URL", value: <CopyableText value={url} />, wide: true },
+                  { label: "User name", value: <CopyableText value={user} /> },
+                  { label: "Console password", value: <SecretValue value={password} label="Password" /> },
+                ]}
+              />
             </div>
             <DialogFooter className="gap-2">
               <Button variant="outline" onClick={() => downloadText(`${user}_credentials.csv`, `${csvLine(["User name", "Password", "Console sign-in URL"])}\n${csvLine([user, password, url])}\n`)}>

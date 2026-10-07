@@ -1,6 +1,6 @@
 "use client"
 
-import { useLayoutEffect, useRef, useState } from "react"
+import { useEffect, useLayoutEffect, useRef, useState } from "react"
 import Link from "next/link"
 import useSWR from "swr"
 import { ExternalLink, RefreshCw, ScrollText } from "lucide-react"
@@ -9,9 +9,12 @@ import { Button } from "@/components/ui/button"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Switch } from "@/components/ui/switch"
+import { TerminalPane, term } from "@/components/console/code-block"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { TableSkeleton } from "@/components/console/loading"
+import { Section } from "@/components/console/section"
+import { StatusDot } from "@/components/console/status-badge"
 import { logGroupHref } from "@/components/cloudwatch/common"
 import { ApiError, api, seg } from "@/lib/api"
 import type { LambdaFunction, LogEvent } from "@/lib/types"
@@ -71,19 +74,22 @@ export function LogsTab({ fn }: { fn: LambdaFunction }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [events.data])
 
-  const onScroll = () => {
+  const hasList = list.length > 0
+  useEffect(() => {
     const el = scroller.current
-    if (el) setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
-  }
+    if (!el) return
+    const onScroll = () => setAtBottom(el.scrollHeight - el.scrollTop - el.clientHeight < 40)
+    el.addEventListener("scroll", onScroll, { passive: true })
+    return () => el.removeEventListener("scroll", onScroll)
+  }, [hasList])
 
   return (
-    <div className="bg-card flex flex-col rounded-lg border shadow-xs">
-      <div className="flex flex-col gap-2 border-b p-3 md:flex-row md:flex-wrap md:items-center">
-        <div className="min-w-0">
-          <h2 className="text-base font-semibold">Recent log events</h2>
-          <p className="text-muted-foreground font-mono text-xs break-all">{group}</p>
-        </div>
-        <div className="flex flex-wrap items-center gap-2 md:ml-auto">
+    <Section
+      title="Recent log events"
+      description={<span className="font-mono text-xs break-all">{group}</span>}
+      flush
+      actions={
+        <>
           <Select value={range} onValueChange={setRange}>
             <SelectTrigger size="sm" aria-label="Time range">
               <SelectValue />
@@ -113,6 +119,7 @@ export function LogsTab({ fn }: { fn: LambdaFunction }) {
             <Label htmlFor="logs-live" className="text-sm font-normal">
               Live
             </Label>
+            {live && <StatusDot tone="success" pulse />}
           </div>
           <Button variant="outline" size="sm" onClick={() => events.mutate()} disabled={events.isValidating} aria-label="Refresh">
             <RefreshCw className={cn(events.isValidating && "animate-spin")} /> Refresh
@@ -122,9 +129,9 @@ export function LogsTab({ fn }: { fn: LambdaFunction }) {
               <ExternalLink /> View in CloudWatch Logs
             </Link>
           </Button>
-        </div>
-      </div>
-
+        </>
+      }
+    >
       {noGroup ? (
         <EmptyState
           icon={ScrollText}
@@ -132,7 +139,7 @@ export function LogsTab({ fn }: { fn: LambdaFunction }) {
           description="The log group is created on the first invocation. Run a test event to see START, END and REPORT lines plus everything the function prints."
         />
       ) : events.error ? (
-        <div className="p-4">
+        <div className="p-5">
           <ErrorState error={events.error} onRetry={() => events.mutate()} />
         </div>
       ) : !events.data ? (
@@ -140,42 +147,42 @@ export function LogsTab({ fn }: { fn: LambdaFunction }) {
       ) : list.length === 0 ? (
         <EmptyState icon={ScrollText} title="No events in this time range" description="Choose a longer time range or invoke the function." />
       ) : (
-        <div ref={scroller} onScroll={onScroll} className="max-h-[60vh] overflow-auto">
-          {list.map((e, i) => {
-            const kind = lineKind(e.message)
-            return (
-              <div
-                key={`${e.timestamp}-${i}`}
-                className={cn(
-                  "flex gap-3 border-b px-3 py-1 font-mono text-[12.5px] leading-5 last:border-0",
-                  kind === "start" && "bg-muted/30",
-                )}
-              >
-                <span className="text-muted-foreground shrink-0 whitespace-nowrap tabular-nums">{logTime(e.timestamp)}</span>
-                <span
-                  className={cn(
-                    "min-w-0 flex-1 break-all whitespace-pre-wrap",
-                    (kind === "start" || kind === "end") && "text-muted-foreground",
-                    kind === "report" && "text-muted-foreground italic",
-                    kind === "error" && "text-red-700 dark:text-red-400",
-                  )}
-                >
-                  {e.message}
-                </span>
-              </div>
-            )
-          })}
+        <div className="flex flex-col gap-2 p-4">
+          <TerminalPane
+            ref={scroller}
+            title={group}
+            copyValue={list.map((e) => `${logTime(e.timestamp)}  ${e.message}`).join("\n")}
+            height="auto"
+            bodyClassName="max-h-[60vh] px-0 py-1.5"
+          >
+            {list.map((e, i) => {
+              const kind = lineKind(e.message)
+              return (
+                <div key={`${e.timestamp}-${i}`} className={cn("flex gap-3 px-4 py-px", kind === "start" && "mt-1.5 bg-white/[0.03]")}>
+                  <span className={cn(term.comment, "shrink-0 whitespace-nowrap tabular-nums select-none")}>{logTime(e.timestamp)}</span>
+                  <span
+                    className={cn(
+                      "min-w-0 flex-1 break-all whitespace-pre-wrap",
+                      (kind === "start" || kind === "end") && term.muted,
+                      kind === "report" && cn(term.info, "italic"),
+                      kind === "error" && term.error,
+                    )}
+                  >
+                    {e.message}
+                  </span>
+                </div>
+              )
+            })}
+          </TerminalPane>
+          <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 text-xs">
+            <span>
+              {list.length} event{list.length === 1 ? "" : "s"}
+              {list.length >= limit ? ` (newest ${limit})` : ""}
+            </span>
+            {live && <span>{atBottom ? "Live: refreshing every 2 seconds" : "Scroll to the bottom to follow new events"}</span>}
+          </div>
         </div>
       )}
-      {events.data && list.length > 0 && (
-        <div className="text-muted-foreground flex flex-wrap items-center justify-between gap-2 border-t px-3 py-2 text-xs">
-          <span>
-            {list.length} event{list.length === 1 ? "" : "s"}
-            {list.length >= limit ? ` (newest ${limit})` : ""}
-          </span>
-          {live && <span>{atBottom ? "Live: refreshing every 2 seconds" : "Scroll to the bottom to follow new events"}</span>}
-        </div>
-      )}
-    </div>
+    </Section>
   )
 }

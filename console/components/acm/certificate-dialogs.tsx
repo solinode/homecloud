@@ -157,22 +157,7 @@ function PemField({
     onChange(await f.text())
   }
   return (
-    <Field
-      label={
-        <span className="flex w-full items-center justify-between gap-2">
-          <span>
-            {label}
-            {optional && <span className="text-muted-foreground font-normal"> - optional</span>}
-          </span>
-          <Button type="button" variant="outline" size="sm" className="h-7" onClick={() => fileRef.current?.click()}>
-            <FileUp /> Choose file
-          </Button>
-        </span>
-      }
-      htmlFor={id}
-      error={error}
-      help={help}
-    >
+    <Field label={label} optional={optional} htmlFor={id} error={error} help={help}>
       <input
         ref={fileRef}
         type="file"
@@ -184,6 +169,12 @@ function PemField({
         }}
       />
       <Textarea id={id} rows={5} value={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="font-mono text-[12px]" spellCheck={false} aria-invalid={!!error} />
+      <div className="flex flex-wrap items-center gap-2">
+        <Button type="button" variant="outline" size="sm" className="h-7" onClick={() => fileRef.current?.click()}>
+          <FileUp /> Choose file
+        </Button>
+        <span className="text-faint text-xs">or paste the PEM text above</span>
+      </div>
     </Field>
   )
 }

@@ -1,8 +1,9 @@
 "use client"
 
 import Link from "next/link"
-import { CheckCircle2, Clock } from "lucide-react"
 
+import { StatusBadge } from "@/components/console/status-badge"
+import { Tag, protocolAccent } from "@/components/console/tag"
 import { queueHref } from "@/components/sqs/common"
 import { seg } from "@/lib/api"
 import { useApi } from "@/lib/hooks"
@@ -32,16 +33,6 @@ export function useTopics(refreshInterval = SNS_POLL) {
   return useApi<Topic[]>(TOPICS_PATH, { refreshInterval })
 }
 
-const PROTOCOL_TONE: Record<string, string> = {
-  sqs: "bg-amber-50 text-amber-800 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/20",
-  lambda: "bg-orange-50 text-orange-800 ring-orange-600/20 dark:bg-orange-500/10 dark:text-orange-300 dark:ring-orange-400/20",
-  http: "bg-sky-50 text-sky-800 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-400/20",
-  https: "bg-sky-50 text-sky-800 ring-sky-600/20 dark:bg-sky-500/10 dark:text-sky-300 dark:ring-sky-400/20",
-  email: "bg-teal-50 text-teal-800 ring-teal-600/20 dark:bg-teal-500/10 dark:text-teal-300 dark:ring-teal-400/20",
-  "email-json": "bg-teal-50 text-teal-800 ring-teal-600/20 dark:bg-teal-500/10 dark:text-teal-300 dark:ring-teal-400/20",
-  sms: "bg-fuchsia-50 text-fuchsia-800 ring-fuchsia-600/20 dark:bg-fuchsia-500/10 dark:text-fuchsia-300 dark:ring-fuchsia-400/20",
-}
-
 export const PROTOCOL_LABEL: Record<SubscriptionProtocol, string> = {
   sqs: "Amazon SQS",
   lambda: "AWS Lambda",
@@ -60,34 +51,22 @@ export const CONFIRM_PROTOCOLS: string[] = ["http", "https", "email", "email-jso
 
 export const isPending = (s: Pick<Subscription, "status">) => s.status === "PendingConfirmation"
 
+/** ProtocolBadge is the subscription protocol chip (SQS, LAMBDA, HTTPS ...). */
 export function ProtocolBadge({ protocol }: { protocol: string }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-md px-1.5 py-0.5 font-mono text-xs font-medium whitespace-nowrap uppercase ring-1 ring-inset",
-        PROTOCOL_TONE[protocol] ?? "bg-muted text-muted-foreground ring-border",
-      )}
-    >
+    <Tag accent={protocolAccent(protocol)} className="uppercase">
       {protocol}
-    </span>
+    </Tag>
   )
 }
 
 /** SubscriptionStatusBadge shows Confirmed / Pending confirmation. */
 export function SubscriptionStatusBadge({ status }: { status: string }) {
   const pending = status === "PendingConfirmation"
-  return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
-        pending
-          ? "bg-amber-50 text-amber-700 ring-amber-600/20 dark:bg-amber-500/10 dark:text-amber-300 dark:ring-amber-400/20"
-          : "bg-emerald-50 text-emerald-700 ring-emerald-600/20 dark:bg-emerald-500/10 dark:text-emerald-300 dark:ring-emerald-400/20",
-      )}
-    >
-      {pending ? <Clock className="size-3" /> : <CheckCircle2 className="size-3" />}
-      {pending ? "Pending confirmation" : status || "Confirmed"}
-    </span>
+  return pending ? (
+    <StatusBadge status="pending" label="Pending confirmation" />
+  ) : (
+    <StatusBadge status={status || "Confirmed"} tone="success" />
   )
 }
 

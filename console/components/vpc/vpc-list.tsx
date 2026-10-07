@@ -10,19 +10,55 @@ import { Button } from "@/components/ui/button"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
-import { cellLinkClass, DataTable, type Column } from "@/components/console/data-table"
+import { CellText, cellLinkClass, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api } from "@/lib/api"
 import { formatDate, formatNumber } from "@/lib/format"
 import { revalidate, useQueryParam } from "@/lib/hooks"
-import type { Vpc } from "@/lib/types"
+import type { Subnet, Vpc } from "@/lib/types"
+import { cn } from "@/lib/utils"
 
-import { deleteErrorMessage, subnetsHref, useVpcs } from "./common"
+import { cidrContains, cidrSize, deleteErrorMessage, parseCidr, subnetsHref, useVpcs } from "./common"
 import { CreateSubnetDialog, CreateVpcDialog } from "./dialogs"
+
+const SUBNET_COLORS = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)", "var(--chart-5)"]
+
+/** CidrMap draws the VPC's address range as a bar with each subnet's slice of it. */
+function CidrMap({ vpcCidr, subnets }: { vpcCidr: string; subnets: Subnet[] }) {
+  const v = parseCidr(vpcCidr)
+  if (!v) return null
+  const total = cidrSize(v)
+  const used = subnets.reduce((n, s) => n + (parseCidr(s.cidr) ? cidrSize(parseCidr(s.cidr)!) : 0), 0)
+  return (
+    <div className="flex flex-col gap-1.5">
+      <div className="text-muted-foreground flex items-center justify-between gap-2 text-xs">
+        <span className="font-mono">{v.text}</span>
+        <span className="tabular-nums">{Math.round((used / total) * 100)}% of the range allocated to subnets</span>
+      </div>
+      <div className="bg-muted relative h-2.5 overflow-hidden rounded-full border" role="img" aria-label={`Subnet allocation of ${v.text}`}>
+        {subnets.map((s, i) => {
+          const c = parseCidr(s.cidr)
+          if (!c || !cidrContains(v, c)) return null
+          const left = ((c.base - v.base) / total) * 100
+          const width = Math.max((cidrSize(c) / total) * 100, 0.6)
+          return (
+            <span
+              key={s.id}
+              title={`${s.name || s.id} · ${c.text}`}
+              className="absolute inset-y-0 border-card border-r"
+              style={{ left: `${left}%`, width: `${width}%`, background: SUBNET_COLORS[i % SUBNET_COLORS.length] }}
+            />
+          )
+        })}
+      </div>
+    </div>
+  )
+}
 
 function VpcDetail({ vpc }: { vpc: Vpc }) {
   const subnets = [...(vpc.subnets ?? [])].sort((a, b) => a.cidr.localeCompare(b.cidr, undefined, { numeric: true }))
@@ -55,24 +91,31 @@ function VpcDetail({ vpc }: { vpc: Vpc }) {
         {subnets.length === 0 ? (
           <p className="text-muted-foreground text-sm">This VPC has no subnets yet. Create one to launch instances into it.</p>
         ) : (
-          <div className="bg-card overflow-x-auto rounded-md border">
+          <div className="flex flex-col gap-3">
+          <CidrMap vpcCidr={vpc.cidr} subnets={subnets} />
+          <div className="bg-card overflow-x-auto rounded-lg border">
             <table className="w-full text-sm">
               <thead>
                 <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                  <th className="px-3 py-1.5 font-semibold">Name</th>
-                  <th className="px-3 py-1.5 font-semibold">Subnet ID</th>
-                  <th className="px-3 py-1.5 font-semibold">CIDR</th>
-                  <th className="px-3 py-1.5 font-semibold">AZ</th>
-                  <th className="px-3 py-1.5 text-right font-semibold">Available IPs</th>
+                  <th className="px-3 py-1.5 font-medium">Name</th>
+                  <th className="px-3 py-1.5 font-medium">Subnet ID</th>
+                  <th className="px-3 py-1.5 font-medium">CIDR</th>
+                  <th className="px-3 py-1.5 font-medium">AZ</th>
+                  <th className="px-3 py-1.5 text-right font-medium">Available IPs</th>
                 </tr>
               </thead>
               <tbody>
-                {subnets.map((s) => (
+                {subnets.map((s, i) => (
                   <tr key={s.id} className="border-b last:border-0">
-                    <td className="px-3 py-1.5">{s.name || <span className="text-muted-foreground">-</span>}</td>
-                    <td className="px-3 py-1.5 font-mono text-[13px]">{s.id}</td>
-                    <td className="px-3 py-1.5 font-mono text-[13px]">{s.cidr}</td>
-                    <td className="px-3 py-1.5">{s.availability_zone}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap">
+                      <span className="inline-flex items-center gap-2">
+                        <span aria-hidden className="size-2 shrink-0 rounded-sm" style={{ background: SUBNET_COLORS[i % SUBNET_COLORS.length] }} />
+                        {s.name || <span className="text-muted-foreground">-</span>}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1.5 font-mono text-[13px] whitespace-nowrap">{s.id}</td>
+                    <td className="px-3 py-1.5 font-mono text-[13px] whitespace-nowrap">{s.cidr}</td>
+                    <td className="px-3 py-1.5 whitespace-nowrap">{s.availability_zone}</td>
                     <td className="px-3 py-1.5 text-right tabular-nums">
                       {formatNumber(s.available_ips, 0)}
                       {s.used_ips > 0 && <span className="text-muted-foreground"> ({s.used_ips} used)</span>}
@@ -81,6 +124,7 @@ function VpcDetail({ vpc }: { vpc: Vpc }) {
                 ))}
               </tbody>
             </table>
+          </div>
           </div>
         )}
       </div>
@@ -110,15 +154,24 @@ export function VpcList() {
         header: "Name",
         value: (v) => v.name,
         cell: (v) => (
-          <button type="button" className={cellLinkClass()} onClick={(e) => (e.stopPropagation(), setSelected(selected[0] === v.id ? [] : [v.id]))}>
+          <button type="button" className={cn(cellLinkClass(), "block max-w-[16rem] truncate whitespace-nowrap")} title={v.name || undefined} onClick={(e) => (e.stopPropagation(), setSelected(selected[0] === v.id ? [] : [v.id]))}>
             {v.name || <span className="text-muted-foreground font-normal">-</span>}
           </button>
         ),
       },
-      { id: "id", header: "VPC ID", value: (v) => v.id, cell: (v) => <span className="font-mono text-[13px]">{v.id}</span> },
+      { id: "id", header: "VPC ID", value: (v) => v.id, cell: (v) => <CellText mono>{v.id}</CellText> },
       { id: "state", header: "State", value: (v) => v.state, cell: (v) => <StatusBadge status={v.state} /> },
       { id: "cidr", header: "IPv4 CIDR", value: (v) => v.cidr, cell: (v) => <span className="font-mono text-[13px]">{v.cidr}</span> },
-      { id: "default", header: "Default VPC", value: (v) => (v.default ? "Yes" : "No"), cell: (v) => (v.default ? "Yes" : "No"), hideBelow: "md" },
+      { id: "default", header: "Default VPC", value: (v) => (v.default ? "Yes" : "No"), cell: (v) =>
+          v.default ? (
+            <Tag accent="brand" mono={false}>
+              Default
+            </Tag>
+          ) : (
+            <span className="text-muted-foreground">No</span>
+          ),
+        hideBelow: "md",
+      },
       {
         id: "internet",
         header: "Internet access",
@@ -137,7 +190,7 @@ export function VpcList() {
           </Link>
         ),
       },
-      { id: "network", header: "Docker network", value: (v) => v.network, cell: (v) => <span className="font-mono text-[13px]">{v.network}</span>, hideBelow: "lg" },
+      { id: "network", header: "Docker network", value: (v) => v.network, cell: (v) => <CellText mono muted>{v.network}</CellText>, hideBelow: "lg" },
       { id: "created", header: "Created", value: (v) => v.created_at, cell: (v) => <TimeAgo value={v.created_at} />, hideBelow: "lg" },
     ],
     [selected],

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Eye, EyeOff, Info, KeyRound, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -103,9 +104,10 @@ export function DbConfiguration({ cfg, inst, onResetPassword }: { cfg: FamilyCon
               <Input id="cfg-retention" type="number" min={0} max={35} value={retention} onChange={(e) => setRetention(e.target.value)} className="w-28" />
             </Field>
           ) : (
-            <p className="text-muted-foreground flex gap-1.5 text-sm">
-              <Info className="mt-0.5 size-4 shrink-0" /> Memcached keeps data only in memory, so {cfg.snaps} are not available.
-            </p>
+            <Alert variant="info">
+              <Info />
+              <AlertDescription>Memcached keeps data only in memory, so {cfg.snaps} are not available.</AlertDescription>
+            </Alert>
           )}
           <div className="flex items-start gap-3">
             <Switch id="cfg-protect" checked={protect} onCheckedChange={setProtect} className="mt-0.5" />
@@ -115,10 +117,6 @@ export function DbConfiguration({ cfg, inst, onResetPassword }: { cfg: FamilyCon
             </Label>
           </div>
           <div className="flex gap-2">
-            <Button type="submit" size="sm" disabled={saving || !dirty || !!retErr || (classChanged && !canResize)}>
-              {saving && <Loader2 className="animate-spin" />}
-              Save changes
-            </Button>
             <Button
               type="button"
               variant="outline"
@@ -128,14 +126,19 @@ export function DbConfiguration({ cfg, inst, onResetPassword }: { cfg: FamilyCon
             >
               Reset
             </Button>
+            <Button type="submit" size="sm" disabled={saving || !dirty || !!retErr || (classChanged && !canResize)}>
+              {saving && <Loader2 className="animate-spin" />}
+              Save changes
+            </Button>
           </div>
         </form>
       </Section>
 
       <Section title="Tags" description="Key/value labels for organizing and finding resources.">
         <div className="flex max-w-2xl flex-col gap-3">
-          <TagsEditor rows={tagRows} onChange={(r) => (setTagRows(r), setTagErr(null))} />
-          {tagErr && <p className="text-destructive text-xs">{tagErr}</p>}
+          <Field label="Tags" error={tagErr} help="Keys must be unique.">
+            <TagsEditor rows={tagRows} onChange={(r) => (setTagRows(r), setTagErr(null))} />
+          </Field>
           <div>
             <Button size="sm" onClick={saveTags} disabled={savingTags}>
               {savingTags && <Loader2 className="animate-spin" />}

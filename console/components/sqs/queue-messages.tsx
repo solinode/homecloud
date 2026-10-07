@@ -1,11 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import Link from "next/link"
 import { MailOpen } from "lucide-react"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -34,7 +33,7 @@ export function QueueMessages({ queue }: { queue: Queue }) {
       id: "id",
       header: "Message ID",
       cell: (m) => (
-        <span className="text-primary font-mono text-[13px] hover:underline" title={m.message_id}>
+        <span className="text-primary block font-mono text-[13px] whitespace-nowrap hover:underline" title={m.message_id}>
           {m.message_id.slice(0, 8)}…
         </span>
       ),
@@ -50,7 +49,11 @@ export function QueueMessages({ queue }: { queue: Queue }) {
     {
       id: "body",
       header: "Body",
-      cell: (m) => <span className="block max-w-[14rem] truncate font-mono text-[13px] sm:max-w-sm">{bodyPreview(m.body)}</span>,
+      cell: (m) => (
+        <CellText mono max="24rem" title={m.body}>
+          {bodyPreview(m.body)}
+        </CellText>
+      ),
       value: (m) => m.body,
       sortable: false,
     },
@@ -61,9 +64,9 @@ export function QueueMessages({ queue }: { queue: Queue }) {
             header: "Source queue",
             cell: (m: PeekedMessage) =>
               m.source_queue ? (
-                <Link href={queueHref(nameFromArn(m.source_queue))} onClick={(e) => e.stopPropagation()} className="text-primary hover:underline">
+                <CellLink href={queueHref(nameFromArn(m.source_queue))} title={m.source_queue}>
                   {nameFromArn(m.source_queue)}
-                </Link>
+                </CellLink>
               ) : (
                 <span className="text-muted-foreground">-</span>
               ),

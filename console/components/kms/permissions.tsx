@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { Loader2, Plus, Trash2 } from "lucide-react"
+import { Loader2, Plus, Ticket, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -10,13 +10,16 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyableText } from "@/components/console/copy-button"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
+import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { JsonEditor, jsonError } from "@/components/console/json-editor"
 import { Section } from "@/components/console/section"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
-import { CodeBlock } from "@/components/s3/common"
 import { api, seg } from "@/lib/api"
 import { useAction, useApi } from "@/lib/hooks"
 import type { KmsGrant, KmsKey } from "@/lib/types"
@@ -72,17 +75,17 @@ export function KeyPolicySection({ k, readOnly }: { k: KmsKey; readOnly: boolean
       ) : editing ? (
         <div className="flex flex-col gap-3">
           <JsonEditor value={text} onChange={setText} rows={16} />
-          <div className="flex gap-2">
-            <Button size="sm" onClick={save} disabled={pending || !!jsonError(text)}>
-              {pending && <Loader2 className="animate-spin" />} Save policy
-            </Button>
+          <div className="flex justify-end gap-2">
             <Button size="sm" variant="outline" onClick={() => setEditing(false)} disabled={pending}>
               Cancel
+            </Button>
+            <Button size="sm" onClick={save} disabled={pending || !!jsonError(text)}>
+              {pending && <Loader2 className="animate-spin" />} Save policy
             </Button>
           </div>
         </div>
       ) : data ? (
-        <CodeBlock code={doc} className="max-h-96 overflow-y-auto" />
+        <CodeBlock title="Key policy (JSON)" code={doc} maxHeight="24rem" />
       ) : (
         <p className="text-muted-foreground text-sm">Loading policy...</p>
       )}
@@ -109,69 +112,98 @@ export function GrantsSection({ k, readOnly }: { k: KmsKey; readOnly: boolean })
   const [revoking, setRevoking] = useState<KmsGrant | null>(null)
   const grants = data ?? []
 
-  return (
-    <Section
-      title={`Grants (${grants.length})`}
-      description="A grant lets a principal use the key for the listed operations without changing the key policy."
-      actions={
-        !readOnly && k.state !== "PendingDeletion" ? (
-          <Button size="sm" variant="outline" onClick={() => setCreating(true)}>
-            <Plus /> Create grant
+  const canCreate = !readOnly && k.state !== "PendingDeletion"
+  const columns: Column<KmsGrant>[] = [
+    {
+      id: "grantee",
+      header: "Grantee principal",
+      cell: (g) => (
+        <div className="min-w-0">
+          <CellText mono>{g.grantee_principal}</CellText>
+          {g.name && <CellText muted className="text-xs">{g.name}</CellText>}
+        </div>
+      ),
+      value: (g) => `${g.grantee_principal} ${g.name ?? ""}`,
+    },
+    {
+      id: "ops",
+      header: "Operations",
+      cell: (g) => (
+        <span className="flex max-w-[28rem] flex-wrap gap-1">
+          {g.operations.map((op) => (
+            <Tag key={op}>{op}</Tag>
+          ))}
+        </span>
+      ),
+      value: (g) => g.operations.join(" "),
+      sortable: false,
+    },
+    {
+      id: "id",
+      header: "Grant ID",
+      cell: (g) => <CopyableText value={g.grant_id} className="max-w-[12rem] truncate text-[12px]" />,
+      value: (g) => g.grant_id,
+      hideBelow: "md",
+    },
+    { id: "created", header: "Created", cell: (g) => <TimeAgo value={g.created_at} />, value: (g) => g.created_at, hideBelow: "sm" },
+    {
+      id: "actions",
+      header: "",
+      className: "text-right",
+      cell: (g) =>
+        !readOnly && (
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={(e) => {
+              e.stopPropagation()
+              setRevoking(g)
+            }}
+            aria-label="Revoke grant"
+          >
+            <Trash2 /> Revoke
           </Button>
-        ) : undefined
-      }
-      flush
-    >
-      {error ? (
-        <div className="p-4">
-          <ErrorState error={error} onRetry={() => mutate()} />
-        </div>
-      ) : (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                <th className="px-4 py-2 font-semibold">Grantee principal</th>
-                <th className="px-3 py-2 font-semibold">Operations</th>
-                <th className="hidden px-3 py-2 font-semibold md:table-cell">Grant ID</th>
-                <th className="hidden px-3 py-2 font-semibold sm:table-cell">Created</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {grants.map((g) => (
-                <tr key={g.grant_id} className="border-b last:border-0">
-                  <td className="px-4 py-2 font-mono text-[13px] break-all">
-                    {g.grantee_principal}
-                    {g.name && <div className="text-muted-foreground font-sans text-xs">{g.name}</div>}
-                  </td>
-                  <td className="px-3 py-2 text-xs">{g.operations.join(", ")}</td>
-                  <td className="hidden max-w-[12rem] px-3 py-2 md:table-cell">
-                    <CopyableText value={g.grant_id} className="truncate text-[12px]" />
-                  </td>
-                  <td className="hidden px-3 py-2 whitespace-nowrap sm:table-cell">
-                    <TimeAgo value={g.created_at} />
-                  </td>
-                  <td className="px-4 py-2 text-right">
-                    {!readOnly && (
-                      <Button variant="ghost" size="sm" onClick={() => setRevoking(g)} aria-label="Revoke grant">
-                        <Trash2 /> Revoke
-                      </Button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {data && grants.length === 0 && (
-                <tr>
-                  <td colSpan={5} className="text-muted-foreground px-4 py-3">
-                    No grants.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
-      )}
+        ),
+    },
+  ]
+
+  return (
+    <>
+      <DataTable
+        title="Grants"
+        description="A grant lets a principal use the key for the listed operations without changing the key policy."
+        data={data}
+        columns={columns}
+        rowId={(g) => g.grant_id}
+        loading={!data && !error}
+        error={error}
+        onRetry={() => mutate()}
+        onRefresh={() => mutate()}
+        noSearch={grants.length < 6}
+        searchPlaceholder="Filter grants"
+        defaultSort={{ id: "created", desc: true }}
+        actions={
+          canCreate ? (
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus /> Create grant
+            </Button>
+          ) : undefined
+        }
+        empty={
+          <EmptyState
+            icon={Ticket}
+            title="No grants"
+            description="Only the key policy controls access to this key."
+            action={
+              canCreate ? (
+                <Button size="sm" onClick={() => setCreating(true)}>
+                  <Plus /> Create grant
+                </Button>
+              ) : undefined
+            }
+          />
+        }
+      />
       <CreateGrantDialog open={creating} onOpenChange={setCreating} k={k} path={path} onCreated={() => mutate()} />
       <ConfirmDialog
         open={!!revoking}
@@ -187,7 +219,7 @@ export function GrantsSection({ k, readOnly }: { k: KmsKey; readOnly: boolean })
           mutate()
         }}
       />
-    </Section>
+    </>
   )
 }
 
@@ -235,7 +267,7 @@ function CreateGrantDialog({ open, onOpenChange, k, path, onCreated }: { open: b
           </DialogDescription>
         </DialogHeader>
         {token !== null ? (
-          <CopyableText value={token} className="text-[12px] break-all" />
+          <CodeBlock title="Grant token" code={token} wrap maxHeight="12rem" copyLabel="Copy token" />
         ) : (
           <div className="flex flex-col gap-3">
             <Field label="Grantee principal" htmlFor="grant-grantee" help="An IAM user or role ARN, an account root ARN or a service principal.">

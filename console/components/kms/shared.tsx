@@ -9,7 +9,8 @@ import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrig
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { Field } from "@/components/console/form-field"
-import { StatusBadge } from "@/components/console/status-badge"
+import { StatusBadge, type Tone } from "@/components/console/status-badge"
+import { Tag, type TagAccent } from "@/components/console/tag"
 import { api, apiUrl, errorMessage, seg } from "@/lib/api"
 import { formatDate } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
@@ -59,6 +60,41 @@ export const USAGE_LABEL: Record<string, string> = {
   GENERATE_VERIFY_MAC: "Generate and verify MAC",
 }
 
+/** KIND_ACCENT tints key-type / key-spec tags: symmetric=brand, asymmetric=info, HMAC=violet. */
+export const KIND_ACCENT: Record<KeyKind, TagAccent> = { symmetric: "brand", asymmetric: "info", hmac: "violet" }
+
+/** USAGE_ACCENT tints key-usage tags. */
+export const USAGE_ACCENT: Record<string, TagAccent> = { ENCRYPT_DECRYPT: "brand", SIGN_VERIFY: "info", GENERATE_VERIFY_MAC: "violet" }
+
+/** KeySpecTag is the key spec chip (SYMMETRIC_DEFAULT, RSA_2048, HMAC_256 ...). */
+export function KeySpecTag({ spec, className }: { spec: string; className?: string }) {
+  const s = spec || SYMMETRIC_SPEC
+  return (
+    <Tag accent={KIND_ACCENT[keyKind(s)]} className={className}>
+      {s}
+    </Tag>
+  )
+}
+
+/** KeyUsageTag is the key usage chip (ENCRYPT_DECRYPT, SIGN_VERIFY ...). */
+export function KeyUsageTag({ usage, className }: { usage: string; className?: string }) {
+  return (
+    <Tag accent={USAGE_ACCENT[usage] ?? "neutral"} className={className} title={USAGE_LABEL[usage]}>
+      {usage}
+    </Tag>
+  )
+}
+
+/** KeyTypeTag is the short key type chip: "Symmetric", or "Asymmetric · RSA_2048". */
+export function KeyTypeTag({ spec }: { spec: string }) {
+  const kind = keyKind(spec)
+  return (
+    <Tag accent={KIND_ACCENT[kind]} mono={kind !== "symmetric"} title={spec || SYMMETRIC_SPEC}>
+      {kind === "symmetric" ? KIND_LABEL.symmetric : spec}
+    </Tag>
+  )
+}
+
 /** keyTypeLabel is a short description such as "Symmetric" or "Asymmetric · RSA_2048". */
 export function keyTypeLabel(k: Pick<KmsKey, "key_spec">): string {
   const kind = keyKind(k.key_spec)
@@ -74,25 +110,35 @@ export function useKmsKeys() {
   return useApi<KmsKey[]>(KEYS_PATH, { refreshInterval: KEY_POLL })
 }
 
-export const STATE_LABEL: Record<string, string> = { Enabled: "Enabled", Disabled: "Disabled", PendingDeletion: "Pending deletion" }
+export const STATE_LABEL: Record<string, string> = {
+  Enabled: "Enabled",
+  Disabled: "Disabled",
+  PendingDeletion: "Pending deletion",
+  PendingImport: "Pending import",
+  Unavailable: "Unavailable",
+}
+
+/** STATE_TONE maps KMS key states (which StatusBadge's mapping doesn't know) to tones. */
+const STATE_TONE: Record<string, Tone> = {
+  Enabled: "success",
+  Disabled: "neutral",
+  PendingDeletion: "danger",
+  PendingImport: "warning",
+  Unavailable: "danger",
+}
 
 export function KeyStateBadge({ state }: { state: string }) {
-  if (state === "PendingDeletion") return <StatusBadge status="scheduled for deletion" label="Pending deletion" tone="danger" />
-  return <StatusBadge status={state.toLowerCase()} label={STATE_LABEL[state] ?? state} />
+  return <StatusBadge status={state.toLowerCase()} label={STATE_LABEL[state] ?? state} tone={STATE_TONE[state] ?? "neutral"} />
 }
 
 export function ManagedBadge({ className }: { className?: string }) {
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <span
-          className={cn(
-            "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
-            "bg-violet-50 text-violet-700 ring-violet-600/20 dark:bg-violet-500/10 dark:text-violet-300 dark:ring-violet-400/20",
-            className,
-          )}
-        >
-          <Lock className="size-3" /> HomeCloud managed
+        <span className={cn("inline-flex", className)}>
+          <Tag accent="violet" mono={false}>
+            <Lock /> HomeCloud managed
+          </Tag>
         </span>
       </TooltipTrigger>
       <TooltipContent className="max-w-64">Created and used by a HomeCloud service. It can be used to encrypt and decrypt but cannot be changed.</TooltipContent>

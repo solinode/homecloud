@@ -8,7 +8,7 @@ import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -19,7 +19,7 @@ import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks
 import type { KmsKey, SsmParameter } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
-import { PARAMETERS_PATH, PARAMETER_PATH, SSM_PATH, TypeBadge, parameterHref } from "./shared"
+import { PARAMETERS_PATH, PARAMETER_PATH, SSM_PATH, TierBadge, TypeBadge, parameterHref } from "./shared"
 
 /** folderOf returns the "directory" part of a prefix: "/app/d" -> "/app/", "" -> "". */
 const folderOf = (prefix: string) => prefix.slice(0, prefix.lastIndexOf("/") + 1)
@@ -58,9 +58,9 @@ function KeyCell({ p, keys }: { p: SsmParameter; keys?: KmsKey[] }) {
   const id = keyIdFromArn(p.key_id)
   const k = keys?.find((x) => x.id === id)
   return (
-    <Link href={keyHref(id)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] break-all hover:underline" title={p.key_id}>
+    <CellLink href={keyHref(id)} mono title={p.key_id} max="14rem">
       {k ? keyLabel(k) : `${id.slice(0, 8)}...`}
-    </Link>
+    </CellLink>
   )
 }
 
@@ -95,7 +95,7 @@ export function ParametersList() {
         cell: (p) => {
           const rel = folder && p.name.startsWith(folder) ? p.name.slice(folder.length) : null
           return (
-            <Link href={parameterHref(p.name)} onClick={(e) => e.stopPropagation()} className={cn(cellLinkClass(), "font-mono text-[13px] break-all")} title={p.name}>
+            <CellLink href={parameterHref(p.name)} mono title={p.name} max="28rem">
               {rel !== null ? (
                 <>
                   <span className="text-muted-foreground font-normal">{folder}</span>
@@ -104,19 +104,23 @@ export function ParametersList() {
               ) : (
                 p.name
               )}
-            </Link>
+            </CellLink>
           )
         },
         value: (p) => p.name,
       },
       { id: "type", header: "Type", cell: (p) => <TypeBadge type={p.type} />, value: (p) => p.type },
-      { id: "tier", header: "Tier", cell: (p) => <span className="whitespace-nowrap">{p.tier || "Standard"}</span>, value: (p) => p.tier || "Standard", hideBelow: "lg" },
+      { id: "tier", header: "Tier", cell: (p) => <TierBadge tier={p.tier} />, value: (p) => p.tier || "Standard", hideBelow: "lg" },
       { id: "version", header: "Version", cell: (p) => <span className="tabular-nums">{p.version}</span>, value: (p) => p.version, hideBelow: "sm" },
       { id: "modified", header: "Last modified", cell: (p) => <TimeAgo value={p.last_modified} />, value: (p) => p.last_modified, hideBelow: "sm" },
       {
         id: "desc",
         header: "Description",
-        cell: (p) => <span className="line-clamp-2 max-w-72">{p.description || <span className="text-muted-foreground">-</span>}</span>,
+        cell: (p) => (
+          <CellText muted max="18rem">
+            {p.description}
+          </CellText>
+        ),
         value: (p) => p.description,
         hideBelow: "md",
       },
@@ -154,7 +158,7 @@ export function ParametersList() {
       {data && (folders.length > 0 || crumbs.length > 0) && (
         <div className="bg-card flex flex-col gap-2 rounded-lg border px-4 py-3 text-sm sm:flex-row sm:items-center">
           <nav aria-label="Path" className="flex min-w-0 flex-wrap items-center gap-1">
-            <span className="text-muted-foreground mr-1 text-xs font-medium">Path</span>
+            <span className="hc-eyebrow mr-1">Path</span>
             <button type="button" onClick={() => applyPrefix("")} className={cn("hover:underline", folder ? "text-primary" : "text-foreground font-medium")}>
               All
             </button>

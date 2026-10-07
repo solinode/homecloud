@@ -4,7 +4,7 @@ import { useState } from "react"
 import { toast } from "sonner"
 
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { StatusBadge } from "@/components/console/status-badge"
+import { StatusBadge, type Tone } from "@/components/console/status-badge"
 import { api, seg } from "@/lib/api"
 import { revalidate } from "@/lib/hooks"
 import { pluralize } from "@/lib/format"
@@ -40,8 +40,12 @@ export const canDelete = (status: string) => !isInProgress(status) && status !==
 /** pollInterval: 2 s while any stack/resource is in progress, 15 s otherwise. */
 export const pollInterval = (statuses: (string | undefined)[]) => (statuses.some(isInProgress) ? 2000 : 15_000)
 
-type Tone = "success" | "warning" | "neutral" | "danger" | "info"
-
+/**
+ * stackStatusTone maps a CloudFormation status to a StatusBadge tone (statusTone
+ * doesn't know these words): *_COMPLETE success, *_IN_PROGRESS warning,
+ * *_FAILED and ROLLBACK_COMPLETE danger, a completed update rollback warning
+ * (the stack is back on its previous, working configuration), deletes neutral.
+ */
 export function stackStatusTone(status: string): Tone {
   if (isInProgress(status)) return "warning"
   if (status.endsWith("_FAILED")) return "danger"

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { AlertTriangle, ChevronLeft, LineChart, Search, X } from "lucide-react"
+import { Activity, ChevronLeft, Info, LineChart, Search, X } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -138,7 +138,7 @@ export function MetricsExplorer() {
                 </button>
               )}
             </div>
-            {full && <p className="text-xs text-amber-700 dark:text-amber-400">5 series selected: the maximum for one graph. Remove one to add another.</p>}
+            {full && <p className="text-warning text-xs">5 series selected: the maximum for one graph. Remove one to add another.</p>}
           </div>
           {error ? (
             <div className="p-3 pt-0">
@@ -152,7 +152,7 @@ export function MetricsExplorer() {
             </div>
           ) : !ns && !search.trim() ? (
             namespaces.length === 0 ? (
-              <p className="text-muted-foreground p-6 text-center text-sm">No metrics yet. Metrics appear once a resource is running.</p>
+              <EmptyState icon={Activity} title="No metrics yet" description="Metrics appear once a resource is running." />
             ) : (
               <ul className="border-t">
                 {namespaces.map(([n, count]) => (
@@ -193,7 +193,7 @@ export function MetricsExplorer() {
                         return (
                           <tr
                             key={k}
-                            className={cn("border-b last:border-0", disabled ? "opacity-60" : "hover:bg-muted/40 cursor-pointer", on && "bg-primary/5 dark:bg-primary/10")}
+                            className={cn("border-b last:border-0", disabled ? "opacity-60" : "hover:bg-muted/40 cursor-pointer", on && "bg-brand-soft")}
                             onClick={() => !disabled && toggle(s)}
                             title={disabled ? "At most 5 series per graph" : undefined}
                           >
@@ -202,7 +202,7 @@ export function MetricsExplorer() {
                             </td>
                             <td className="min-w-0 px-2 py-1.5">
                               <div className="flex flex-col">
-                                <span className="font-mono text-xs break-all">{dimsText(s.dimensions) || "(no dimensions)"}</span>
+                                <span className="font-mono text-xs break-all">{dimsText(s.dimensions) || <span className="text-muted-foreground">(no dimensions)</span>}</span>
                                 {s.dimensions?.InstanceId && names.get(s.dimensions.InstanceId) && (
                                   <span className="text-muted-foreground text-xs">{names.get(s.dimensions.InstanceId)}</span>
                                 )}
@@ -279,8 +279,8 @@ export function MetricsExplorer() {
             ) : (
               <div className="flex flex-col gap-6">
                 {byUnit.length > 1 && (
-                  <Alert>
-                    <AlertTriangle />
+                  <Alert variant="info">
+                    <Info />
                     <AlertDescription>The selected series use different units, so they are drawn on {byUnit.length} separate graphs (one per unit).</AlertDescription>
                   </Alert>
                 )}
@@ -307,14 +307,14 @@ export function MetricsExplorer() {
               <ul className="divide-y">
                 {selected.map((s) => (
                   <li key={keyOf(s)} className="flex items-center gap-3 px-4 py-2 text-sm">
-                    <span className="h-0.5 w-4 shrink-0 rounded" style={{ background: colorOf(s) }} />
+                    <span aria-hidden className="h-[3px] w-4 shrink-0 rounded-full" style={{ background: colorOf(s) }} />
                     <div className="min-w-0 flex-1">
                       <div className="truncate font-medium">{s.name}</div>
                       <div className="text-muted-foreground truncate font-mono text-xs">
                         {s.namespace} {dimsText(s.dimensions) && `| ${dimsText(s.dimensions)}`}
                       </div>
                     </div>
-                    <span className="text-muted-foreground text-xs">{s.unit || "None"}</span>
+                    <span className="text-muted-foreground shrink-0 text-xs">{s.unit || "None"}</span>
                     <Button variant="ghost" size="icon" className="size-7" onClick={() => toggle(s)} aria-label="Remove series">
                       <X />
                     </Button>

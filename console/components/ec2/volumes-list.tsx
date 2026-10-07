@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { HardDrive, Loader2, Plus } from "lucide-react"
 import { toast } from "sonner"
 
@@ -11,7 +10,7 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
@@ -28,19 +27,19 @@ const VOLUMES_PATH = "/api/v1/ec2/volumes"
 const ZONES = ["us-east-1a", "us-east-1b", "us-east-1c"]
 
 const columns: Column<Volume>[] = [
-  { id: "id", header: "Volume ID", cell: (v) => <span className="font-mono text-[13px] font-medium">{v.id}</span>, value: (v) => v.id },
-  { id: "name", header: "Name", cell: (v) => v.name || <span className="text-muted-foreground">-</span>, value: (v) => v.name },
-  { id: "size", header: "Size", cell: (v) => `${v.size_gb} GiB`, value: (v) => v.size_gb },
+  { id: "id", header: "Volume ID", cell: (v) => <CellText mono className="font-medium">{v.id}</CellText>, value: (v) => v.id },
+  { id: "name", header: "Name", cell: (v) => <CellText max="14rem">{v.name}</CellText>, value: (v) => v.name },
+  { id: "size", header: "Size", cell: (v) => <span className="whitespace-nowrap tabular-nums">{v.size_gb} GiB</span>, value: (v) => v.size_gb },
   { id: "state", header: "Volume state", cell: (v) => <StatusBadge status={v.state} />, value: (v) => v.state },
   {
     id: "attached",
     header: "Attached resources",
     cell: (v) =>
       v.attached_to ? (
-        <span className="whitespace-nowrap">
-          <Link href={instanceHref(v.attached_to)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] hover:underline">
+        <span className="flex items-center whitespace-nowrap">
+          <CellLink href={instanceHref(v.attached_to)} mono>
             {v.attached_to}
-          </Link>
+          </CellLink>
           {v.mount_path && <span className="text-muted-foreground font-mono text-[13px]">:{v.mount_path}</span>}
         </span>
       ) : (
@@ -51,11 +50,11 @@ const columns: Column<Volume>[] = [
   {
     id: "snapshot",
     header: "Snapshot",
-    cell: (v) => (v.snapshot_id ? <span className="font-mono text-[13px]">{v.snapshot_id}</span> : <span className="text-muted-foreground">-</span>),
+    cell: (v) => <CellText mono>{v.snapshot_id}</CellText>,
     value: (v) => v.snapshot_id ?? "",
     hideBelow: "lg",
   },
-  { id: "az", header: "Availability zone", cell: (v) => v.availability_zone, value: (v) => v.availability_zone, hideBelow: "md" },
+  { id: "az", header: "Availability zone", cell: (v) => <CellText>{v.availability_zone}</CellText>, value: (v) => v.availability_zone, hideBelow: "md" },
   { id: "created", header: "Created", cell: (v) => <TimeAgo value={v.created_at} />, value: (v) => v.created_at, hideBelow: "lg" },
 ]
 
@@ -198,7 +197,7 @@ function CreateVolumeDialog({ open, onOpenChange }: { open: boolean; onOpenChang
           <Field label="Name" htmlFor="vol-name" optional error={submitted ? nameErr : undefined}>
             <Input id="vol-name" value={name} onChange={(e) => setName(e.target.value)} placeholder="db-data" autoFocus />
           </Field>
-          <div className="grid grid-cols-2 gap-3">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="Size (GiB)" htmlFor="vol-size" error={submitted ? sizeErr : undefined} help={snapshot.trim() ? "Leave empty to use the snapshot's size." : "Advisory: Docker volumes are not capped."}>
               <Input id="vol-size" type="number" min={1} value={size} onChange={(e) => setSize(e.target.value)} />
             </Field>

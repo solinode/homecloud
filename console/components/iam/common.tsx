@@ -12,6 +12,7 @@ import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Skeleton } from "@/components/ui/skeleton"
 import { CopyButton } from "@/components/console/copy-button"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { api, seg, type ApiError } from "@/lib/api"
 import type { AccessKey, PolicyDocument, PolicyStatement, PolicySummary } from "@/lib/types"
 import { cn } from "@/lib/utils"
@@ -145,10 +146,10 @@ export function PolicyStatementsTable({ doc }: { doc: PolicyDocument | undefined
   if (!statements.length) return <p className="text-muted-foreground text-sm">This policy has no statements.</p>
   const hasCond = statements.some((s) => conditionLines(s.Condition).length > 0)
   return (
-    <div className="overflow-x-auto rounded-md border">
+    <div className="overflow-x-auto rounded-lg border">
       <table className="w-full text-sm">
         <thead>
-          <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
+          <tr className="bg-muted/50 text-muted-foreground border-b text-left text-xs">
             <th className="px-3 py-2 font-semibold">Effect</th>
             <th className="px-3 py-2 font-semibold">Actions</th>
             <th className="px-3 py-2 font-semibold">Resources</th>
@@ -167,17 +168,17 @@ export function PolicyStatementsTable({ doc }: { doc: PolicyDocument | undefined
                   {s.Sid && <div className="text-muted-foreground mt-1 text-xs">{s.Sid}</div>}
                 </td>
                 <td className="px-3 py-2">
-                  {notAction && <div className="mb-1 text-xs font-medium text-amber-700 dark:text-amber-300">All actions except (NotAction)</div>}
+                  {notAction && <div className="mb-1 text-warning text-xs font-medium">All actions except (NotAction)</div>}
                   <div className="flex flex-wrap gap-1">
                     {asList(notAction ? s.NotAction : s.Action).map((a) => (
-                      <code key={a} className="bg-muted rounded px-1.5 py-0.5 text-xs">
+                      <Tag key={a} accent={a === "*" ? "warning" : "neutral"}>
                         {a === "*" ? "* (all actions)" : a}
-                      </code>
+                      </Tag>
                     ))}
                   </div>
                 </td>
                 <td className="px-3 py-2">
-                  {notResource && <div className="mb-1 text-xs font-medium text-amber-700 dark:text-amber-300">All resources except (NotResource)</div>}
+                  {notResource && <div className="mb-1 text-warning text-xs font-medium">All resources except (NotResource)</div>}
                   <div className="flex flex-col gap-0.5">
                     {asList(notResource ? s.NotResource : s.Resource).map((r) => (
                       <span key={r} className="font-mono text-xs break-all">

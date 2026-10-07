@@ -5,10 +5,10 @@ import { Loader2, WandSparkles } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { TagsEditor, type TagRow } from "@/components/console/tags-editor"
 import { api, errorMessage } from "@/lib/api"
-import { cn } from "@/lib/utils"
 
 export type SecretMode = "kv" | "plain"
 
@@ -61,23 +61,15 @@ export function draftError(d: SecretDraft): string | null {
 /** ModeToggle is the segmented "Key/value | Plaintext" switch. */
 export function ModeToggle({ mode, onChange, labels = { kv: "Key/value", plain: "Plaintext" } }: { mode: SecretMode; onChange: (m: SecretMode) => void; labels?: Record<SecretMode, string> }) {
   return (
-    <div role="tablist" className="bg-muted inline-flex rounded-md p-0.5 text-sm">
-      {(["kv", "plain"] as const).map((m) => (
-        <button
-          key={m}
-          type="button"
-          role="tab"
-          aria-selected={mode === m}
-          onClick={() => onChange(m)}
-          className={cn(
-            "rounded px-3 py-1 font-medium transition-colors",
-            mode === m ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-          )}
-        >
-          {labels[m]}
-        </button>
-      ))}
-    </div>
+    <Tabs value={mode} onValueChange={(v) => onChange(v as SecretMode)}>
+      <TabsList aria-label="Value format">
+        {(["kv", "plain"] as const).map((m) => (
+          <TabsTrigger key={m} value={m}>
+            {labels[m]}
+          </TabsTrigger>
+        ))}
+      </TabsList>
+    </Tabs>
   )
 }
 

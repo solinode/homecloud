@@ -1,6 +1,6 @@
 "use client"
 
-import { StatusBadge } from "@/components/console/status-badge"
+import { Tag, type TagAccent } from "@/components/console/tag"
 import { useApi } from "@/lib/hooks"
 import type { SsmDataType, SsmParameter, SsmParameterTier, SsmParameterType } from "@/lib/types"
 
@@ -30,9 +30,16 @@ export const DATA_TYPES: { type: SsmDataType; blurb: string }[] = [
 /** maxForTier is the largest value the chosen tier accepts. */
 export const maxForTier = (tier: string) => (tier === "Standard" ? MAX_STANDARD : MAX_VALUE)
 
+/** Tag accent per parameter tier. */
+export const TIER_ACCENT: Record<SsmParameterTier, TagAccent> = { Standard: "neutral", Advanced: "info", "Intelligent-Tiering": "violet" }
+
 export function TierBadge({ tier }: { tier?: string }) {
   const t = tier || "Standard"
-  return <StatusBadge status={t} label={t} tone={t === "Advanced" ? "info" : "neutral"} />
+  return (
+    <Tag mono={false} accent={TIER_ACCENT[t as SsmParameterTier] ?? "neutral"}>
+      {t}
+    </Tag>
+  )
 }
 export const MAX_NAME = 1011
 
@@ -52,10 +59,11 @@ export function nameError(name: string): string | null {
   return null
 }
 
-export const TYPE_TONE: Record<SsmParameterType, "neutral" | "info" | "warning"> = { String: "neutral", StringList: "info", SecureString: "warning" }
+/** Tag accent per parameter type. */
+export const TYPE_ACCENT: Record<SsmParameterType, TagAccent> = { String: "neutral", StringList: "info", SecureString: "warning" }
 
 export function TypeBadge({ type }: { type: SsmParameterType | string }) {
-  return <StatusBadge status={type} label={type} tone={TYPE_TONE[type as SsmParameterType] ?? "neutral"} />
+  return <Tag accent={TYPE_ACCENT[type as SsmParameterType] ?? "neutral"}>{type}</Tag>
 }
 
 /**

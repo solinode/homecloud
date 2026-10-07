@@ -5,6 +5,7 @@ import { ChevronDown, Download, ShieldCheck } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyButton } from "@/components/console/copy-button"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -67,14 +68,11 @@ export function PrivateCaPanel({ className }: { className?: string }) {
               <ChevronDown className={cn("size-4 transition-transform", open && "rotate-180")} /> How to trust the CA
             </CollapsibleTrigger>
             <CollapsibleContent>
-              <ul className="mt-3 flex flex-col gap-2">
+              <ul className="mt-3 flex flex-col gap-3">
                 {STEPS.map((s) => (
-                  <li key={s.os} className="flex flex-col gap-1">
-                    <span className="text-muted-foreground text-xs font-medium">{s.os}</span>
-                    <span className="bg-muted/50 flex items-start gap-1 rounded-md border px-2 py-1.5">
-                      <code className="min-w-0 flex-1 font-mono text-[12px] break-all">{s.cmd}</code>
-                      <CopyButton value={s.cmd} />
-                    </span>
+                  <li key={s.os} className="flex min-w-0 flex-col gap-1.5">
+                    <span className="hc-eyebrow">{s.os}</span>
+                    <CodeBlock code={s.cmd} prompt wrap />
                   </li>
                 ))}
               </ul>

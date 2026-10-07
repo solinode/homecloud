@@ -120,7 +120,7 @@ export function useDbActions(cfg: FamilyConfig, opts: { onDeleted?: () => void }
         </ul>
       )}
       {protectedOnes.length > 0 && (
-        <Alert>
+        <Alert variant="warning">
           <ShieldAlert />
           <AlertTitle>Deletion protection is on</AlertTitle>
           <AlertDescription>

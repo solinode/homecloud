@@ -5,6 +5,7 @@ import { Plus, Trash2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Field } from "@/components/console/form-field"
 import type { SecurityGroup } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -44,11 +45,8 @@ export function RuleFields({
   const fixed = !!preset?.port
   const id = rule.key
   return (
-    <div className={cn("grid grid-cols-2 gap-3 sm:grid-cols-12", !compact && "bg-muted/30 rounded-md border p-3")}>
-      <div className="col-span-2 flex flex-col gap-1 sm:col-span-3">
-        <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-type`}>
-          Type
-        </label>
+    <div className={cn("grid grid-cols-2 gap-3 sm:grid-cols-12", !compact && "bg-muted/30 rounded-lg border p-3")}>
+      <Field label="Type" htmlFor={`${id}-type`} className="col-span-2 sm:col-span-3">
         <Select value={rule.preset} onValueChange={(v) => onChange(applyPreset(rule, v))}>
           <SelectTrigger id={`${id}-type`} size="sm" className="w-full">
             <SelectValue />
@@ -62,11 +60,8 @@ export function RuleFields({
             ))}
           </SelectContent>
         </Select>
-      </div>
-      <div className="flex flex-col gap-1 sm:col-span-3">
-        <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-proto`}>
-          Protocol
-        </label>
+      </Field>
+      <Field label="Protocol" htmlFor={`${id}-proto`} className="sm:col-span-3">
         <Select
           value={rule.protocol}
           disabled={fixed}
@@ -80,11 +75,8 @@ export function RuleFields({
             <SelectItem value="udp">UDP</SelectItem>
           </SelectContent>
         </Select>
-      </div>
-      <div className="flex flex-col gap-1 sm:col-span-3">
-        <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-from`}>
-          From port
-        </label>
+      </Field>
+      <Field label="From port" htmlFor={`${id}-from`} error={errs.from} className="sm:col-span-3">
         <Input
           id={`${id}-from`}
           inputMode="numeric"
@@ -98,12 +90,8 @@ export function RuleFields({
             onChange({ ...rule, from: v, to: rule.to === rule.from ? v : rule.to })
           }}
         />
-        {errs.from && <span className="text-destructive text-xs">{errs.from}</span>}
-      </div>
-      <div className="flex flex-col gap-1 sm:col-span-3">
-        <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-to`}>
-          To port
-        </label>
+      </Field>
+      <Field label="To port" htmlFor={`${id}-to`} error={errs.to} className="sm:col-span-3">
         <Input
           id={`${id}-to`}
           inputMode="numeric"
@@ -114,12 +102,8 @@ export function RuleFields({
           aria-invalid={!!errs.to}
           onChange={(e) => onChange({ ...rule, to: e.target.value.replace(/[^\d]/g, "") })}
         />
-        {errs.to && <span className="text-destructive text-xs">{errs.to}</span>}
-      </div>
-      <div className="col-span-2 flex flex-col gap-1 sm:col-span-6">
-        <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-source`}>
-          Source
-        </label>
+      </Field>
+      <Field label="Source" htmlFor={`${id}-source`} error={errs.cidr ?? errs.group} className="col-span-2 sm:col-span-6">
         <div className="flex gap-2">
           <Select value={rule.source} onValueChange={(v) => onChange({ ...rule, source: v as "cidr" | "group" })}>
             <SelectTrigger id={`${id}-source`} size="sm" className="w-24 shrink-0">
@@ -159,13 +143,8 @@ export function RuleFields({
             </Button>
           )}
         </div>
-        {errs.cidr && <span className="text-destructive text-xs">{errs.cidr}</span>}
-        {errs.group && <span className="text-destructive text-xs">{errs.group}</span>}
-      </div>
-      <div className="col-span-2 flex flex-col gap-1 sm:col-span-6">
-        <label className="text-muted-foreground text-xs font-medium" htmlFor={`${id}-desc`}>
-          Description <span className="font-normal">- optional</span>
-        </label>
+      </Field>
+      <Field label="Description" htmlFor={`${id}-desc`} optional className="col-span-2 sm:col-span-6">
         <Input
           id={`${id}-desc`}
           className="h-8"
@@ -174,7 +153,7 @@ export function RuleFields({
           placeholder="e.g. Web traffic"
           onChange={(e) => onChange({ ...rule, description: e.target.value })}
         />
-      </div>
+      </Field>
     </div>
   )
 }

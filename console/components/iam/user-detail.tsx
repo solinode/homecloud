@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
-import { Plus, ShieldCheck, Trash2, UsersRound } from "lucide-react"
+import { FlaskConical, Plus, ShieldCheck, Trash2, UsersRound } from "lucide-react"
 import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
@@ -11,7 +11,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -26,7 +26,7 @@ import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks
 import type { IamGroup, IamUser, PolicySummary } from "@/lib/types"
 
 import { AttachPoliciesDialog, PickDialog, runEach } from "./dialogs"
-import { IAM, LINK, PolicyTypeBadge, groupHref, policyHref } from "./common"
+import { IAM, PolicyTypeBadge, groupHref, policyHref } from "./common"
 import { PermissionsBoundarySection } from "./boundary"
 import { InlinePoliciesSection } from "./inline-policies-section"
 import { TagsSection } from "./tags-section"
@@ -88,11 +88,16 @@ export function UserDetail() {
         breadcrumbs={crumbs}
         badge={user.root ? <StatusBadge status="root" tone="warning" label="Root user" /> : undefined}
         actions={
-          !user.root && (
-            <Button variant="outline" size="sm" onClick={() => setConfirmDelete(true)}>
-              <Trash2 /> Delete
+          <>
+            <Button variant="outline" size="sm" asChild>
+              <Link href={`/iam/simulator/?user=${encodeURIComponent(user.name)}`}>
+                <FlaskConical /> Simulate
+              </Link>
             </Button>
-          )
+            {!user.root && (
+              <ActionsMenu items={[{ label: "Delete user", icon: <Trash2 />, destructive: true, onSelect: () => setConfirmDelete(true) }]} />
+            )}
+          </>
         }
       />
 
@@ -199,11 +204,7 @@ function PermissionsTab({
       id: "policy",
       header: "Policy name",
       value: (r) => r.policy,
-      cell: (r) => (
-        <Link href={policyHref(r.policy)} className={LINK}>
-          {r.policy}
-        </Link>
-      ),
+      cell: (r) => <CellLink href={policyHref(r.policy)}>{r.policy}</CellLink>,
     },
     { id: "type", header: "Type", value: (r) => (r.managed ? "AWS managed" : "Customer managed"), cell: (r) => (r.managed === undefined ? "-" : <PolicyTypeBadge managed={r.managed} />) },
     {
@@ -222,7 +223,7 @@ function PermissionsTab({
           "Directly"
         ),
     },
-    { id: "desc", header: "Description", value: (r) => r.description, cell: (r) => <span className="text-muted-foreground">{r.description || "-"}</span>, hideBelow: "lg" },
+    { id: "desc", header: "Description", value: (r) => r.description, cell: (r) => <CellText muted>{r.description}</CellText>, hideBelow: "lg" },
   ]
 
   return (
@@ -348,11 +349,7 @@ function GroupsTab({
       id: "name",
       header: "Group name",
       value: (g) => g.name,
-      cell: (g) => (
-        <Link href={groupHref(g.name)} className={LINK}>
-          {g.name}
-        </Link>
-      ),
+      cell: (g) => <CellLink href={groupHref(g.name)}>{g.name}</CellLink>,
     },
     {
       id: "policies",
