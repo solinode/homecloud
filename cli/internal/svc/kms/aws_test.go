@@ -47,6 +47,17 @@ func meta(t *testing.T, h *awstest.Harness, args ...string) map[string]any {
 	return h.AWSJSON(t, args...)["KeyMetadata"].(map[string]any)
 }
 
+// Terraform reads the rotation status of every key KMS made, asymmetric ones
+// included: AWS reports rotation off for them rather than failing.
+func TestKMSRotationStatusOfAsymmetricKey(t *testing.T) {
+	h, _, _ := setup(t)
+	id := meta(t, h, "kms", "create-key", "--key-usage", "SIGN_VERIFY", "--key-spec", "ECC_NIST_P256")["KeyId"].(string)
+	if rs := h.AWSJSON(t, "kms", "get-key-rotation-status", "--key-id", id); rs["KeyRotationEnabled"] != false {
+		t.Fatalf("rotation status: %v", rs)
+	}
+	expectErr(t, h, "UnsupportedOperationException", "kms", "enable-key-rotation", "--key-id", id)
+}
+
 func TestKMSKeyLifecycleCLI(t *testing.T) {
 	h, k, clk := setup(t)
 	m := meta(t, h, "kms", "create-key", "--description", "app key", "--tags", "TagKey=env,TagValue=dev")
