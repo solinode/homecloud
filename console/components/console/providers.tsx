@@ -10,11 +10,11 @@ import { swrConfig } from "@/lib/hooks"
 
 export function Providers({ children }: { children: ReactNode }) {
   return (
-    <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
+    <ThemeProvider attribute="class" defaultTheme="system" enableSystem disableTransitionOnChange>
       <SWRConfig value={swrConfig}>
         <TooltipProvider delayDuration={300}>
           {children}
-          <Toaster position="top-right" richColors closeButton />
+          <Toaster position="bottom-right" closeButton />
         </TooltipProvider>
       </SWRConfig>
     </ThemeProvider>
