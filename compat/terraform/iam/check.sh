@@ -6,5 +6,5 @@ export AWS_ACCESS_KEY_ID=$($TF output -raw access_key_id)
 export AWS_SECRET_ACCESS_KEY=$($TF output -raw secret_access_key)
 unset AWS_SESSION_TOKEN
 aws sts get-caller-identity --query Arn --output text | grep -q ':user/compat-deployer'
-aws sts assume-role --role-arn "$role" --role-session-name compat --query AssumedRoleUser.Arn --output text | grep -q 'assumed-role/compat-app/compat'
+aws sts assume-role --role-arn "$role" --role-session-name compat --query AssumedRoleUser.Arn --output text | grep -q 'assumed-role/compat-app-[0-9a-f]*/compat$'
 echo "iam ok"

@@ -104,6 +104,10 @@ module "group" {
   name  = "${var.name}-ops"
   users = [module.deployer.name, module.auditor.name]
 
+  # The module's self-management policy (kept) denies everything without MFA unless this is off;
+  # HomeCloud enforces that deny exactly as AWS does.
+  enable_mfa_enforcement = false
+
   permissions = {
     AssumeApp = {
       actions   = ["sts:AssumeRole"]
