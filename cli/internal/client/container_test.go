@@ -1,9 +1,14 @@
 package client
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 func TestContainerEndpoint(t *testing.T) {
 	public := Profile{Endpoint: "http://cloud.example.com:18080"}
+	t.Setenv("HOMECLOUD_DATA_DIR", t.TempDir())
 	// Outside the image nothing changes.
 	t.Setenv("HOMECLOUD_IN_CONTAINER", "")
 	if got := containerEndpoint(public); got != public.Endpoint {
@@ -14,6 +19,16 @@ func TestContainerEndpoint(t *testing.T) {
 	if got := containerEndpoint(public); got != "http://127.0.0.1:8080" {
 		t.Fatalf("in the image: %s", got)
 	}
+	// serve --addr is saved in config.json and wins over the image default.
+	dir := t.TempDir()
+	t.Setenv("HOMECLOUD_DATA_DIR", dir)
+	if err := os.WriteFile(filepath.Join(dir, "config.json"), []byte(`{"api_addr":"0.0.0.0:18080"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if got := containerEndpoint(public); got != "http://127.0.0.1:18080" {
+		t.Fatalf("with --addr: %s", got)
+	}
+	t.Setenv("HOMECLOUD_DATA_DIR", t.TempDir())
 	// A real certificate does not cover 127.0.0.1; the self-signed one does.
 	if got := containerEndpoint(Profile{Endpoint: "https://cloud.example.com"}); got != "https://cloud.example.com" {
 		t.Fatalf("https with a public certificate: %s", got)

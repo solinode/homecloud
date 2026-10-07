@@ -128,8 +128,8 @@ func containerEndpoint(p Profile) string {
 	if os.Getenv("HOMECLOUD_IN_CONTAINER") != "1" || os.Getenv("HOMECLOUD_ENDPOINT") != "" {
 		return p.Endpoint
 	}
-	_, port, err := net.SplitHostPort(os.Getenv("HOMECLOUD_ADDR"))
-	if err != nil {
+	port := serverPort()
+	if port == "" {
 		return p.Endpoint
 	}
 	switch {
@@ -139,6 +139,24 @@ func containerEndpoint(p Profile) string {
 		return "https://127.0.0.1:" + port
 	}
 	return p.Endpoint
+}
+
+// serverPort is the port the local server listens on: api_addr in the data
+// directory's config.json (written by serve, flags included), else HOMECLOUD_ADDR.
+func serverPort() string {
+	addr := os.Getenv("HOMECLOUD_ADDR")
+	if b, err := os.ReadFile(filepath.Join(core.DefaultDataDir(), "config.json")); err == nil {
+		var c struct {
+			APIAddr string `json:"api_addr"`
+		}
+		if json.Unmarshal(b, &c) == nil && c.APIAddr != "" {
+			addr = c.APIAddr
+		}
+	}
+	if _, port, err := net.SplitHostPort(addr); err == nil {
+		return port
+	}
+	return ""
 }
 
 // APIError mirrors the server's error body.
