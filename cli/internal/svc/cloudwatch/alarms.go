@@ -294,6 +294,7 @@ func (s *Service) evaluateAlarms() {
 		b, _ := json.Marshal(data)
 		s.setAlarmState(a, state, reason, string(b))
 	}
+	s.evaluateComposites()
 }
 
 // setAlarmState records a state transition and runs the alarm's actions.

@@ -212,6 +212,50 @@ func TestCloudWatchRPCv2CBOR(t *testing.T) {
 	}
 }
 
+// Composite alarms (aws_cloudwatch_composite_alarm) follow their rule.
+func TestCloudWatchCompositeAlarms(t *testing.T) {
+	h, _ := newAWS(t)
+	for _, n := range []string{"cpu", "errors"} {
+		h.AWS(t, "cloudwatch", "put-metric-alarm", "--alarm-name", n, "--namespace", "App", "--metric-name", n, "--statistic", "Sum",
+			"--period", "60", "--evaluation-periods", "1", "--threshold", "1", "--comparison-operator", "GreaterThanThreshold")
+		h.AWS(t, "cloudwatch", "set-alarm-state", "--alarm-name", n, "--state-value", "ALARM", "--state-reason", "test")
+	}
+	if o, err := h.AWSErr(t, "cloudwatch", "put-composite-alarm", "--alarm-name", "bad", "--alarm-rule", "ALARM(cpu) AND"); err == nil || !strings.Contains(o, "Invalid AlarmRule") {
+		t.Fatalf("bad rule: %v %s", err, o)
+	}
+	if o, err := h.AWSErr(t, "cloudwatch", "put-composite-alarm", "--alarm-name", "bad", "--alarm-rule", "ALARM(nope)"); err == nil || !strings.Contains(o, "does not exist") {
+		t.Fatalf("unknown alarm: %v %s", err, o)
+	}
+	h.AWS(t, "cloudwatch", "put-composite-alarm", "--alarm-name", "app", "--alarm-rule", `ALARM("cpu") AND (ALARM(errors) OR FALSE) AND NOT OK(cpu)`,
+		"--alarm-description", "both", "--tags", "Key=team,Value=core")
+	state := func() string {
+		out := h.AWSJSON(t, "cloudwatch", "describe-alarms", "--alarm-types", "CompositeAlarm", "--alarm-names", "app")["CompositeAlarms"].([]any)
+		if len(out) != 1 {
+			t.Fatalf("composite alarms: %v", out)
+		}
+		return out[0].(map[string]any)["StateValue"].(string)
+	}
+	if st := state(); st != "ALARM" {
+		t.Fatalf("state %s, want ALARM", st)
+	}
+	h.AWS(t, "cloudwatch", "set-alarm-state", "--alarm-name", "errors", "--state-value", "OK", "--state-reason", "test")
+	if st := state(); st != "OK" {
+		t.Fatalf("state %s, want OK", st)
+	}
+	// Without AlarmTypes only metric alarms are listed, as in AWS.
+	if out := h.AWSJSON(t, "cloudwatch", "describe-alarms"); len(out["CompositeAlarms"].([]any)) != 0 || len(out["MetricAlarms"].([]any)) != 2 {
+		t.Fatalf("default describe: %v", out)
+	}
+	arn := "arn:aws:cloudwatch:us-east-1:" + h.Env.AccountID + ":alarm:app"
+	if tags := h.AWSJSON(t, "cloudwatch", "list-tags-for-resource", "--resource-arn", arn)["Tags"].([]any); len(tags) != 1 {
+		t.Fatalf("tags: %v", tags)
+	}
+	h.AWS(t, "cloudwatch", "delete-alarms", "--alarm-names", "app")
+	if out := h.AWSJSON(t, "cloudwatch", "describe-alarms", "--alarm-types", "CompositeAlarm"); len(out["CompositeAlarms"].([]any)) != 0 {
+		t.Fatalf("after delete: %v", out)
+	}
+}
+
 // Saved Logs Insights queries (aws_cloudwatch_query_definition).
 func TestLogsQueryDefinitions(t *testing.T) {
 	h, _ := newAWS(t)
