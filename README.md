@@ -1,5 +1,9 @@
 # HomeCloud
 
+<p align="center">
+  <a href="https://homecloud.pages.dev"><img src="docs/images/landing.png" alt="HomeCloud: your own AWS, on your hardware" width="100%"></a>
+</p>
+
 **A self-hosted, AWS-compatible cloud in one binary: point your real Terraform, AWS CLI and SDK code at it, and it runs on real containers and VMs on your machine.**
 
 <p align="center">
