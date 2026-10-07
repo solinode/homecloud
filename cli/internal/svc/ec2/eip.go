@@ -260,6 +260,31 @@ func (s *Service) awsDescribeAddresses(q *awsapi.Req) (any, error) {
 	return map[string]any{"addressesSet": items}, nil
 }
 
+// awsDescribeAddressesAttribute reports the reverse DNS (domain-name)
+// attribute, which HomeCloud addresses never have; Terraform reads it for
+// every aws_eip.
+func (s *Service) awsDescribeAddressesAttribute(q *awsapi.Req) (any, error) {
+	if err := q.Authorize("ec2:DescribeAddressesAttribute", "*"); err != nil {
+		return nil, err
+	}
+	if a := q.Param("Attribute"); a != "" && a != "domain-name" {
+		return nil, invalid("Invalid value '%s' for Attribute: only domain-name is supported", a)
+	}
+	ids := q.List("AllocationId")
+	items := awsapi.Items{}
+	for _, a := range s.addresses() {
+		if len(ids) == 0 || slices.Contains(ids, a.AllocationID) {
+			items = append(items, map[string]any{"allocationId": a.AllocationID, "publicIp": a.PublicIP})
+		}
+	}
+	for _, id := range ids {
+		if !slices.ContainsFunc(s.addresses(), func(a Address) bool { return a.AllocationID == id }) {
+			return nil, eipNotFound(id)
+		}
+	}
+	return map[string]any{"addressSet": items}, nil
+}
+
 func (s *Service) awsReleaseAddress(q *awsapi.Req) (any, error) {
 	id := q.Param("AllocationId")
 	if id == "" {

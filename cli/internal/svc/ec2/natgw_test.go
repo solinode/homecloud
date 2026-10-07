@@ -16,6 +16,11 @@ func TestNATGateways(t *testing.T) {
 	t.Cleanup(func() { _, _ = h.AWSErr(t, "ec2", "delete-subnet", "--subnet-id", sn) })
 	eip := h.AWSJSON(t, "ec2", "allocate-address", "--domain", "vpc")
 	alloc := eip["AllocationId"].(string)
+	// Terraform reads every Elastic IP's reverse DNS attribute.
+	attr := h.AWSJSON(t, "ec2", "describe-addresses-attribute", "--allocation-ids", alloc, "--attribute", "domain-name")["Addresses"].([]any)
+	if len(attr) != 1 || attr[0].(map[string]any)["AllocationId"] != alloc || attr[0].(map[string]any)["PtrRecord"] != nil {
+		t.Fatalf("addresses attribute: %v", attr)
+	}
 
 	if o, err := h.AWSErr(t, "ec2", "create-nat-gateway", "--subnet-id", sn); err == nil || !strings.Contains(o, "MissingParameter") {
 		t.Fatalf("public gateway without an address: %v %s", err, o)

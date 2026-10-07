@@ -1,6 +1,7 @@
 package ec2
 
 import (
+	"maps"
 	"net/http"
 	"slices"
 	"strconv"
@@ -49,6 +50,12 @@ func (s *Service) vpcOps(ops map[string]ec2Op) {
 		"DisassociateRouteTable":        s.awsDisassociateRouteTable,
 		"ReplaceRouteTableAssociation":  s.awsReplaceRouteTableAssociation,
 		"DescribeNetworkAcls":           s.awsDescribeNetworkAcls,
+		"CreateNetworkAcl":              s.awsCreateNetworkAcl,
+		"DeleteNetworkAcl":              s.awsDeleteNetworkAcl,
+		"ReplaceNetworkAclAssociation":  s.awsReplaceNetworkAclAssociation,
+		"CreateNetworkAclEntry":         s.aclEntryOp(false),
+		"ReplaceNetworkAclEntry":        s.aclEntryOp(true),
+		"DeleteNetworkAclEntry":         s.awsDeleteNetworkAclEntry,
 	} {
 		ops[k] = v
 	}
@@ -279,6 +286,14 @@ func (s *Service) awsDeleteSubnet(q *awsapi.Req) (any, error) {
 	if err := s.vpc.DeleteSubnet(id); err != nil {
 		return nil, err
 	}
+	aclMu.Lock()
+	for _, a := range store.List[NetworkACL](s.env.Store, cNetworkACLs) {
+		if _, ok := a.Associations[id]; ok {
+			delete(a.Associations, id)
+			_ = store.Put(s.env.Store, cNetworkACLs, a.ID, a)
+		}
+	}
+	aclMu.Unlock()
 	netMu.Lock()
 	defer netMu.Unlock()
 	for _, t := range store.List[RouteTable](s.env.Store, cRouteTables) {
@@ -548,6 +563,14 @@ func (s *Service) ruleOp(egress, add bool) ec2Op {
 		ruleIDs := q.List("SecurityGroupRuleId")
 		if len(rules) == 0 && (add || len(ruleIDs) == 0) {
 			return nil, core.Errf(http.StatusBadRequest, "MissingParameter", "No IpPermissions were given")
+		}
+		if tags := tagSpecs(q, "security-group-rule"); add && len(tags) > 0 {
+			if err := checkTags(tags); err != nil {
+				return nil, err
+			}
+			for i := range rules {
+				rules[i].Tags = maps.Clone(tags)
+			}
 		}
 		var added []vpc.Rule
 		g, err = s.vpc.UpdateSecurityGroup(g.ID, func(x *vpc.SecurityGroup) error {
@@ -871,40 +894,4 @@ func (s *Service) awsReplaceRouteTableAssociation(q *awsapi.Req) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"newAssociationId": assoc, "associationState": map[string]any{"state": "associated"}}, nil
-}
-
-// ---- network ACLs ----
-
-// awsDescribeNetworkAcls reports each VPC's default network ACL, which allows
-// all traffic (HomeCloud does not filter traffic inside a VPC).
-func (s *Service) awsDescribeNetworkAcls(q *awsapi.Req) (any, error) {
-	if err := q.Authorize("ec2:DescribeNetworkAcls", "*"); err != nil {
-		return nil, err
-	}
-	ids, fs := q.List("NetworkAclId"), filters(q)
-	want := idSet(ids)
-	items := awsapi.Items{}
-	for _, v := range s.vpc.List() {
-		id := "acl-" + strings.TrimPrefix(v.ID, "vpc-")
-		a := attrs{}.set("network-acl-id", id).set("vpc-id", v.ID).set("default", "true").set("owner-id", s.env.AccountID).set("association.subnet-id").tags(nil)
-		assocs := awsapi.Items{}
-		for _, sn := range s.vpc.Subnets() {
-			if sn.VpcID == v.ID {
-				a.set("association.subnet-id", sn.ID)
-				assocs = append(assocs, map[string]any{"networkAclAssociationId": "aclassoc-" + strings.TrimPrefix(sn.ID, "subnet-"), "networkAclId": id, "subnetId": sn.ID})
-			}
-		}
-		if (len(ids) > 0 && !want[id]) || !match(fs, a) {
-			continue
-		}
-		entries := awsapi.Items{}
-		for _, egress := range []bool{false, true} {
-			entries = append(entries,
-				map[string]any{"ruleNumber": 100, "protocol": "-1", "ruleAction": "allow", "egress": egress, "cidrBlock": "0.0.0.0/0"},
-				map[string]any{"ruleNumber": 32767, "protocol": "-1", "ruleAction": "deny", "egress": egress, "cidrBlock": "0.0.0.0/0"})
-		}
-		items = append(items, map[string]any{"networkAclId": id, "vpcId": v.ID, "default": true, "ownerId": s.env.AccountID,
-			"entrySet": entries, "associationSet": assocs, "tagSet": awsapi.Items{}})
-	}
-	return map[string]any{"networkAclSet": items}, nil
 }
