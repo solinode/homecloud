@@ -4,7 +4,7 @@ import Link from "next/link"
 import { Globe, Lock } from "lucide-react"
 
 import { dbHref } from "@/components/rds/shared"
-import { cn } from "@/lib/utils"
+import { Tag } from "@/components/console/tag"
 import { useApi } from "@/lib/hooks"
 import type { DbInstance, DnsRecord, EcsTask, HostedZoneSummary, Instance, LoadBalancer } from "@/lib/types"
 
@@ -103,17 +103,9 @@ export function recordNameError(name: string, zone: string): string | null {
 export function ZoneTypeBadge({ isPrivate, className }: { isPrivate: boolean; className?: string }) {
   const Icon = isPrivate ? Lock : Globe
   return (
-    <span
-      className={cn(
-        "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
-        isPrivate
-          ? "bg-slate-100 text-slate-700 ring-slate-500/20 dark:bg-slate-500/15 dark:text-slate-300 dark:ring-slate-400/20"
-          : "bg-violet-50 text-violet-700 ring-violet-600/20 dark:bg-violet-500/10 dark:text-violet-300 dark:ring-violet-400/20",
-        className,
-      )}
-    >
-      <Icon className="size-3" /> {isPrivate ? "Private" : "Public"}
-    </span>
+    <Tag accent={isPrivate ? "neutral" : "violet"} mono={false} className={className}>
+      <Icon /> {isPrivate ? "Private" : "Public"}
+    </Tag>
   )
 }
 
@@ -213,7 +205,7 @@ export function AliasTargetLink({ alias, targets, loading }: { alias: string; ta
       <Link href={t.href} className="text-primary font-mono text-[13px] hover:underline" onClick={(e) => e.stopPropagation()}>
         {t.kind === "task" ? t.id.slice(0, 12) : t.id}
       </Link>
-      {!t.live && <span className="text-xs text-amber-700 dark:text-amber-400">(not running: no answer)</span>}
+      {!t.live && <span className="text-warning text-xs">(not running: no answer)</span>}
     </span>
   )
 }

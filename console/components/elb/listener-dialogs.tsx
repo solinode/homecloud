@@ -23,10 +23,10 @@ const validPort = (s: string) => /^\d+$/.test(s) && Number(s) >= 1 && Number(s) 
 /** ReprovisionWarning explains that listener changes recreate the load balancer container. */
 export function ReprovisionWarning({ lb }: { lb: LoadBalancer }) {
   return (
-    <Alert className="border-amber-600/30 bg-amber-50 text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300">
+    <Alert variant="warning">
       <AlertTriangle />
       <AlertTitle>Re-provisions the load balancer</AlertTitle>
-      <AlertDescription className="text-current/90">
+      <AlertDescription>
         Adding or removing a listener recreates the load balancer container, so all listeners drop traffic for a few seconds.
         {lb.scheme === "internet-facing" && " Listeners without a fixed host port may be published on a different host port afterwards."}
       </AlertDescription>
@@ -364,7 +364,12 @@ export function AddRuleDialog({ lb, listener, onClose }: { lb: LoadBalancer; lis
             <Input id="ar-host" value={host} onChange={(e) => setHost(e.target.value)} placeholder="api.example.com" className="font-mono" spellCheck={false} />
           </Field>
           {err("cond") && <p className="text-destructive -mt-2 text-xs">{err("cond")}</p>}
-          {serverErr && <p className="text-destructive text-xs" role="alert">{serverErr}</p>}
+          {serverErr && (
+            <Alert variant="destructive">
+              <AlertTriangle />
+              <AlertDescription>{serverErr}</AlertDescription>
+            </Alert>
+          )}
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-[8rem_minmax(0,1fr)]">
             <Field label="Priority" htmlFor="ar-priority" optional error={err("priority")}>
               <Input

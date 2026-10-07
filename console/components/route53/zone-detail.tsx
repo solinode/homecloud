@@ -2,16 +2,20 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { AlertCircle, ArrowLeft, Download, FileText, Info, Loader2, Pencil, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
+import { AlertCircle, AlertTriangle, ArrowLeft, Download, FileText, Info, Loader2, Pencil, Play, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { CopyButton, CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CopyableText } from "@/components/console/copy-button"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
@@ -19,6 +23,7 @@ import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { Tag, recordTypeAccent } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, api, errorMessage, seg } from "@/lib/api"
 import { formatDate } from "@/lib/format"
@@ -101,8 +106,9 @@ export function ZoneDetail() {
             <Button variant="outline" size="sm" onClick={() => setExporting(true)}>
               <FileText /> Export zone file
             </Button>
-            <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeletingZone(true)}>
-              <Trash2 /> Delete zone
+            <ActionsMenu items={[{ label: "Delete hosted zone", icon: <Trash2 />, destructive: true, onSelect: () => setDeletingZone(true) }]} />
+            <Button size="sm" onClick={() => setCreating(true)}>
+              <Plus /> Create record
             </Button>
           </>
         }
@@ -126,7 +132,7 @@ export function ZoneDetail() {
                     value: zone.vpc_ids?.length ? (
                       <span className="flex flex-wrap gap-x-3">
                         {zone.vpc_ids.map((v) => (
-                          <Link key={v} href={`/vpc/?id=${encodeURIComponent(v)}`} className="text-primary font-mono text-[13px] hover:underline">
+                          <Link key={v} href={`/vpc/?id=${encodeURIComponent(v)}`} className="text-primary font-mono text-[13px] whitespace-nowrap hover:underline">
                             {vpcs.data?.find((x) => x.id === v)?.name || v}
                           </Link>
                         ))}
@@ -224,14 +230,25 @@ function RecordsTable({
     {
       id: "name",
       header: "Record name",
-      cell: (r) => <span className="font-mono text-[13px] whitespace-nowrap">{zoneLabel(fqdn(r.record.name, zone.name))}</span>,
+      cell: (r) => <CellText mono>{zoneLabel(fqdn(r.record.name, zone.name))}</CellText>,
       value: (r) => fqdn(r.record.name, zone.name),
     },
-    { id: "type", header: "Type", cell: (r) => <span className="font-mono text-[13px]">{r.record.type}</span>, value: (r) => r.record.type },
+    { id: "type", header: "Type", cell: (r) => <Tag accent={recordTypeAccent(r.record.type)}>{r.record.type}</Tag>, value: (r) => r.record.type },
     {
       id: "routing",
       header: "Routing",
-      cell: (r) => (r.record.alias ? "Alias" : r.generated ? <span className="text-muted-foreground">Generated</span> : "Simple"),
+      cell: (r) =>
+        r.record.alias ? (
+          <Tag accent="brand" mono={false}>
+            Alias
+          </Tag>
+        ) : r.generated ? (
+          <Tag mono={false} className="text-faint">
+            Generated
+          </Tag>
+        ) : (
+          <Tag mono={false}>Simple</Tag>
+        ),
       value: (r) => (r.record.alias ? "Alias" : "Simple"),
       hideBelow: "md",
     },
@@ -406,29 +423,22 @@ function DnsTest({ zone }: { zone: HostedZone }) {
           </Button>
         </div>
         {zone.private && (
-          <p className="text-xs text-amber-700 dark:text-amber-400">
-            The test queries the public view (the LAN DNS port), so records in this private zone do not answer here. Query them from inside the VPC instead, e.g.
-            with Run command on an instance.
-          </p>
+          <Alert variant="warning">
+            <AlertTriangle />
+            <AlertDescription>
+              The test queries the public view (the LAN DNS port), so records in this private zone do not answer here. Query them from inside the VPC instead, e.g.
+              with Run command on an instance.
+            </AlertDescription>
+          </Alert>
         )}
         {result && (
-          <div className="bg-muted/40 flex flex-col gap-1.5 rounded-md border p-3 text-sm" aria-live="polite">
-            <div className="text-muted-foreground text-xs">
-              {result.type || "A"} {result.name}
-            </div>
-            {result.error ? (
-              <p className="text-destructive font-mono text-[13px] break-all">{result.error}</p>
-            ) : answers.length ? (
-              <ul className="flex flex-col gap-0.5">
-                {answers.map((a, i) => (
-                  <li key={i} className="font-mono text-[13px] break-all">
-                    {a}
-                  </li>
-                ))}
-              </ul>
-            ) : (
-              <p className="text-muted-foreground">No answer</p>
-            )}
+          <div className="flex flex-col gap-1.5" aria-live="polite">
+            <CodeBlock
+              title={`${result.type || "A"} ${result.name}`}
+              code={result.error ? result.error : answers.length ? answers.join("\n") : "# No answer"}
+              tone={result.error ? "danger" : undefined}
+              wrap
+            />
             {result.note && <p className="text-muted-foreground text-xs">Note: {result.note}.</p>}
           </div>
         )}
@@ -459,19 +469,16 @@ function ZoneFileDialog({ zone, onClose }: { zone: HostedZone | null; onClose: (
         {error ? (
           <ErrorState error={error} />
         ) : isLoading ? (
-          <p className="text-muted-foreground flex items-center gap-2 text-sm">
-            <Loader2 className="size-4 animate-spin" /> Loading...
-          </p>
+          <Skeleton className="h-64 w-full rounded-lg" />
         ) : (
-          <pre className="bg-muted/50 max-h-[55vh] overflow-auto rounded-md border p-3 font-mono text-xs leading-relaxed">{text}</pre>
+          <CodeBlock code={text} title={zone ? `${zoneLabel(zone.name)}.zone` : "zone file"} maxHeight="55vh" />
         )}
         <DialogFooter>
-          <CopyButton value={text} size="sm" label="Copy" toastMessage="Zone file copied" />
-          <Button variant="outline" size="sm" onClick={download} disabled={!text}>
-            <Download /> Download
-          </Button>
-          <Button size="sm" onClick={onClose}>
+          <Button variant="outline" onClick={onClose}>
             Close
+          </Button>
+          <Button onClick={download} disabled={!text}>
+            <Download /> Download
           </Button>
         </DialogFooter>
       </DialogContent>

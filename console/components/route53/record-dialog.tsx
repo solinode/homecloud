@@ -1,19 +1,21 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Loader2 } from "lucide-react"
+import { Info, Link2, ListOrdered, Loader2, type LucideIcon } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectGroup, SelectItem, SelectLabel, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
 import { Field } from "@/components/console/form-field"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
+import { Tag, recordTypeAccent } from "@/components/console/tag"
 import { api, errorMessage, seg } from "@/lib/api"
 import { revalidate } from "@/lib/hooks"
 import type { DnsRecord, HostedZone, RecordChange } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import {
   R53_PATH,
@@ -32,6 +34,11 @@ import {
 type Routing = "value" | "alias"
 
 const KINDS: AliasKind[] = ["instance", "task", "database", "load-balancer"]
+
+const ROUTINGS: { value: Routing; title: string; description: string; icon: LucideIcon }[] = [
+  { value: "value", title: "IP addresses", description: "Fixed IPv4 addresses you enter.", icon: ListOrdered },
+  { value: "alias", title: "Alias to HomeCloud resource", description: "Follows an instance, task, database or load balancer.", icon: Link2 },
+]
 
 /** Relative name for the name field: "" for the apex, "www" for www.<zone>. */
 function relativeName(name: string, zone: string): string {
@@ -177,7 +184,7 @@ export function RecordDialog({
                 aria-invalid={!!err("name")}
               />
               <span
-                className="bg-muted text-muted-foreground flex max-w-[55%] items-center rounded-r-md border border-l-0 px-2.5 font-mono text-[13px]"
+                className="bg-muted text-muted-foreground flex max-w-[55%] items-center rounded-r-md border border-l-0 px-2.5 font-mono text-[13px] whitespace-nowrap"
                 title={`.${zoneLabel(zone.name)}`}
               >
                 <span className="truncate">.{zoneLabel(zone.name)}</span>
@@ -194,13 +201,13 @@ export function RecordDialog({
                   if (v !== "A") setRouting("value")
                 }}
               >
-                <SelectTrigger id="rec-type" className="w-full font-mono">
+                <SelectTrigger id="rec-type" className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
                   {RECORD_TYPES.map((x) => (
-                    <SelectItem key={x} value={x} className="font-mono">
-                      {x}
+                    <SelectItem key={x} value={x}>
+                      <Tag accent={recordTypeAccent(x)}>{x}</Tag>
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -212,28 +219,13 @@ export function RecordDialog({
           </div>
 
           {type === "A" && (
-            <div className="bg-muted inline-flex self-start rounded-md p-0.5 text-sm" role="tablist" aria-label="Route traffic to">
-              {(
-                [
-                  ["value", "IP addresses"],
-                  ["alias", "Alias to HomeCloud resource"],
-                ] as [Routing, string][]
-              ).map(([k, label]) => (
-                <button
-                  key={k}
-                  type="button"
-                  role="tab"
-                  aria-selected={routing === k}
-                  onClick={() => setRouting(k)}
-                  className={cn(
-                    "rounded px-3 py-1 font-medium transition-colors",
-                    routing === k ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:text-foreground",
-                  )}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
+            <Field label="Answer with">
+              <OptionGroup label="Answer with">
+                {ROUTINGS.map((o) => (
+                  <OptionCard key={o.value} selected={routing === o.value} onSelect={() => setRouting(o.value)} icon={o.icon} title={o.title} description={o.description} />
+                ))}
+              </OptionGroup>
+            </Field>
           )}
 
           {isAlias ? (
@@ -293,9 +285,12 @@ export function RecordDialog({
           )}
 
           {record && renamed && (
-            <p className="text-muted-foreground text-xs">
-              Changing the name or type replaces the {record.type} record {zoneLabel(fqdn(record.name, zone.name))} in one change batch.
-            </p>
+            <Alert variant="info">
+              <Info />
+              <AlertDescription>
+                Changing the name or type replaces the {record.type} record {zoneLabel(fqdn(record.name, zone.name))} in one change batch.
+              </AlertDescription>
+            </Alert>
           )}
 
           <DialogFooter>

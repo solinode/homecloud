@@ -3,18 +3,23 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, Info, Loader2, Rocket, Trash2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, Copy, FileLock, FilePen, HardDrive, Loader2, RefreshCw, Rocket, Server, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 
 import { Button } from "@/components/ui/button"
-import { Skeleton } from "@/components/ui/skeleton"
-import { CopyableText } from "@/components/console/copy-button"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
+import { CopyableText, copyText } from "@/components/console/copy-button"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { TagList } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, seg } from "@/lib/api"
@@ -70,15 +75,41 @@ export function FileSystemDetail() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating}>
-              {isValidating && <Loader2 className="animate-spin" />}
+              {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Refresh
             </Button>
-            <Button variant="destructive" size="sm" onClick={() => setDeleting(true)}>
-              <Trash2 /> Delete
+            <ActionsMenu
+              items={[
+                {
+                  label: "Copy ARN",
+                  icon: <Copy />,
+                  onSelect: async () => {
+                    if (await copyText(fs.arn)) toast.success("ARN copied")
+                  },
+                },
+                { separator: true },
+                { label: "Delete file system", icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(true) },
+              ]}
+            />
+            <Button size="sm" asChild>
+              <Link href="/ec2/launch/">
+                <Rocket /> Launch instance
+              </Link>
             </Button>
           </>
         }
       />
+
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+        <StatTile
+          label="Metered size"
+          value={validTime(fs.size_updated) ? formatBytes(fs.size_bytes) : "-"}
+          caption={validTime(fs.size_updated) ? <>Measured <TimeAgo value={fs.size_updated} /></> : "Not measured yet"}
+          icon={<HardDrive />}
+        />
+        <StatTile label="Mounted by" value={fs.mounted_by.length} unit={fs.mounted_by.length === 1 ? "instance" : "instances"} tone={fs.mounted_by.length ? "success" : "neutral"} icon={<Server />} />
+        <StatTile label="Access" value={fs.read_only ? "Read-only" : "Read/write"} caption={fs.read_only ? "Instances mount it read-only" : "Instances can write"} icon={fs.read_only ? <FileLock /> : <FilePen />} />
+      </div>
 
       <Section title="General">
         <KeyValueGrid
@@ -100,7 +131,16 @@ export function FileSystemDetail() {
                 <span className="text-muted-foreground">Not measured yet</span>
               ),
             },
-            { label: "Access", value: fs.read_only ? "Read-only (instances mount it read-only)" : "Read/write" },
+            {
+              label: "Access",
+              value: fs.read_only ? (
+                <Tag accent="info" mono={false}>
+                  Read-only
+                </Tag>
+              ) : (
+                <Tag mono={false}>Read/write</Tag>
+              ),
+            },
             { label: "Created", value: <span>{formatDate(fs.created_at)} (<TimeAgo value={fs.created_at} />)</span> },
             { label: "ARN", value: <CopyableText value={fs.arn} />, wide: true },
           ]}
@@ -120,87 +160,92 @@ export function FileSystemDetail() {
 
 function MountsSection({ fs }: { fs: FileSystem }) {
   const instances = useApi<Instance[]>("/api/v1/ec2/instances", { refreshInterval: 15_000 })
-  const mounts = (instances.data ?? [])
+  const mounts: MountRow[] = (instances.data ?? [])
     .filter((i) => i.state !== "terminated")
-    .flatMap((i) => (i.file_systems ?? []).filter((m) => m.file_system_id === fs.id).map((m) => ({ inst: i, m })))
+    .flatMap((i) => (i.file_systems ?? []).filter((m) => m.file_system_id === fs.id).map((m) => ({ inst: i, path: m.mount_path, readOnly: !!m.read_only })))
+
+  const columns: Column<MountRow>[] = [
+    {
+      id: "instance",
+      header: "Instance",
+      cell: ({ inst }) => (
+        <span className="flex min-w-0 items-center gap-2">
+          <CellLink href={`/ec2/instance/?id=${encodeURIComponent(inst.id)}`} mono={!inst.name} title={inst.id}>
+            {inst.name || inst.id}
+          </CellLink>
+          {inst.name && <span className="text-muted-foreground hidden font-mono text-xs whitespace-nowrap sm:inline">{inst.id}</span>}
+        </span>
+      ),
+      value: ({ inst }) => inst.name || inst.id,
+    },
+    { id: "state", header: "State", cell: ({ inst }) => <StatusBadge status={inst.state} />, value: ({ inst }) => inst.state },
+    { id: "path", header: "Mount path", cell: (r) => <CellText mono>{r.path}</CellText>, value: (r) => r.path },
+    {
+      id: "access",
+      header: "Access",
+      cell: (r) =>
+        r.readOnly ? (
+          <Tag accent="info" mono={false}>
+            Read-only
+          </Tag>
+        ) : (
+          <Tag mono={false}>Read/write</Tag>
+        ),
+      value: (r) => (r.readOnly ? "Read-only" : "Read/write"),
+      hideBelow: "sm",
+    },
+  ]
+
+  const apiSnippet = `"file_systems": [{"file_system_id": "${fs.id}", "mount_path": "/mnt/efs"${fs.read_only ? ', "read_only": true' : ""}}]`
 
   return (
-    <Section
-      title={`Mounted by (${fs.mounted_by.length})`}
-      description="Instances that mount this file system. Every instance sees the same files."
-      flush
-      actions={
-        <Button variant="outline" size="sm" asChild>
-          <Link href="/ec2/launch/">
-            <Rocket /> Launch instance
-          </Link>
-        </Button>
-      }
-    >
-      {instances.error ? (
-        <div className="p-4">
-          <ErrorState error={instances.error} onRetry={() => instances.mutate()} />
+    <>
+      <DataTable
+        title="Mounted by"
+        description="Instances that mount this file system. Every instance sees the same files."
+        data={instances.data || !fs.mounted_by.length ? mounts : undefined}
+        columns={columns}
+        rowId={(r) => `${r.inst.id}:${r.path}`}
+        loading={!instances.data && !instances.error && fs.mounted_by.length > 0}
+        error={instances.error}
+        onRetry={() => instances.mutate()}
+        noSearch={mounts.length < 6}
+        empty={
+          <EmptyState
+            icon={Server}
+            title="No instance mounts this file system"
+            description="File systems are attached when an instance launches."
+            action={
+              <Button size="sm" variant="outline" asChild>
+                <Link href="/ec2/launch/">
+                  <Rocket /> Launch instance
+                </Link>
+              </Button>
+            }
+          />
+        }
+      />
+      <Section title="How to mount" description="File systems are attached when an instance launches.">
+        <div className="flex flex-col gap-3 text-sm">
+          <p className="text-muted-foreground">
+            In the{" "}
+            <Link href="/ec2/launch/" className="text-primary hover:underline">
+              launch wizard
+            </Link>
+            , add this file system under <span className="text-foreground">File systems</span> with a mount path such as{" "}
+            <span className="text-foreground font-mono text-[13px]">/mnt/efs</span>. Via the API, pass this to RunInstances:
+          </p>
+          <CodeBlock code={apiSnippet} title="RunInstances" wrap />
         </div>
-      ) : !instances.data && fs.mounted_by.length > 0 ? (
-        <div className="flex flex-col gap-2 p-4">
-          <Skeleton className="h-6 w-full" />
-          <Skeleton className="h-6 w-full" />
-        </div>
-      ) : mounts.length ? (
-        <div className="overflow-x-auto">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 border-b">
-                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Instance</th>
-                <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">State</th>
-                <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Mount path</th>
-                <th className="text-muted-foreground px-4 py-2 text-left text-xs font-semibold">Access</th>
-              </tr>
-            </thead>
-            <tbody>
-              {mounts.map(({ inst, m }) => (
-                <tr key={`${inst.id}:${m.mount_path}`} className="border-b last:border-0">
-                  <td className="px-4 py-2">
-                    <Link href={`/ec2/instance/?id=${encodeURIComponent(inst.id)}`} className="text-primary hover:underline">
-                      {inst.name ? (
-                        <>
-                          {inst.name} <span className="text-muted-foreground font-mono text-xs">{inst.id}</span>
-                        </>
-                      ) : (
-                        <span className="font-mono text-[13px]">{inst.id}</span>
-                      )}
-                    </Link>
-                  </td>
-                  <td className="px-3 py-2">
-                    <StatusBadge status={inst.state} />
-                  </td>
-                  <td className="px-3 py-2 font-mono text-[13px]">{m.mount_path}</td>
-                  <td className="px-4 py-2 whitespace-nowrap">{m.read_only ? "Read-only" : "Read/write"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      ) : (
-        <p className="text-muted-foreground p-4 text-sm">No instance mounts this file system.</p>
-      )}
-      <div className="text-muted-foreground flex gap-2 border-t p-4 text-sm">
-        <Info className="mt-0.5 size-4 shrink-0" />
-        <span>
-          <span className="text-foreground font-medium">How to mount:</span> file systems are attached when an instance launches. In the{" "}
-          <Link href="/ec2/launch/" className="text-primary hover:underline">
-            launch wizard
-          </Link>
-          , add this file system under <span className="text-foreground">File systems</span> with a mount path such as{" "}
-          <span className="text-foreground font-mono text-[13px]">/mnt/efs</span>. Via the API, pass{" "}
-          <span className="text-foreground font-mono text-[13px] break-all">
-            {`"file_systems": [{"file_system_id": "${fs.id}", "mount_path": "/mnt/efs"${fs.read_only ? ', "read_only": true' : ""}}]`}
-          </span>{" "}
-          to RunInstances.
-        </span>
-      </div>
-    </Section>
+      </Section>
+    </>
   )
+}
+
+interface MountRow {
+  inst: Instance
+  path: string
+  readOnly: boolean
 }
 
 function BackButton() {

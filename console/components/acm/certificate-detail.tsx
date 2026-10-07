@@ -7,8 +7,9 @@ import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
-import { CopyButton, CopyableText } from "@/components/console/copy-button"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
+import { CopyableText } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -16,6 +17,7 @@ import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { TagList } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, api, errorMessage, seg } from "@/lib/api"
@@ -55,14 +57,13 @@ function PemBlock({ title, pem, filename }: { title: string; pem: string; filena
       title={title}
       actions={
         <>
-          <CopyButton value={pem} size="sm" label="Copy" toastMessage={`${title} copied`} />
           <Button variant="outline" size="sm" onClick={download}>
             <Download /> Download
           </Button>
         </>
       }
     >
-      <pre className="bg-muted/50 max-h-72 overflow-auto rounded-md border p-3 font-mono text-[11px] leading-relaxed">{pem}</pre>
+      <CodeBlock code={pem} title={filename} wrap maxHeight="18rem" copyLabel="Copy PEM" />
     </Section>
   )
 }
@@ -120,11 +121,6 @@ export function CertificateDetail() {
     }
   }
 
-  const deleteButton = (
-    <Button variant="outline" size="sm" className="text-destructive hover:text-destructive" onClick={() => setDeleting(true)} disabled={inUse}>
-      <Trash2 /> Delete
-    </Button>
-  )
 
   return (
     <div className="flex flex-col gap-4">
@@ -143,30 +139,32 @@ export function CertificateDetail() {
             <Button variant="outline" size="sm" onClick={() => mutate()} aria-label="Refresh">
               <RefreshCw className={cn(isValidating && "animate-spin")} />
             </Button>
+            <ActionsMenu
+              items={[
+                {
+                  label: "Delete certificate",
+                  icon: <Trash2 />,
+                  destructive: true,
+                  disabled: inUse,
+                  hint: inUse ? "In use by a load balancer listener. Remove the listener or switch it to another certificate first." : undefined,
+                  onSelect: () => setDeleting(true),
+                },
+              ]}
+            />
             {c.type === "PRIVATE" && (
-              <Button variant="outline" size="sm" onClick={renew} disabled={renewing}>
+              <Button size="sm" onClick={renew} disabled={renewing}>
                 {renewing ? <Loader2 className="animate-spin" /> : <RotateCcw />} Renew
               </Button>
-            )}
-            {inUse ? (
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <span tabIndex={0}>{deleteButton}</span>
-                </TooltipTrigger>
-                <TooltipContent className="max-w-64">In use by a load balancer listener. Remove the listener or switch it to another certificate first.</TooltipContent>
-              </Tooltip>
-            ) : (
-              deleteButton
             )}
           </>
         }
       />
 
       {(expired || left < EXPIRY_WARNING_DAYS) && (
-        <Alert variant={expired ? "destructive" : "default"} className={cn(!expired && "border-amber-600/30 bg-amber-50 text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300")}>
+        <Alert variant={expired ? "destructive" : "warning"}>
           <AlertTriangle />
           <AlertTitle>{expired ? "This certificate has expired" : `This certificate expires in ${left} day${left === 1 ? "" : "s"}`}</AlertTitle>
-          <AlertDescription className="text-current/90">
+          <AlertDescription>
             {c.type === "PRIVATE"
               ? "Renew it to issue fresh certificate material under the same ARN; listeners using it pick it up automatically."
               : "Import a renewed certificate and switch the listeners to it."}
@@ -213,10 +211,12 @@ export function CertificateDetail() {
           <ul className="flex flex-col gap-1 text-sm">
             {users.map((u) => (
               <li key={`${u.lb}:${u.port}`}>
-                <Link href={`/elb/load-balancer/?name=${encodeURIComponent(u.lb)}&tab=listeners`} className="text-primary hover:underline">
+              <span className="inline-flex items-center gap-2">
+                <Link href={`/elb/load-balancer/?name=${encodeURIComponent(u.lb)}&tab=listeners`} className="text-primary font-medium whitespace-nowrap hover:underline">
                   {u.lb}
-                </Link>{" "}
-                <span className="text-muted-foreground font-mono text-xs">HTTPS:{u.port}</span>
+                </Link>
+                <Tag accent="success">HTTPS:{u.port}</Tag>
+              </span>
               </li>
             ))}
           </ul>

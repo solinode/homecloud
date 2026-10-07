@@ -3,9 +3,10 @@
 import { useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, Info, Loader2, Pencil, Plus, Target } from "lucide-react"
+import { AlertCircle, ArrowLeft, Info, Loader2, Pencil, Plus, RefreshCw, Target } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
@@ -18,6 +19,9 @@ import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
+import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, api, seg } from "@/lib/api"
 import { formatDate, pluralize } from "@/lib/format"
@@ -141,35 +145,60 @@ export function TargetGroupDetail() {
     <div className="flex flex-col gap-4">
       <PageHeader
         title={tg.name}
+        badge={
+          c.total ? (
+            <StatusBadge
+              status={c.unhealthy ? "unhealthy" : c.healthy === c.total ? "healthy" : "partial"}
+              tone={c.unhealthy ? "danger" : c.healthy === c.total ? "success" : "neutral"}
+              label={`${c.healthy}/${c.total} healthy`}
+            />
+          ) : (
+            <StatusBadge status="empty" tone="neutral" label="No targets" />
+          )
+        }
         description={
           <span>
-            Target group · <span className="font-mono text-[13px]">{tg.protocol}:{tg.port}</span> · {pluralize(c.total, "target")}, {c.healthy} healthy
+            Target group · <span className="font-mono text-[13px]">{tg.protocol}:{tg.port}</span> · {pluralize(c.total, "target")}
           </span>
         }
         breadcrumbs={crumbs}
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating} aria-label="Refresh">
-              {isValidating ? <Loader2 className="animate-spin" /> : null}
+              {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Refresh
             </Button>
+            <ActionsMenu items={actionItems} />
             <Button size="sm" onClick={() => setRegistering(true)}>
               <Plus /> Register targets
             </Button>
-            <ActionsMenu items={actionItems} />
           </>
         }
       />
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Targets" value={c.total} icon={<Target />} />
+        <StatTile label="Healthy" value={c.healthy} tone={c.healthy ? "success" : "neutral"} />
+        <StatTile label="Unhealthy" value={c.unhealthy} tone={c.unhealthy ? "danger" : "neutral"} />
+        <StatTile label="Other" value={c.other} tone={c.other ? "warning" : "neutral"} caption="Initial, unused or unavailable" />
+      </div>
 
       <Section title="Details">
         <KeyValueGrid
           columns={4}
           items={[
-            { label: "Protocol : Port", value: <span className="font-mono text-[13px]">{tg.protocol}:{tg.port}</span> },
+            {
+              label: "Protocol : Port",
+              value: (
+                <Tag accent={tg.protocol === "HTTPS" ? "success" : "info"}>
+                  {tg.protocol}:{tg.port}
+                </Tag>
+              ),
+            },
             {
               label: "VPC",
               value: (
-                <Link href={vpcHref(tg.vpc_id)} className="text-primary font-mono text-[13px] hover:underline">
+                <Link href={vpcHref(tg.vpc_id)} className="text-primary font-mono text-[13px] whitespace-nowrap hover:underline">
                   {tg.vpc_id}
                 </Link>
               ),
@@ -187,18 +216,16 @@ export function TargetGroupDetail() {
               ),
             },
             { label: "Created", value: <span>{formatDate(tg.created_at)} (<TimeAgo value={tg.created_at} />)</span> },
-            { label: "Total targets", value: String(c.total) },
-            { label: "Healthy", value: <span className={c.healthy ? "text-emerald-700 dark:text-emerald-400" : undefined}>{c.healthy}</span> },
-            { label: "Unhealthy", value: <span className={c.unhealthy ? "text-red-700 dark:text-red-400" : undefined}>{c.unhealthy}</span> },
-            { label: "Other", value: String(c.other) },
+            { label: "Health check", value: <span className="font-mono text-[13px]">{tg.health_check.path}</span> },
             { label: "ARN", value: <CopyableText value={tg.arn} />, wide: true },
           ]}
         />
       </Section>
 
       {ecsServices.length > 0 && (
-        <p className="bg-muted/40 flex gap-2 rounded-md border p-3 text-sm">
-          <Info className="text-muted-foreground mt-0.5 size-4 shrink-0" />
+        <Alert variant="info">
+          <Info />
+          <AlertDescription>
           <span>
             Targets are managed by ECS service{ecsServices.length > 1 ? "s" : ""}{" "}
             {ecsServices.map((s, i) => (
@@ -211,13 +238,14 @@ export function TargetGroupDetail() {
             ))}
             : running tasks are registered and stopped tasks deregistered automatically.
           </span>
-        </p>
+          </AlertDescription>
+        </Alert>
       )}
       {!usedBy.length && c.total > 0 && (
-        <p className="text-muted-foreground flex gap-2 text-sm">
-          <Info className="mt-0.5 size-4 shrink-0" />
-          Targets are health-checked only while an active load balancer forwards to this group, so they show as Unused.
-        </p>
+        <Alert>
+          <Info />
+          <AlertDescription>Targets are health-checked only while an active load balancer forwards to this group, so they show as Unused.</AlertDescription>
+        </Alert>
       )}
 
       <Tabs value={tab} onValueChange={(v) => setParam("tab", v === "targets" ? null : v)}>
@@ -307,7 +335,7 @@ export function TargetGroupDetail() {
               ))}
             </ul>
             {ecsServices.length > 0 && (deregistering ?? []).some((t) => !t.id.startsWith("i-")) && (
-              <p className="text-amber-700 dark:text-amber-400">ECS re-registers running service tasks when they are replaced.</p>
+              <p className="text-warning">ECS re-registers running service tasks when they are replaced.</p>
             )}
           </div>
         }
@@ -328,7 +356,7 @@ function TargetName({ target, instance }: { target: ElbTarget; instance?: Instan
   if (instance) {
     return (
       <span className="flex flex-col">
-        <span className="font-medium">{instance.name || "-"}</span>
+        <span className="max-w-[16rem] truncate font-medium whitespace-nowrap" title={instance.name}>{instance.name || "-"}</span>
         {instance.state !== "running" && <span className="text-muted-foreground text-xs">Instance {instance.state}</span>}
       </span>
     )

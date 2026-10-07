@@ -1,18 +1,20 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Plus, Target } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
+import { StatusDot } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { LoadBalancer, TargetGroup } from "@/lib/types"
+import { cn } from "@/lib/utils"
 import { CreateTargetGroupDialog, DeleteTargetGroupDialog, EditHealthCheckDialog, RegisterTargetsDialog } from "./tg-dialogs"
 import { LbLink, healthCounts, lbsUsing, tgHref, useLoadBalancers, useTargetGroups, vpcHref } from "./shared"
 
@@ -20,11 +22,19 @@ function TargetSummary({ tg }: { tg: TargetGroup }) {
   const c = healthCounts(tg.targets)
   if (!c.total) return <span className="text-muted-foreground">0</span>
   return (
-    <span className="whitespace-nowrap">
-      {c.total}
-      <span className="text-muted-foreground"> · </span>
-      <span className={c.healthy ? "text-emerald-700 dark:text-emerald-400" : "text-muted-foreground"}>{c.healthy} healthy</span>
-      {c.unhealthy > 0 && <span className="text-red-700 dark:text-red-400">, {c.unhealthy} unhealthy</span>}
+    <span className="inline-flex items-center gap-2 whitespace-nowrap">
+      <span className="tabular-nums">{c.total}</span>
+      <span className="text-muted-foreground">·</span>
+      <span className={cn("inline-flex items-center gap-1.5", c.healthy ? "text-success" : "text-muted-foreground")}>
+        <StatusDot tone={c.healthy ? "success" : "neutral"} />
+        {c.healthy} healthy
+      </span>
+      {c.unhealthy > 0 && (
+        <span className="text-danger inline-flex items-center gap-1.5">
+          <StatusDot tone="danger" />
+          {c.unhealthy} unhealthy
+        </span>
+      )}
     </span>
   )
 }
@@ -34,14 +44,14 @@ function makeColumns(lbs: LoadBalancer[] | undefined): Column<TargetGroup>[] {
     {
       id: "name",
       header: "Name",
-      cell: (tg) => (
-        <Link href={tgHref(tg.name)} onClick={(e) => e.stopPropagation()} className="text-primary font-medium whitespace-nowrap hover:underline">
-          {tg.name}
-        </Link>
-      ),
+      cell: (tg) => <CellLink href={tgHref(tg.name)}>{tg.name}</CellLink>,
       value: (tg) => tg.name,
     },
-    { id: "port", header: "Protocol : Port", cell: (tg) => <span className="font-mono text-[13px]">{tg.protocol}:{tg.port}</span>, value: (tg) => tg.port },
+    { id: "port", header: "Protocol : Port", cell: (tg) => (
+        <Tag accent={tg.protocol === "HTTPS" ? "success" : "info"}>
+          {tg.protocol}:{tg.port}
+        </Tag>
+      ), value: (tg) => tg.port },
     { id: "targets", header: "Targets", cell: (tg) => <TargetSummary tg={tg} />, value: (tg) => tg.targets.length },
     {
       id: "lbs",
@@ -76,9 +86,9 @@ function makeColumns(lbs: LoadBalancer[] | undefined): Column<TargetGroup>[] {
       id: "vpc",
       header: "VPC",
       cell: (tg) => (
-        <Link href={vpcHref(tg.vpc_id)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] whitespace-nowrap hover:underline">
+        <CellLink href={vpcHref(tg.vpc_id)} mono>
           {tg.vpc_id}
-        </Link>
+        </CellLink>
       ),
       value: (tg) => tg.vpc_id,
       hideBelow: "lg",

@@ -1,14 +1,14 @@
 "use client"
 
 import { useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { BadgeCheck, FileUp, Plus } from "lucide-react"
 import { toast } from "sonner"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { StatusBadge } from "@/components/console/status-badge"
@@ -41,14 +41,14 @@ export function CertificatesList() {
       cell: (c) => {
         const extra = certNames(c).length - 1
         return (
-          <span className="flex flex-wrap items-center gap-x-1.5">
-            <Link href={certHref(c.id)} onClick={(e) => e.stopPropagation()} className={`${cellLinkClass()} font-mono text-[13px]`}>
+          <span className="flex items-center gap-1.5">
+            <CellLink href={certHref(c.id)} mono max="18rem">
               {c.domain_name}
-            </Link>
+            </CellLink>
             {extra > 0 && (
-              <span className="text-muted-foreground text-xs" title={certNames(c).slice(1).join(", ")}>
-                +{extra} more
-              </span>
+              <Badge variant="secondary" className="font-normal" title={certNames(c).slice(1).join(", ")}>
+                +{extra}
+              </Badge>
             )}
           </span>
         )
@@ -62,13 +62,19 @@ export function CertificatesList() {
       header: "In use",
       cell: (c) => {
         const u = inUse(c)
-        return u.length ? <StatusBadge status="in-use" label={`Yes (${u.map((x) => `${x.lb}:${x.port}`).join(", ")})`} /> : <span className="text-muted-foreground">No</span>
+        return u.length ? (
+          <span title={u.map((x) => `${x.lb}:${x.port}`).join(", ")}>
+            <StatusBadge status="in-use" label={u.length === 1 ? `In use (${u[0].lb}:${u[0].port})` : `In use (${u.length} listeners)`} />
+          </span>
+        ) : (
+          <span className="text-muted-foreground">No</span>
+        )
       },
       value: (c) => inUse(c).length,
       hideBelow: "lg",
     },
     { id: "expires", header: "Expires", cell: (c) => <ExpiryCell cert={c} />, value: (c) => c.not_after },
-    { id: "issuer", header: "Issuer", cell: (c) => <span className="line-clamp-1 max-w-56">{c.issuer}</span>, value: (c) => c.issuer, hideBelow: "lg" },
+    { id: "issuer", header: "Issuer", cell: (c) => <CellText muted max="14rem">{c.issuer}</CellText>, value: (c) => c.issuer, hideBelow: "lg" },
     { id: "created", header: "Created", cell: (c) => <TimeAgo value={c.created_at} />, value: (c) => c.created_at, hideBelow: "sm" },
   ]
 

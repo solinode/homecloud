@@ -9,12 +9,13 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { FormDialog } from "@/components/console/form-dialog"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { Tag } from "@/components/console/tag"
 import { api, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { InternetGateway, RouteTable, Subnet } from "@/lib/types"
@@ -23,6 +24,14 @@ import { useVpcs, VpcLink, VpcSelect } from "./common"
 import { IGW_PATH } from "./internet-gateways"
 
 const RTB_PATH = "/api/v1/ec2/route-tables"
+
+interface RouteRow {
+  destination: string
+  target: string
+  origin: string
+  /** the implicit VPC-local route (cannot be removed) */
+  local?: boolean
+}
 
 export function RouteTables() {
   const { data, error, isLoading, isValidating, mutate } = useApi<RouteTable[]>(RTB_PATH)
@@ -54,13 +63,51 @@ export function RouteTables() {
   const vpcIgws = (igws.data ?? []).filter((g) => g.vpc_id === sel?.vpc_id)
   const freeSubnets = (subnets.data ?? []).filter((s) => s.vpc_id === sel?.vpc_id && !sel?.associations?.some((a) => a.subnet_id === s.id))
 
+  const routeRows: RouteRow[] = sel
+    ? [
+        { destination: vpcs.data?.find((v) => v.id === sel.vpc_id)?.cidr ?? "VPC range", target: "local", origin: "CreateRouteTable", local: true },
+        ...(sel.routes ?? []).map((r) => ({ destination: r.destination, target: r.gateway_id || r.target || "", origin: r.origin })),
+      ]
+    : []
+  const routeColumns: Column<RouteRow>[] = [
+    { id: "dest", header: "Destination", cell: (r) => <span className="font-mono text-[13px] whitespace-nowrap">{r.destination}</span>, value: (r) => r.destination },
+    {
+      id: "target",
+      header: "Target",
+      cell: (r) => (r.local ? <Tag mono={false}>local</Tag> : <CellText mono>{r.target}</CellText>),
+      value: (r) => r.target,
+    },
+    { id: "origin", header: "Origin", cell: (r) => <CellText muted>{r.origin}</CellText>, value: (r) => r.origin, hideBelow: "sm" },
+    {
+      id: "actions",
+      header: "",
+      className: "w-12 text-right",
+      cell: (r) =>
+        r.local ? null : (
+          <Button variant="ghost" size="icon" className="size-8" aria-label={`Remove route ${r.destination}`} onClick={() => setRemoveRoute(r.destination)}>
+            <Trash2 />
+          </Button>
+        ),
+    },
+  ]
+
   const columns: Column<RouteTable>[] = [
-    { id: "name", header: "Name", cell: (t) => t.tags?.Name || <span className="text-muted-foreground">-</span>, value: (t) => t.tags?.Name },
-    { id: "id", header: "Route table ID", cell: (t) => <span className="font-mono text-[13px] font-medium">{t.id}</span>, value: (t) => t.id },
+    { id: "name", header: "Name", cell: (t) => <CellText>{t.tags?.Name}</CellText>, value: (t) => t.tags?.Name },
+    { id: "id", header: "Route table ID", cell: (t) => <CellText mono className="font-medium">{t.id}</CellText>, value: (t) => t.id },
     { id: "vpc", header: "VPC", cell: (t) => <span onClick={(e) => e.stopPropagation()}><VpcLink id={t.vpc_id} vpcs={vpcs.data} /></span>, value: (t) => t.vpc_id },
     { id: "routes", header: "Routes", cell: (t) => (t.routes ?? []).length + 1, value: (t) => (t.routes ?? []).length + 1, hideBelow: "sm" },
     { id: "assoc", header: "Subnet associations", cell: (t) => (t.associations ?? []).filter((a) => a.subnet_id).length, value: (t) => (t.associations ?? []).length, hideBelow: "sm" },
-    { id: "main", header: "Main", cell: (t) => ((t.associations ?? []).some((a) => a.main) ? "Yes" : "No"), value: (t) => ((t.associations ?? []).some((a) => a.main) ? 1 : 0), hideBelow: "md" },
+    {
+      id: "main",
+      header: "Main",
+      cell: (t) =>
+        (t.associations ?? []).some((a) => a.main) ? (
+          <Tag accent="brand" mono={false}>
+            Main
+          </Tag>
+        ) : (
+          <span className="text-muted-foreground">No</span>
+        ), value: (t) => ((t.associations ?? []).some((a) => a.main) ? 1 : 0), hideBelow: "md" },
   ]
 
   return (
@@ -99,52 +146,43 @@ export function RouteTables() {
             </Button>
           </>
         }
-        empty={<EmptyState icon={RouteIcon} title="No route tables" description="Create a route table for a VPC." />}
+        empty={
+          <EmptyState
+            icon={RouteIcon}
+            title="No route tables"
+            description="Create a route table for a VPC."
+            action={
+              <Button size="sm" onClick={() => open("create")}>
+                <Plus /> Create route table
+              </Button>
+            }
+          />
+        }
       />
       {sel && (
         <div className="grid gap-4 lg:grid-cols-2">
-          <Section title={`Routes of ${sel.id}`} flush>
-            <table className="w-full text-sm">
-              <thead className="text-muted-foreground border-b text-left">
-                <tr>
-                  <th className="px-4 py-2 font-medium">Destination</th>
-                  <th className="px-4 py-2 font-medium">Target</th>
-                  <th className="px-4 py-2 font-medium">Origin</th>
-                  <th />
-                </tr>
-              </thead>
-              <tbody>
-                <tr className="border-b">
-                  <td className="px-4 py-2 font-mono text-[13px]">{vpcs.data?.find((v) => v.id === sel.vpc_id)?.cidr ?? "VPC range"}</td>
-                  <td className="px-4 py-2">local</td>
-                  <td className="text-muted-foreground px-4 py-2">CreateRouteTable</td>
-                  <td />
-                </tr>
-                {(sel.routes ?? []).map((r) => (
-                  <tr key={r.destination} className="border-b last:border-0">
-                    <td className="px-4 py-2 font-mono text-[13px]">{r.destination}</td>
-                    <td className="px-4 py-2 font-mono text-[13px]">{r.gateway_id || r.target}</td>
-                    <td className="text-muted-foreground px-4 py-2">{r.origin}</td>
-                    <td className="px-2 py-1 text-right">
-                      <Button variant="ghost" size="icon" aria-label={`Remove route ${r.destination}`} onClick={() => setRemoveRoute(r.destination)}>
-                        <Trash2 />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </Section>
+          <DataTable
+            title={`Routes of ${sel.id}`}
+            data={routeRows}
+            columns={routeColumns}
+            rowId={(r) => r.destination}
+            noSearch
+          />
           <Section title="Subnet associations" flush>
             {(sel.associations ?? []).length === 0 ? (
-              <p className="text-muted-foreground p-4 text-sm">No associations.</p>
+              <p className="text-muted-foreground p-5 text-sm">No associations.</p>
             ) : (
               <ul>
                 {(sel.associations ?? []).map((a) => (
-                  <li key={a.id} className="flex items-center justify-between border-b px-4 py-2 text-sm last:border-0">
-                    <span>
-                      <span className="font-mono text-[13px]">{a.subnet_id ?? "Main (all subnets without an association)"}</span>
-                      <span className="text-muted-foreground ml-2 font-mono text-xs">{a.id}</span>
+                  <li key={a.id} className="flex items-center justify-between gap-3 border-b px-5 py-2.5 text-sm last:border-0">
+                    <span className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5">
+                      {a.main && (
+                        <Tag accent="brand" mono={false}>
+                          Main
+                        </Tag>
+                      )}
+                      <span className="font-mono text-[13px]">{a.subnet_id ?? "All subnets without an association"}</span>
+                      <span className="text-muted-foreground font-mono text-xs">{a.id}</span>
                     </span>
                     {!a.main && (
                       <Button

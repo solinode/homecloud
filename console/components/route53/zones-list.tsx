@@ -10,12 +10,14 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Textarea } from "@/components/ui/textarea"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { CopyButton } from "@/components/console/copy-button"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage } from "@/lib/api"
@@ -31,7 +33,7 @@ function VpcList({ ids, vpcs }: { ids?: string[] | null; vpcs?: Vpc[] }) {
   return (
     <span className="flex flex-wrap gap-x-2">
       {ids.map((id) => (
-        <Link key={id} href={`/vpc/?id=${encodeURIComponent(id)}`} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] hover:underline">
+        <Link key={id} href={`/vpc/?id=${encodeURIComponent(id)}`} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] whitespace-nowrap hover:underline">
           {vpcs?.find((v) => v.id === id)?.name || id}
         </Link>
       ))}
@@ -54,9 +56,9 @@ export function ZonesList() {
       id: "name",
       header: "Hosted zone name",
       cell: (z) => (
-        <Link href={zoneHref(z.id)} onClick={(e) => e.stopPropagation()} className={`${cellLinkClass()} font-mono text-[13px]`}>
+        <CellLink href={zoneHref(z.id)} mono>
           {zoneLabel(z.name)}
-        </Link>
+        </CellLink>
       ),
       value: (z) => z.name,
     },
@@ -73,7 +75,7 @@ export function ZonesList() {
       id: "id",
       header: "Hosted zone ID",
       cell: (z) => (
-        <span className="inline-flex items-center gap-1 font-mono text-[13px]">
+        <span className="inline-flex items-center gap-1 font-mono text-[13px] whitespace-nowrap">
           {z.id}
           <CopyButton value={z.id} label="Copy zone ID" />
         </span>
@@ -81,7 +83,11 @@ export function ZonesList() {
       value: (z) => z.id,
       hideBelow: "lg",
     },
-    { id: "comment", header: "Description", cell: (z) => <span className="line-clamp-1 max-w-64">{z.comment || <span className="text-muted-foreground">-</span>}</span>, value: (z) => z.comment, hideBelow: "lg" },
+    { id: "comment", header: "Description", cell: (z) => (
+        <CellText muted max="16rem">
+          {z.comment}
+        </CellText>
+      ), value: (z) => z.comment, hideBelow: "lg" },
     { id: "created", header: "Created", cell: (z) => <TimeAgo value={z.created_at} />, value: (z) => z.created_at, hideBelow: "sm" },
   ]
 
@@ -194,42 +200,23 @@ function CreateZoneDialog({ open, onOpenChange, vpcs }: { open: boolean; onOpenC
           <Field label="Domain name" htmlFor="zone-name" error={touched || name ? nameErr : undefined} help="e.g. corp.internal or home.arpa">
             <Input id="zone-name" autoFocus value={name} onChange={(e) => setName(e.target.value)} placeholder="corp.internal" className="font-mono" spellCheck={false} autoComplete="off" />
           </Field>
-          <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium">Type</span>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2" role="radiogroup" aria-label="Zone type">
-              {TYPES.map((t) => {
-                const active = isPrivate === t.value
-                return (
-                  <button
-                    key={t.label}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    onClick={() => setPrivate(t.value)}
-                    className={cn(
-                      "flex flex-col gap-1 rounded-lg border p-3 text-left transition-colors",
-                      active ? "border-primary bg-primary/5 ring-primary ring-1 dark:bg-primary/10" : "hover:bg-muted/50",
-                    )}
-                  >
-                    <span className="flex items-center gap-2 text-sm font-medium">
-                      <t.icon className="size-4" /> {t.label}
-                    </span>
-                    <span className="text-muted-foreground text-xs">{t.blurb}</span>
-                  </button>
-                )
-              })}
-            </div>
-          </div>
+          <Field label="Type">
+            <OptionGroup label="Zone type">
+              {TYPES.map((t) => (
+                <OptionCard key={t.label} selected={isPrivate === t.value} onSelect={() => setPrivate(t.value)} icon={t.icon} title={t.label} description={t.blurb} />
+              ))}
+            </OptionGroup>
+          </Field>
           {isPrivate && (
             <Field label="VPCs to associate" optional help="Leave all unchecked to answer in every VPC.">
               {!vpcs ? (
-                <p className="text-muted-foreground text-sm">Loading VPCs...</p>
+                <Skeleton className="h-20 w-full rounded-lg" />
               ) : (
-                <div className="divide-y rounded-md border">
+                <div className="divide-y rounded-lg border">
                   {vpcs.map((v) => (
-                    <label key={v.id} className="flex cursor-pointer items-center gap-3 px-3 py-2 text-sm">
+                    <label key={v.id} className={cn("flex cursor-pointer items-center gap-3 px-3 py-2 text-sm", vpcIds.includes(v.id) ? "bg-brand-soft" : "hover:bg-muted/50")}>
                       <Checkbox checked={vpcIds.includes(v.id)} onCheckedChange={(c) => setVpcIds(c ? [...vpcIds, v.id] : vpcIds.filter((x) => x !== v.id))} />
-                      <span className="font-medium">{v.name || v.id}</span>
+                      <span className="truncate font-medium whitespace-nowrap">{v.name || v.id}</span>
                       <span className="text-muted-foreground font-mono text-xs">
                         {v.id} · {v.cidr}
                       </span>

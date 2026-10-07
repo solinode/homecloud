@@ -3,16 +3,16 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertTriangle, Loader2 } from "lucide-react"
+import { AlertTriangle, FileLock, FilePen, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { Field } from "@/components/console/form-field"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
 import { api, ApiError, errorMessage, seg } from "@/lib/api"
 import { revalidate } from "@/lib/hooks"
@@ -82,17 +82,24 @@ export function CreateFileSystemDialog({ open, onOpenChange }: { open: boolean; 
             <Input id="fs-name" autoFocus autoComplete="off" value={name} onChange={(e) => (setName(e.target.value), setErr(null))} placeholder="web-content" />
           </Field>
 
-          <div className="flex items-start justify-between gap-4 rounded-md border p-3">
-            <div>
-              <Label htmlFor="fs-ro" className="font-medium">
-                Read-only
-              </Label>
-              <p className="text-muted-foreground mt-0.5 text-xs">
-                Instances can only mount it read-only. Use it for content that is populated once and then shared, like static assets.
-              </p>
-            </div>
-            <Switch id="fs-ro" checked={readOnly} onCheckedChange={setReadOnly} />
-          </div>
+          <Field label="Access mode">
+            <OptionGroup label="Access mode">
+              <OptionCard
+                selected={!readOnly}
+                onSelect={() => setReadOnly(false)}
+                icon={FilePen}
+                title="Read/write"
+                description="Instances mount it read/write and can share changes with each other."
+              />
+              <OptionCard
+                selected={readOnly}
+                onSelect={() => setReadOnly(true)}
+                icon={FileLock}
+                title="Read-only"
+                description="Instances can only mount it read-only. For content populated once and then shared, like static assets."
+              />
+            </OptionGroup>
+          </Field>
 
           <Field label="Tags" optional>
             <TagsEditor rows={tags} onChange={setTags} />
@@ -160,27 +167,29 @@ export function DeleteFileSystemDialog({
       }}
     >
       {mounted.length > 0 && !apiError && (
-        <div className="flex items-start gap-2 rounded-md border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+        <Alert variant="warning">
+          <AlertTriangle />
+          <AlertDescription>
           <span>
             Mounted by{" "}
             {mounted.map((id, i) => (
               <span key={id}>
                 {i > 0 && ", "}
-                <Link href={`/ec2/instance/?id=${encodeURIComponent(id)}`} className="font-mono text-[13px] underline">
+                <Link href={`/ec2/instance/?id=${encodeURIComponent(id)}`} className="text-foreground font-mono text-[13px] underline">
                   {id}
                 </Link>
               </span>
             ))}
             . The deletion will be refused until those instances are terminated.
           </span>
-        </div>
+          </AlertDescription>
+        </Alert>
       )}
       {apiError && (
-        <div className="border-destructive/30 bg-destructive/5 text-destructive flex items-start gap-2 rounded-md border p-3 text-sm">
-          <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-          <span>{apiError}</span>
-        </div>
+        <Alert variant="destructive">
+          <AlertTriangle />
+          <AlertDescription>{apiError}</AlertDescription>
+        </Alert>
       )}
     </ConfirmDialog>
   )

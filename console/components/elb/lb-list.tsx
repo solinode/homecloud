@@ -10,9 +10,10 @@ import { Button } from "@/components/ui/button"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
 import { CopyableText } from "@/components/console/copy-button"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, seg } from "@/lib/api"
 import { pluralize } from "@/lib/format"
@@ -24,11 +25,7 @@ const columns: Column<LoadBalancer>[] = [
   {
     id: "name",
     header: "Name",
-    cell: (lb) => (
-      <Link href={lbHref(lb.name)} onClick={(e) => e.stopPropagation()} className="text-primary font-medium whitespace-nowrap hover:underline">
-        {lb.name}
-      </Link>
-    ),
+    cell: (lb) => <CellLink href={lbHref(lb.name)}>{lb.name}</CellLink>,
     value: (lb) => lb.name,
   },
   { id: "state", header: "State", cell: (lb) => <LbStateBadge state={lb.state} />, value: (lb) => lb.state },
@@ -58,8 +55,16 @@ const columns: Column<LoadBalancer>[] = [
     id: "listeners",
     header: "Listeners",
     cell: (lb) => (
-      <span className="whitespace-nowrap" title={(lb.listeners ?? []).map((l) => `${l.protocol}:${l.port}`).join(", ")}>
-        {(lb.listeners ?? []).map((l) => `${l.protocol}:${l.port}`).join(", ") || "-"}
+      <span className="flex flex-wrap gap-1" title={(lb.listeners ?? []).map((l) => `${l.protocol}:${l.port}`).join(", ")}>
+        {(lb.listeners ?? []).length ? (
+          lb.listeners.map((l) => (
+            <Tag key={l.id} accent={l.protocol === "HTTPS" ? "success" : "info"}>
+              {l.protocol}:{l.port}
+            </Tag>
+          ))
+        ) : (
+          <span className="text-muted-foreground">-</span>
+        )}
       </span>
     ),
     value: (lb) => lb.listeners?.length ?? 0,
@@ -69,9 +74,9 @@ const columns: Column<LoadBalancer>[] = [
     id: "vpc",
     header: "VPC",
     cell: (lb) => (
-      <Link href={vpcHref(lb.vpc_id)} onClick={(e) => e.stopPropagation()} className="text-primary font-mono text-[13px] whitespace-nowrap hover:underline">
+      <CellLink href={vpcHref(lb.vpc_id)} mono>
         {lb.vpc_id}
-      </Link>
+      </CellLink>
     ),
     value: (lb) => `${lb.vpc_id} ${lb.subnet_id}`,
     hideBelow: "lg",

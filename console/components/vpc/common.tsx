@@ -276,7 +276,7 @@ export function vpcLabel(v: Vpc | undefined, id: string): string {
 export function VpcLink({ id, vpcs, className }: { id: string; vpcs?: Vpc[]; className?: string }) {
   const v = vpcs?.find((x) => x.id === id)
   return (
-    <Link href={vpcHref(id)} className={cn("text-primary hover:underline", className)} title={v?.cidr}>
+    <Link href={vpcHref(id)} className={cn("text-primary whitespace-nowrap hover:underline", className)} title={v?.cidr}>
       <span className="font-mono text-[13px]">{id}</span>
       {v?.name && <span className="text-muted-foreground"> | {v.name}</span>}
     </Link>

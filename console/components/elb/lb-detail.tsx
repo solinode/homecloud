@@ -3,14 +3,17 @@
 import { useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, ArrowRight, ExternalLink, FileCode, Loader2, Plus, Trash2 } from "lucide-react"
+import { Activity, AlertCircle, ArrowLeft, ArrowRight, ExternalLink, FileCode, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { CopyButton, CopyableText } from "@/components/console/copy-button"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
+import { CopyableText } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { KeyValueGrid } from "@/components/console/key-value"
@@ -19,6 +22,7 @@ import { CONTAINER_CHARTS, MetricsPanel } from "@/components/console/metrics-pan
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { TagList } from "@/components/console/tags-editor"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { ApiError, api, seg } from "@/lib/api"
 import { formatDate, pluralize } from "@/lib/format"
@@ -56,6 +60,7 @@ export function LoadBalancerDetail() {
     refreshInterval: (d) => lbPollInterval(d ? [d.state] : []),
   })
   const [deleting, setDeleting] = useState(false)
+  const [addingListener, setAddingListener] = useState(false)
 
   const crumbs = [{ label: "ELB", href: "/elb/" }, { label: "Load balancers", href: "/elb/" }, { label: name || "Load balancer" }]
 
@@ -98,14 +103,26 @@ export function LoadBalancerDetail() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating} aria-label="Refresh">
-              {isValidating ? <Loader2 className="animate-spin" /> : null}
+              {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Refresh
             </Button>
-            <Button variant="outline" size="sm" onClick={() => setParam("tab", "config")}>
-              <FileCode /> View generated config
-            </Button>
-            <Button variant="outline" size="sm" className="text-destructive" onClick={() => setDeleting(true)}>
-              <Trash2 /> Delete
+            <ActionsMenu
+              items={[
+                { label: "View generated config", icon: <FileCode />, onSelect: () => setParam("tab", "config") },
+                { label: "View monitoring", icon: <Activity />, onSelect: () => setParam("tab", "monitoring") },
+                { separator: true },
+                { label: "Delete load balancer", icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(true) },
+              ]}
+            />
+            <Button
+              size="sm"
+              disabled={isLbTransitional(lb.state)}
+              onClick={() => {
+                setParam("tab", "listeners")
+                setAddingListener(true)
+              }}
+            >
+              <Plus /> Add listener
             </Button>
           </>
         }
@@ -121,9 +138,10 @@ export function LoadBalancerDetail() {
         </Alert>
       )}
       {isLbTransitional(lb.state) && (
-        <p className="text-muted-foreground flex items-center gap-2 text-sm">
-          <Loader2 className="size-4 animate-spin" /> The load balancer is being provisioned. This page refreshes automatically.
-        </p>
+        <Alert variant="info">
+          <Loader2 className="animate-spin" />
+          <AlertDescription>The load balancer is being provisioned. This page refreshes automatically.</AlertDescription>
+        </Alert>
       )}
 
       <Tabs value={tab} onValueChange={(v) => setParam("tab", v === "details" ? null : v)}>
@@ -137,7 +155,7 @@ export function LoadBalancerDetail() {
           <DetailsTab lb={lb} />
         </TabsContent>
         <TabsContent value="listeners">
-          <ListenersTab lb={lb} />
+          <ListenersTab lb={lb} onAddListener={() => setAddingListener(true)} />
         </TabsContent>
         <TabsContent value="config">
           <ConfigTab lb={lb} />
@@ -152,6 +170,7 @@ export function LoadBalancerDetail() {
         </TabsContent>
       </Tabs>
 
+      <AddListenerDialog lb={lb} open={addingListener} onOpenChange={setAddingListener} />
       <DeleteLoadBalancerDialog lb={deleting ? lb : null} onClose={() => setDeleting(false)} onDeleted={() => router.push("/elb/")} />
     </div>
   )
@@ -234,8 +253,7 @@ function DetailsTab({ lb }: { lb: LoadBalancer }) {
   )
 }
 
-function ListenersTab({ lb }: { lb: LoadBalancer }) {
-  const [adding, setAdding] = useState(false)
+function ListenersTab({ lb, onAddListener }: { lb: LoadBalancer; onAddListener: () => void }) {
   const [ruleFor, setRuleFor] = useState<ElbListener | null>(null)
   const [deletingListener, setDeletingListener] = useState<ElbListener | null>(null)
   const [deletingRule, setDeletingRule] = useState<{ listener: ElbListener; rule: ElbRule } | null>(null)
@@ -250,7 +268,7 @@ function ListenersTab({ lb }: { lb: LoadBalancer }) {
         <p className="text-muted-foreground text-sm">
           {pluralize(lb.listeners.length, "listener")}. Rules are applied live; adding or deleting a listener re-provisions the load balancer.
         </p>
-        <Button size="sm" onClick={() => setAdding(true)} disabled={busy}>
+        <Button size="sm" onClick={onAddListener} disabled={busy}>
           <Plus /> Add listener
         </Button>
       </div>
@@ -264,9 +282,8 @@ function ListenersTab({ lb }: { lb: LoadBalancer }) {
             flush
             title={
               <span className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <span className="font-mono">
-                  {l.protocol}:{l.port}
-                </span>
+                <Tag accent={l.protocol === "HTTPS" ? "success" : "info"}>{l.protocol}</Tag>
+                <span className="font-mono">{l.port}</span>
                 {pub ? (
                   <a
                     href={publicUrl(lb, pub, l.protocol === "HTTPS")}
@@ -317,9 +334,9 @@ function ListenersTab({ lb }: { lb: LoadBalancer }) {
               <table className="w-full text-sm">
                 <thead>
                   <tr className="bg-muted/40 border-b">
-                    <th className="text-muted-foreground w-20 px-4 py-2 text-left text-xs font-semibold">Priority</th>
-                    <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Conditions</th>
-                    <th className="text-muted-foreground px-3 py-2 text-left text-xs font-semibold">Action</th>
+                    <th className="text-muted-foreground w-20 px-4 py-2 text-left text-xs font-medium">Priority</th>
+                    <th className="text-muted-foreground px-3 py-2 text-left text-xs font-medium">Conditions</th>
+                    <th className="text-muted-foreground px-3 py-2 text-left text-xs font-medium">Action</th>
                     <th className="w-12 px-4 py-2" />
                   </tr>
                 </thead>
@@ -386,7 +403,6 @@ function ListenersTab({ lb }: { lb: LoadBalancer }) {
         )
       })}
 
-      <AddListenerDialog lb={lb} open={adding} onOpenChange={setAdding} />
       <AddRuleDialog lb={lb} listener={ruleFor} onClose={() => setRuleFor(null)} />
       <ConfirmDialog
         open={!!deletingListener}
@@ -443,21 +459,18 @@ function ConfigTab({ lb }: { lb: LoadBalancer }) {
       title="Generated nginx configuration"
       description="Rendered by HomeCloud from the listeners, rules and healthy targets. Read-only: it is regenerated whenever routing or target health changes."
       actions={
-        <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={() => mutate()} disabled={isValidating}>
-            {isValidating && <Loader2 className="animate-spin" />}
-            Refresh
-          </Button>
-          {data && <CopyButton value={data.nginx_conf} size="sm" label="Copy" toastMessage="Configuration copied" />}
-        </div>
+        <Button size="sm" variant="outline" onClick={() => mutate()} disabled={isValidating}>
+          {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
+          Refresh
+        </Button>
       }
     >
       {error ? (
         <ErrorState error={error} onRetry={() => mutate()} />
       ) : isLoading || !data ? (
-        <div className="bg-muted/50 h-64 animate-pulse rounded-md border" />
+        <Skeleton className="h-64 w-full rounded-lg" />
       ) : (
-        <pre className="bg-muted/50 max-h-[70vh] overflow-auto rounded-md border p-3 font-mono text-[12.5px] leading-relaxed">{data.nginx_conf}</pre>
+        <CodeBlock code={data.nginx_conf} title="nginx.conf" maxHeight="70vh" />
       )}
     </Section>
   )
