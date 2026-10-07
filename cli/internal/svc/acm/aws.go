@@ -226,7 +226,7 @@ func (s *Service) detail(c Certificate) certDetail {
 	d := certDetail{CertificateArn: c.ARN, DomainName: c.DomainName, SubjectAlternativeNames: c.SANs, Serial: serialColons(c.Serial),
 		Subject: "CN=" + c.DomainName, Issuer: "CN=" + c.Issuer, CreatedAt: awsapi.Epoch(c.CreatedAt), Status: c.Status,
 		NotBefore: awsapi.Epoch(c.NotBefore), NotAfter: awsapi.Epoch(c.NotAfter), KeyAlgorithm: keyAlgorithm(leaf), SignatureAlgorithm: sigAlgorithm(leaf),
-		InUseBy: []string{}, Type: awsType(c.Type), RenewalEligibility: "INELIGIBLE", Options: map[string]string{"CertificateTransparencyLoggingPreference": "DISABLED"},
+		InUseBy: []string{}, Type: awsType(c.Type), RenewalEligibility: "INELIGIBLE", Options: map[string]string{"CertificateTransparencyLoggingPreference": ctLogging(c)},
 		KeyUsages: []usage{{Name: "DIGITAL_SIGNATURE"}}, ExtendedKeyUsages: []usage{{Name: "TLS_WEB_SERVER_AUTHENTICATION", OID: "1.3.6.1.5.5.7.3.1"}}}
 	if d.SubjectAlternativeNames == nil {
 		d.SubjectAlternativeNames = []string{}
@@ -277,6 +277,7 @@ func (s *Service) awsRequest(q *awsapi.Req) (any, error) {
 		Tags                    []awsTag
 		CertificateAuthorityArn string
 		KeyAlgorithm            string
+		Options                 struct{ CertificateTransparencyLoggingPreference string }
 	}
 	if err := q.Bind(&in); err != nil {
 		return nil, err
@@ -301,8 +302,12 @@ func (s *Service) awsRequest(q *awsapi.Req) (any, error) {
 	if in.ValidationMethod == "" {
 		in.ValidationMethod = "DNS"
 	}
+	ct := in.Options.CertificateTransparencyLoggingPreference
+	if err := checkCTLogging(ct); err != nil {
+		return nil, err
+	}
 	c, err := s.requestCert(requestInput{DomainName: in.DomainName, SANs: in.SubjectAlternativeNames, Tags: tagMap(in.Tags),
-		ValidationMethod: in.ValidationMethod, IdempotencyToken: in.IdempotencyToken})
+		ValidationMethod: in.ValidationMethod, IdempotencyToken: in.IdempotencyToken, CTLogging: ct})
 	if err != nil {
 		return nil, err
 	}
@@ -525,12 +530,38 @@ func (s *Service) awsRenew(q *awsapi.Req) (any, error) {
 }
 
 func (s *Service) awsUpdateOptions(q *awsapi.Req) (any, error) {
-	var in struct{ CertificateArn string }
+	var in struct {
+		CertificateArn string
+		Options        struct{ CertificateTransparencyLoggingPreference string }
+	}
 	if err := q.Bind(&in); err != nil {
 		return nil, err
 	}
-	_, err := s.cert(q, "acm:UpdateCertificateOptions", in.CertificateArn)
+	c, err := s.cert(q, "acm:UpdateCertificateOptions", in.CertificateArn)
+	if err != nil {
+		return nil, err
+	}
+	ct := in.Options.CertificateTransparencyLoggingPreference
+	if err := checkCTLogging(ct); err != nil || ct == "" {
+		return nil, err
+	}
+	_, err = store.Update(s.env.Store, cCerts, c.ID, func(x *Certificate) error { x.CTLogging = ct; return nil })
 	return nil, err
+}
+
+func checkCTLogging(v string) error {
+	if v != "" && v != "ENABLED" && v != "DISABLED" {
+		return acmErr(http.StatusBadRequest, "ValidationException", "CertificateTransparencyLoggingPreference must be ENABLED or DISABLED")
+	}
+	return nil
+}
+
+// ctLogging reports a certificate's transparency logging preference (ENABLED unless set).
+func ctLogging(c Certificate) string {
+	if c.CTLogging == "" {
+		return "ENABLED"
+	}
+	return c.CTLogging
 }
 
 func (s *Service) awsAccountConfig(q *awsapi.Req) (any, error) {
