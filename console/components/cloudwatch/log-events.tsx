@@ -15,11 +15,13 @@ import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Textarea } from "@/components/ui/textarea"
 import { MetricFilters, SubscriptionFilters } from "./log-filters"
+import { CodeBlock } from "@/components/console/code-block"
 import { CopyButton } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
+import { StatusDot } from "@/components/console/status-badge"
 import { api, errorMessage, seg } from "@/lib/api"
 import { formatBytes, timeAgo } from "@/lib/format"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
@@ -94,7 +96,7 @@ function EventRow({ e, showStream }: { e: LogEvent; showStream: boolean }) {
       </div>
       {open && (
         <div className="flex flex-col gap-2 px-10 pt-1 pb-3">
-          <pre className="bg-background max-h-96 overflow-auto rounded-md border p-3 font-mono text-[12.5px] break-all whitespace-pre-wrap">{json ?? e.message}</pre>
+          <CodeBlock code={json ?? e.message} wrap maxHeight="24rem" noCopy />
           <div className="text-muted-foreground flex flex-wrap items-center gap-3 text-xs">
             <span>{new Date(e.timestamp).toISOString()}</span>
             <span>stream {e.stream}</span>
@@ -290,7 +292,7 @@ export function LogEventsViewer() {
       {tab === "metric" && !isContainer && <MetricFilters group={name} />}
       {tab === "subscription" && !isContainer && <SubscriptionFilters group={name} />}
 
-      <div className={cn("bg-card flex flex-col rounded-lg border shadow-xs", tab !== "events" && !isContainer && "hidden")}>
+      <div className={cn("bg-card flex flex-col overflow-hidden rounded-xl border shadow-xs", tab !== "events" && !isContainer && "hidden")}>
         <div className="flex flex-col gap-2 border-b p-3 lg:flex-row lg:flex-wrap lg:items-center">
           <div className="relative w-full lg:max-w-sm lg:flex-1">
             <Search className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2" />
@@ -362,12 +364,9 @@ export function LogEventsViewer() {
                 Live tail
                 {live &&
                   (paused ? (
-                    <Pause className="size-3.5 text-amber-600 dark:text-amber-400" />
+                    <Pause className="size-3.5 text-warning" />
                   ) : (
-                    <span className="relative flex size-2">
-                      <span className="absolute inline-flex size-full animate-ping rounded-full bg-emerald-500 opacity-75" />
-                      <span className="relative inline-flex size-2 rounded-full bg-emerald-500" />
-                    </span>
+                    <StatusDot tone="success" pulse />
                   ))}
               </Label>
             </div>
@@ -385,7 +384,7 @@ export function LogEventsViewer() {
             {events.data ? `${list.length} event${list.length === 1 ? "" : "s"}` : "Loading"}
             {list.length >= limit && ` (showing the newest ${limit}; narrow the time range or raise the limit to see more)`}
           </span>
-          {paused && <span className="text-amber-700 dark:text-amber-400">Live tail paused while you scroll. Jump to latest to resume.</span>}
+          {paused && <span className="text-warning">Live tail paused while you scroll. Jump to latest to resume.</span>}
         </div>
 
         <div className="relative">

@@ -8,10 +8,11 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { DataTable, type Column } from "@/components/console/data-table"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { FormDialog } from "@/components/console/form-dialog"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, seg } from "@/lib/api"
 import { revalidate, useApi } from "@/lib/hooks"
@@ -27,15 +28,15 @@ export function MetricFilters({ group }: { group: string }) {
   const [deleting, setDeleting] = useState<MetricFilter | null>(null)
 
   const columns: Column<MetricFilter>[] = [
-    { id: "name", header: "Filter name", cell: (f) => <span className="font-medium">{f.filterName}</span>, value: (f) => f.filterName },
-    { id: "pattern", header: "Pattern", cell: (f) => <span className="font-mono text-[13px]">{f.filterPattern || "(all events)"}</span>, value: (f) => f.filterPattern },
+    { id: "name", header: "Filter name", cell: (f) => <CellText className="font-medium">{f.filterName}</CellText>, value: (f) => f.filterName },
+    { id: "pattern", header: "Pattern", cell: (f) => (f.filterPattern ? <CellText mono>{f.filterPattern}</CellText> : <span className="text-muted-foreground">(all events)</span>), value: (f) => f.filterPattern },
     {
       id: "metric",
       header: "Metric",
-      cell: (f) => `${f.metricTransformations[0]?.metricNamespace} / ${f.metricTransformations[0]?.metricName}`,
+      cell: (f) => <CellText>{`${f.metricTransformations[0]?.metricNamespace} / ${f.metricTransformations[0]?.metricName}`}</CellText>,
       value: (f) => f.metricTransformations[0]?.metricName,
     },
-    { id: "value", header: "Value", cell: (f) => <span className="font-mono text-[13px]">{f.metricTransformations[0]?.metricValue}</span>, hideBelow: "md" },
+    { id: "value", header: "Value", cell: (f) => <CellText mono>{f.metricTransformations[0]?.metricValue}</CellText>, hideBelow: "md" },
     { id: "created", header: "Created", cell: (f) => <TimeAgo value={new Date(f.creationTime).toISOString()} />, hideBelow: "lg" },
     {
       id: "del",
@@ -66,7 +67,15 @@ export function MetricFilters({ group }: { group: string }) {
             <Plus /> Create metric filter
           </Button>
         }
-        empty={<EmptyState icon={Filter} title="No metric filters" description="Create a filter to count matching events as a metric." />}
+        empty={
+          <EmptyState icon={Filter} title="No metric filters" description="Create a filter to count matching events as a metric."
+            action={
+              <Button size="sm" onClick={() => setCreating(true)}>
+                <Plus /> Create metric filter
+              </Button>
+            }
+          />
+        }
       />
       {creating && <MetricFilterDialog group={group} path={path} onClose={() => setCreating(false)} />}
       {deleting && (
@@ -113,7 +122,7 @@ function MetricFilterDialog({ group, path, onClose }: { group: string; path: str
       <Field label="Filter pattern" htmlFor="mf-pattern" help='Leave empty to match every event. Examples: ERROR, "timed out", { $.level = "error" }.'>
         <Input id="mf-pattern" value={pattern} onChange={(e) => setPattern(e.target.value)} className="font-mono" spellCheck={false} />
       </Field>
-      <div className="grid grid-cols-2 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
         <Field label="Metric namespace" htmlFor="mf-ns" help="Not AWS/ or HC/.">
           <Input id="mf-ns" value={ns} onChange={(e) => setNs(e.target.value)} />
         </Field>
@@ -136,10 +145,10 @@ export function SubscriptionFilters({ group }: { group: string }) {
   const [deleting, setDeleting] = useState<SubscriptionFilter | null>(null)
 
   const columns: Column<SubscriptionFilter>[] = [
-    { id: "name", header: "Filter name", cell: (f) => <span className="font-medium">{f.filterName}</span>, value: (f) => f.filterName },
-    { id: "pattern", header: "Pattern", cell: (f) => <span className="font-mono text-[13px]">{f.filterPattern || "(all events)"}</span>, value: (f) => f.filterPattern },
-    { id: "dest", header: "Destination", cell: (f) => <span className="font-mono text-[13px]">{f.destinationArn.split(":function:")[1] ?? f.destinationArn}</span>, value: (f) => f.destinationArn },
-    { id: "dist", header: "Distribution", cell: (f) => f.distribution, hideBelow: "md" },
+    { id: "name", header: "Filter name", cell: (f) => <CellText className="font-medium">{f.filterName}</CellText>, value: (f) => f.filterName },
+    { id: "pattern", header: "Pattern", cell: (f) => (f.filterPattern ? <CellText mono>{f.filterPattern}</CellText> : <span className="text-muted-foreground">(all events)</span>), value: (f) => f.filterPattern },
+    { id: "dest", header: "Destination", cell: (f) => <CellText mono title={f.destinationArn}>{f.destinationArn.split(":function:")[1] ?? f.destinationArn}</CellText>, value: (f) => f.destinationArn },
+    { id: "dist", header: "Distribution", cell: (f) => <Tag mono={false}>{f.distribution}</Tag>, hideBelow: "md" },
     {
       id: "del",
       header: "",
@@ -169,7 +178,15 @@ export function SubscriptionFilters({ group }: { group: string }) {
             <Plus /> Create subscription filter
           </Button>
         }
-        empty={<EmptyState icon={Filter} title="No subscription filters" description="Create a filter to stream matching events to a Lambda function." />}
+        empty={
+          <EmptyState icon={Filter} title="No subscription filters" description="Create a filter to stream matching events to a Lambda function."
+            action={
+              <Button size="sm" onClick={() => setCreating(true)}>
+                <Plus /> Create subscription filter
+              </Button>
+            }
+          />
+        }
       />
       {creating && <SubscriptionDialog group={group} path={path} onClose={() => setCreating(false)} />}
       {deleting && (

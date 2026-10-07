@@ -9,6 +9,8 @@ import { ErrorState } from "@/components/console/error-state"
 import { MetricChart, type ChartQuery } from "@/components/console/metric-chart"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
+import type { Tone } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { useApi } from "@/lib/hooks"
 import type { Alarm, AlarmState, Instance, LogGroup } from "@/lib/types"
@@ -16,10 +18,10 @@ import { cn } from "@/lib/utils"
 
 import { alarmCondition, AlarmStateBadge, describeContainerGroup, logGroupHref, useInstanceNames } from "./common"
 
-const CARDS: { state: AlarmState; label: string; icon: typeof AlertTriangle; cls: string }[] = [
-  { state: "ALARM", label: "In alarm", icon: AlertTriangle, cls: "text-red-600 dark:text-red-400" },
-  { state: "OK", label: "OK", icon: CheckCircle2, cls: "text-emerald-600 dark:text-emerald-400" },
-  { state: "INSUFFICIENT_DATA", label: "Insufficient data", icon: CircleHelp, cls: "text-slate-500 dark:text-slate-400" },
+const CARDS: { state: AlarmState; label: string; icon: typeof AlertTriangle; tone: Tone }[] = [
+  { state: "ALARM", label: "In alarm", icon: AlertTriangle, tone: "danger" },
+  { state: "OK", label: "OK", icon: CheckCircle2, tone: "success" },
+  { state: "INSUFFICIENT_DATA", label: "Insufficient data", icon: CircleHelp, tone: "neutral" },
 ]
 
 export function CloudWatchOverview() {
@@ -53,21 +55,16 @@ export function CloudWatchOverview() {
         {CARDS.map((c) => {
           const n = (alarms.data ?? []).filter((a) => a.state === c.state).length
           return (
-            <Link
+            <StatTile
               key={c.state}
               href={`/cloudwatch/alarms/?state=${c.state}`}
-              className="bg-card flex items-center justify-between gap-3 rounded-lg border p-4 shadow-xs transition-shadow hover:shadow-md"
-            >
-              <div className="flex flex-col gap-1">
-                <span className="text-muted-foreground text-sm font-medium">{c.label}</span>
-                {alarms.isLoading ? (
-                  <Skeleton className="h-8 w-12" />
-                ) : (
-                  <span className={cn("text-3xl font-semibold tabular-nums", n > 0 || c.state !== "ALARM" ? c.cls : "text-foreground")}>{alarms.error ? "-" : n}</span>
-                )}
-              </div>
-              <c.icon className={cn("size-8 opacity-80", c.cls)} />
-            </Link>
+              label={c.label}
+              tone={c.tone}
+              icon={<c.icon />}
+              loading={alarms.isLoading}
+              value={<span className={cn(c.state === "ALARM" && n > 0 && "text-danger")}>{alarms.error ? "-" : n}</span>}
+              caption={c.state === "ALARM" ? "Alarms breaching their threshold" : c.state === "OK" ? "Alarms within their threshold" : "Alarms without enough datapoints"}
+            />
           )
         })}
       </div>
@@ -92,7 +89,7 @@ export function CloudWatchOverview() {
           </div>
         ) : inAlarm.length === 0 ? (
           <p className="text-muted-foreground flex items-center gap-2 p-4 text-sm">
-            <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" />
+            <CheckCircle2 className="size-4 text-success" />
             No alarms in ALARM state.
             {alarms.data?.length === 0 && (
               <Link href="/cloudwatch/alarms/?create=1" className="text-primary hover:underline">

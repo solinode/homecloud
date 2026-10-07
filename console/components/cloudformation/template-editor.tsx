@@ -59,14 +59,15 @@ export function TemplateEditor({
   return (
     <div
       className={cn(
-        "bg-muted/30 overflow-auto rounded-md border font-mono text-[13px] leading-5",
+        "bg-muted/30 overflow-auto rounded-md border font-mono text-[13px] leading-5 shadow-xs transition-[border-color,box-shadow]",
+        !readOnly && "focus-within:border-ring focus-within:ring-ring/50 focus-within:ring-[3px]",
         maxHeight,
-        invalid && !readOnly && "border-destructive/60",
+        invalid && !readOnly && "border-destructive/60 focus-within:border-destructive focus-within:ring-destructive/20",
         className,
       )}
     >
       <div className="flex min-w-full">
-        <div aria-hidden className="text-muted-foreground/60 bg-muted/50 sticky left-0 border-r px-2 py-2 text-right select-none">
+        <div aria-hidden className="text-faint bg-muted sticky left-0 border-r px-2 py-2 text-right tabular-nums select-none">
           {Array.from({ length: lines }, (_, i) => (
             <div key={i}>{i + 1}</div>
           ))}
@@ -81,6 +82,7 @@ export function TemplateEditor({
           spellCheck={false}
           autoCapitalize="off"
           autoCorrect="off"
+          aria-invalid={invalid && !readOnly ? true : undefined}
           rows={lines}
           wrap="off"
           className="min-w-0 flex-1 resize-none overflow-x-auto overflow-y-hidden bg-transparent px-3 py-2 whitespace-pre outline-none"

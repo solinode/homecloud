@@ -7,7 +7,7 @@ import { Layers, Plus, Trash2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -19,11 +19,7 @@ const columns: Column<StackSummary>[] = [
   {
     id: "name",
     header: "Stack name",
-    cell: (s) => (
-      <Link href={stackHref(s.name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-        {s.name}
-      </Link>
-    ),
+    cell: (s) => <CellLink href={stackHref(s.name)}>{s.name}</CellLink>,
     value: (s) => s.name,
   },
   { id: "status", header: "Status", cell: (s) => <StackStatusBadge status={s.status} />, value: (s) => s.status },
@@ -32,7 +28,7 @@ const columns: Column<StackSummary>[] = [
     header: "Status reason",
     cell: (s) =>
       s.status_reason ? (
-        <span className="line-clamp-2 max-w-md text-xs break-words" title={s.status_reason}>
+        <span className="text-muted-foreground line-clamp-2 max-w-md text-xs break-words" title={s.status_reason}>
           {s.status_reason}
         </span>
       ) : (
@@ -44,7 +40,11 @@ const columns: Column<StackSummary>[] = [
   {
     id: "description",
     header: "Description",
-    cell: (s) => (s.description ? <span className="line-clamp-1 max-w-xs">{s.description}</span> : <span className="text-muted-foreground">-</span>),
+    cell: (s) => (
+      <CellText muted max="20rem">
+        {s.description}
+      </CellText>
+    ),
     value: (s) => s.description,
     hideBelow: "lg",
   },

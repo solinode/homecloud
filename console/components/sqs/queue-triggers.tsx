@@ -4,7 +4,7 @@ import Link from "next/link"
 import { Zap } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -17,11 +17,7 @@ const columns: Column<EventSourceMapping>[] = [
   {
     id: "function",
     header: "Function",
-    cell: (m) => (
-      <Link href={functionHref(m.function_name, "triggers")} className={cellLinkClass()}>
-        {m.function_name}
-      </Link>
-    ),
+    cell: (m) => <CellLink href={functionHref(m.function_name, "triggers")}>{m.function_name}</CellLink>,
     value: (m) => m.function_name,
   },
   { id: "batch", header: "Batch size", cell: (m) => <span className="tabular-nums">{m.batch_size}</span>, value: (m) => m.batch_size },
@@ -36,7 +32,12 @@ const columns: Column<EventSourceMapping>[] = [
     header: "Last result",
     cell: (m) =>
       m.last_processing_result ? (
-        <span className={m.last_processing_result === "OK" ? "" : "text-destructive"}>{m.last_processing_result}</span>
+        <StatusBadge
+          status={m.last_processing_result}
+          label={m.last_processing_result}
+          tone={m.last_processing_result === "OK" ? "success" : "danger"}
+          className="max-w-[16rem] truncate"
+        />
       ) : (
         <span className="text-muted-foreground">-</span>
       ),
@@ -47,7 +48,7 @@ const columns: Column<EventSourceMapping>[] = [
   {
     id: "uuid",
     header: "Mapping ID",
-    cell: (m) => <span className="font-mono text-[13px]">{m.id}</span>,
+    cell: (m) => <CellText mono>{m.id}</CellText>,
     value: (m) => m.id,
     hideBelow: "lg",
   },

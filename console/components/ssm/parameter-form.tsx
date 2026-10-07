@@ -16,8 +16,10 @@ import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
 import { Field } from "@/components/console/form-field"
 import { DetailSkeleton } from "@/components/console/loading"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { Tag } from "@/components/console/tag"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
 import { KeyPicker, keyHref, keyIdFromArn, keyLabel, useKmsKeys } from "@/components/kms/shared"
 import { errorMessage, api } from "@/lib/api"
@@ -281,30 +283,11 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
           </Section>
 
           <Section title="Type">
-            <div className="grid grid-cols-1 gap-3 md:grid-cols-3" role="radiogroup" aria-label="Parameter type">
-              {TYPES.map((t) => {
-                const active = type === t.type
-                return (
-                  <button
-                    key={t.type}
-                    type="button"
-                    role="radio"
-                    aria-checked={active}
-                    onClick={() => setType(t.type)}
-                    className={cn(
-                      "flex flex-col gap-1 rounded-lg border p-3 text-left transition-colors",
-                      active ? "border-primary bg-primary/5 ring-primary/30 ring-1 dark:bg-primary/10" : "hover:bg-muted/40",
-                    )}
-                  >
-                    <span className="flex items-center gap-2 text-sm font-medium">
-                      <t.icon className={cn("size-4", active ? "text-primary" : "text-muted-foreground")} />
-                      {t.title}
-                    </span>
-                    <span className="text-muted-foreground text-xs">{t.blurb}</span>
-                  </button>
-                )
-              })}
-            </div>
+            <OptionGroup label="Parameter type" columns={3}>
+              {TYPES.map((t) => (
+                <OptionCard key={t.type} selected={type === t.type} onSelect={() => setType(t.type)} icon={t.icon} title={t.title} description={t.blurb} />
+              ))}
+            </OptionGroup>
 
             {secure && (
               <div className="mt-4 flex max-w-2xl flex-col gap-2">
@@ -377,9 +360,9 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
                 <div className="flex flex-wrap items-center gap-1.5">
                   <span className="text-muted-foreground text-xs">{items.length} items:</span>
                   {items.map((it, i) => (
-                    <span key={i} className={cn("bg-muted rounded-md border px-2 py-0.5 font-mono text-xs", !it && "border-destructive text-destructive")}>
+                    <Tag key={i} accent={it ? "neutral" : "danger"} className={cn(it && "text-foreground")}>
                       {it || "(empty)"}
-                    </span>
+                    </Tag>
                   ))}
                 </div>
               )}
@@ -388,33 +371,20 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
 
           <Section title="Tier and validation">
             <div className="flex max-w-2xl flex-col gap-4">
-              <div className="flex flex-col gap-1.5">
-                <span className="text-sm font-medium">Tier</span>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-3" role="radiogroup" aria-label="Parameter tier">
-                  {TIERS.map((t) => {
-                    const active = tier === t.tier
-                    const blocked = wasAdvanced && t.tier === "Standard"
-                    return (
-                      <button
-                        key={t.tier}
-                        type="button"
-                        role="radio"
-                        aria-checked={active}
-                        disabled={blocked}
-                        title={blocked ? "Advanced parameters can't be moved back to the Standard tier." : undefined}
-                        onClick={() => setTier(t.tier)}
-                        className={cn(
-                          "flex flex-col gap-0.5 rounded-lg border p-2.5 text-left transition-colors disabled:cursor-not-allowed disabled:opacity-50",
-                          active ? "border-primary bg-primary/5 ring-primary/30 dark:bg-primary/10 ring-1" : "hover:bg-muted/40",
-                        )}
-                      >
-                        <span className="text-sm font-medium">{t.title}</span>
-                        <span className="text-muted-foreground text-xs">{t.blurb}</span>
-                      </button>
-                    )
-                  })}
-                </div>
-              </div>
+              <Field label="Tier" help={wasAdvanced ? "Advanced parameters can't be moved back to the Standard tier." : undefined}>
+                <OptionGroup label="Parameter tier" columns={3}>
+                  {TIERS.map((t) => (
+                    <OptionCard
+                      key={t.tier}
+                      selected={tier === t.tier}
+                      disabled={wasAdvanced && t.tier === "Standard"}
+                      onSelect={() => setTier(t.tier)}
+                      title={t.title}
+                      description={t.blurb}
+                    />
+                  ))}
+                </OptionGroup>
+              </Field>
               <Field label="Data type" htmlFor="ssm-data-type" error={dataTypeErr} help={DATA_TYPES.find((d) => d.type === dataType)?.blurb}>
                 <Select value={dataType} onValueChange={(v) => setDataType(v as SsmDataType)}>
                   <SelectTrigger id="ssm-data-type" className="w-full font-mono text-[13px] sm:w-72">
@@ -513,13 +483,13 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
                 </Alert>
               )}
               {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
-              <div className="flex flex-col gap-2 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+                <Button type="button" variant="outline" asChild>
+                  <Link href={editing ? parameterHref(editName) : "/ssm/"}>Cancel</Link>
+                </Button>
                 <Button type="submit" disabled={pending || (editing && !overwrite)}>
                   {pending ? <Loader2 className="animate-spin" /> : <Save />}
                   {editing ? "Save changes" : "Create parameter"}
-                </Button>
-                <Button type="button" variant="outline" asChild>
-                  <Link href={editing ? parameterHref(editName) : "/ssm/"}>Cancel</Link>
                 </Button>
               </div>
             </div>
@@ -533,7 +503,7 @@ function FormBody({ crumbs, editName, initial }: { crumbs: { label: string; href
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+      <dt className="text-faint mb-0.5 text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )

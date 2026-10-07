@@ -1,9 +1,10 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Loader2, Plus, X } from "lucide-react"
+import { Info, Loader2, Plus, X } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -269,7 +270,10 @@ export function AlarmDialog({
               {mode === "pick" ? (
                 <>
                   {metrics.data && metrics.data.length === 0 && (
-                    <p className="text-muted-foreground text-sm">No metrics have data yet. Use &quot;Enter manually&quot; to alarm on a metric that will be published later.</p>
+                    <Alert variant="info">
+                      <Info />
+                      <AlertDescription>No metrics have data yet. Use &quot;Enter manually&quot; to alarm on a metric that will be published later.</AlertDescription>
+                    </Alert>
                   )}
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                     <Field label="Namespace" htmlFor="alarm-ns" error={t ? errors.namespace : undefined}>
@@ -354,7 +358,7 @@ export function AlarmDialog({
                 </>
               )}
 
-              <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field label="Statistic" htmlFor="alarm-stat">
                   <Select value={statistic} onValueChange={(v) => setStatistic(v as Statistic)}>
                     <SelectTrigger id="alarm-stat" className="w-full">
@@ -447,7 +451,7 @@ export function AlarmDialog({
                     height={200}
                   />
                 ) : (
-                  <div className="text-muted-foreground flex h-[200px] items-center justify-center rounded-md border border-dashed text-sm">Select a metric to preview it</div>
+                  <div className="text-muted-foreground bg-muted/30 flex h-[200px] items-center justify-center rounded-lg border border-dashed text-sm">Select a metric to preview it</div>
                 )}
                 {!errors.threshold && !errors.eval && !errors.dp && metric && (
                   <p className="text-muted-foreground text-xs">

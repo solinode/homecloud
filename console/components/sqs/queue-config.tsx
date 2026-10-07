@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch"
 import { Field } from "@/components/console/form-field"
 import { JsonEditor, jsonError } from "@/components/console/json-editor"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
 import { useApi } from "@/lib/hooks"
 import type {
   DeduplicationScope,
@@ -20,7 +21,6 @@ import type {
   RedriveAllowPolicy,
   RedrivePermission,
 } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 import { queueHref } from "./common"
 
@@ -237,29 +237,11 @@ function ChoiceCards<T extends string>({
   options: { value: T; title: string; text: string }[]
 }) {
   return (
-    <div role="radiogroup" aria-label={label} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+    <OptionGroup label={label} columns={3}>
       {options.map((o) => (
-        <button
-          key={o.value || "_"}
-          type="button"
-          role="radio"
-          aria-checked={value === o.value}
-          onClick={() => onChange(o.value)}
-          className={cn(
-            "flex items-start gap-3 rounded-md border p-3 text-left transition-colors",
-            value === o.value ? "border-primary bg-primary/5 ring-primary ring-1" : "hover:bg-muted/40",
-          )}
-        >
-          <span className={cn("mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border", value === o.value ? "border-primary" : "border-input")}>
-            {value === o.value && <span className="bg-primary size-2 rounded-full" />}
-          </span>
-          <span className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium">{o.title}</span>
-            <span className="text-muted-foreground text-xs">{o.text}</span>
-          </span>
-        </button>
+        <OptionCard key={o.value || "_"} selected={value === o.value} onSelect={() => onChange(o.value)} title={o.title} description={o.text} />
       ))}
-    </div>
+    </OptionGroup>
   )
 }
 
@@ -517,7 +499,7 @@ export function DeadLetterFields({
               </Link>{" "}
               after {c.maxReceives || "?"} receives.
               {denied && (
-                <span className="mt-1 block text-amber-700 dark:text-amber-300">
+                <span className="text-warning mt-1 block">
                   {c.dlq}&apos;s redrive allow policy ({allow.redrivePermission}) may not permit this queue as a source.
                 </span>
               )}
@@ -610,10 +592,9 @@ export function AccessPolicyFields({
         />
       </div>
       {c.policyEnabled && (
-        <>
+        <Field label="Policy document" error={errors.policy} help="JSON policy with Version and Statement.">
           <JsonEditor value={c.policy} onChange={(v) => onChange({ policy: v })} rows={10} />
-          {errors.policy && <p className="text-destructive text-xs">{errors.policy}</p>}
-        </>
+        </Field>
       )}
     </div>
   )

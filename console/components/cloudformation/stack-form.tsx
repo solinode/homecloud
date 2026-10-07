@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, CheckCircle2, FileUp, Info, Layers, Loader2, ShieldCheck, Sparkles } from "lucide-react"
+import { AlertCircle, ArrowLeft, CheckCircle2, FileUp, Info, Layers, Loader2, ShieldCheck, Sparkles, TriangleAlert } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -18,6 +18,8 @@ import { Field } from "@/components/console/form-field"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { Stepper } from "@/components/console/stepper"
+import { Tag } from "@/components/console/tag"
 import { ApiError, api, errorMessage } from "@/lib/api"
 import { pluralize } from "@/lib/format"
 import { revalidate, useApi, useQueryParam } from "@/lib/hooks"
@@ -250,6 +252,17 @@ export function StackForm() {
   const blocked = !!st && !canUpdate(st.status)
   const order = result?.valid ? result.creation_order : []
 
+  // Progress through the form (display only; every section stays editable).
+  const steps = [
+    ...(updating ? [] : [{ label: "Name the stack", description: "Letters, digits and hyphens." }]),
+    { label: "Template", description: "Write, load or upload; validated as you type." },
+    { label: "Parameters", description: paramNames.length ? pluralize(paramNames.length, "parameter") : "None declared" },
+    { label: updating ? "Review and update" : "Review and create" },
+  ]
+  const stepDone = [...(updating ? [] : [!nameErr]), valid, valid && paramsOk]
+  const firstOpen = stepDone.findIndex((d) => !d)
+  const stepIndex = firstOpen < 0 ? steps.length - 1 : firstOpen
+
   return (
     <div className="flex flex-col gap-4">
       <PageHeader
@@ -373,9 +386,9 @@ export function StackForm() {
                   const was = st?.resources?.[id]
                   return (
                     <li key={id} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-4 py-2 text-sm">
-                      <span className="text-muted-foreground w-6 text-right tabular-nums">{i + 1}.</span>
+                      <span className="text-faint w-6 text-right font-mono text-xs tabular-nums">{i + 1}.</span>
                       <span className="font-medium">{id}</span>
-                      {t && <span className="text-muted-foreground font-mono text-[13px]">{t}</span>}
+                      {t && <Tag>{t}</Tag>}
                       {meta?.waits && <span className="text-muted-foreground text-xs">(waits until {meta.waits})</span>}
                       {updating && (
                         <span className="text-muted-foreground ml-auto text-xs">
@@ -400,9 +413,17 @@ export function StackForm() {
                 })}
               </ol>
               {updating && st?.order && st.order.some((id) => !order.includes(id)) && (
-                <p className="border-t px-4 py-2 text-sm text-amber-700 dark:text-amber-300">
-                  Will be deleted (no longer in the template): {st.order.filter((id) => !order.includes(id)).join(", ")}
-                </p>
+                <div className="border-t p-3">
+                  <Alert variant="warning">
+                    <TriangleAlert />
+                    <AlertTitle>Will be deleted</AlertTitle>
+                    <AlertDescription>
+                      <span>
+                        No longer in the template: <span className="font-mono text-[13px]">{st.order.filter((id) => !order.includes(id)).join(", ")}</span>
+                      </span>
+                    </AlertDescription>
+                  </Alert>
+                </div>
               )}
             </Section>
           )}
@@ -456,13 +477,14 @@ export function StackForm() {
         <aside className="xl:sticky xl:top-4">
           <Section title="Summary">
             <div className="flex flex-col gap-4">
+              <Stepper orientation="vertical" steps={steps} current={stepIndex} className="-mx-2 border-b pb-3" />
               <dl className="flex flex-col gap-3 text-sm">
                 <SummaryItem label="Stack name">{(updating ? updateName : name.trim()) || "-"}</SummaryItem>
                 <SummaryItem label="Template">
                   {!text.trim() ? (
                     "-"
                   ) : valid ? (
-                    <span className="flex items-center gap-1 text-emerald-700 dark:text-emerald-400">
+                    <span className="text-success flex items-center gap-1">
                       <CheckCircle2 className="size-3.5" /> Valid {templateFormat(text)}
                     </span>
                   ) : result ? (
@@ -491,13 +513,13 @@ export function StackForm() {
               {submitted && (nameErr || !paramsOk || !text.trim()) && (
                 <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>
               )}
-              <div className="flex flex-col gap-2 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-end gap-2 border-t pt-4">
+                <Button type="button" variant="outline" asChild>
+                  <Link href={updating ? stackHref(updateName) : "/cloudformation/"}>Cancel</Link>
+                </Button>
                 <Button type="submit" disabled={pending || blocked || (fresh && !!result && !result.valid)}>
                   {pending ? <Loader2 className="animate-spin" /> : <Layers />}
                   {updating ? "Update stack" : "Create stack"}
-                </Button>
-                <Button type="button" variant="outline" asChild>
-                  <Link href={updating ? stackHref(updateName) : "/cloudformation/"}>Cancel</Link>
                 </Button>
               </div>
             </div>
@@ -532,7 +554,7 @@ function ValidationLine({ validation, fresh, empty, submitted }: { validation: V
       </span>
     )
   return (
-    <span className="flex items-center gap-1 text-emerald-600 dark:text-emerald-400">
+    <span className="text-success flex items-center gap-1">
       <CheckCircle2 className="size-3.5" /> Template is valid
     </span>
   )
@@ -569,8 +591,8 @@ function ParamField({
       label={
         <span className="flex flex-wrap items-center gap-2">
           <span className="font-mono text-[13px]">{name}</span>
-          <span className="text-muted-foreground text-xs font-normal">{def.Type || "String"}</span>
-          {def.NoEcho && <span className="text-muted-foreground text-xs font-normal">· NoEcho</span>}
+          <Tag>{def.Type || "String"}</Tag>
+          {def.NoEcho && <Tag accent="warning">NoEcho</Tag>}
         </span>
       }
       htmlFor={id}
@@ -609,7 +631,7 @@ function ParamField({
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+      <dt className="text-faint mb-0.5 text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )

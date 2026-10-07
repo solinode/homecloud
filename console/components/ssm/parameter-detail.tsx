@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, EyeOff, Info, KeyRound, Loader2, Pencil, RefreshCw, Tag, Trash2, X } from "lucide-react"
+import { AlertCircle, ArrowLeft, EyeOff, History as HistoryIcon, Info, KeyRound, Loader2, Pencil, RefreshCw, Tag as TagIcon, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -13,7 +13,10 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ActionsMenu } from "@/components/console/actions-menu"
+import { CodeBlock } from "@/components/console/code-block"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
+import { CellText, DataTable, type Column } from "@/components/console/data-table"
 import { CopyButton, CopyableText } from "@/components/console/copy-button"
 import { EmptyState } from "@/components/console/empty-state"
 import { ErrorState } from "@/components/console/error-state"
@@ -22,6 +25,7 @@ import { KeyValueGrid } from "@/components/console/key-value"
 import { DetailSkeleton, TableSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { Tag } from "@/components/console/tag"
 import { TagList } from "@/components/console/tags-editor"
 import { TimeAgo } from "@/components/console/time-ago"
 import { keyHref, keyIdFromArn, keyLabel, useKmsKeys } from "@/components/kms/shared"
@@ -61,13 +65,13 @@ function Labels({ labels, onRemove, disabled }: { labels?: string[] | null; onRe
   return (
     <span className="flex flex-wrap gap-1">
       {labels.map((l) => (
-        <span key={l} className="bg-muted inline-flex items-center gap-1 rounded-md border px-1.5 py-0.5 font-mono text-xs">
-          <Tag className="text-muted-foreground size-3" />
+        <Tag key={l} className="text-foreground">
+          <TagIcon className="text-muted-foreground" />
           {l}
           {onRemove && (
             <button
               type="button"
-              className="text-muted-foreground hover:text-foreground -mr-0.5 rounded disabled:opacity-50"
+              className="text-muted-foreground hover:text-foreground -mr-0.5 rounded disabled:opacity-50 [&>svg]:size-3"
               onClick={() => onRemove(l)}
               disabled={disabled}
               aria-label={`Remove label ${l}`}
@@ -76,7 +80,7 @@ function Labels({ labels, onRemove, disabled }: { labels?: string[] | null; onRe
               <X className="size-3" />
             </button>
           )}
-        </span>
+        </Tag>
       ))}
     </span>
   )
@@ -134,13 +138,17 @@ export function ParameterDetail() {
             <Button variant="outline" size="sm" onClick={refresh} aria-label="Refresh">
               <RefreshCw className={cn(isValidating && "animate-spin")} />
             </Button>
-            <Button variant="outline" size="sm" asChild>
+            <ActionsMenu
+              items={[
+                { label: "View history", icon: <HistoryIcon />, onSelect: () => setParam("tab", "history") },
+                { separator: true },
+                { label: "Delete parameter", icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(true) },
+              ]}
+            />
+            <Button size="sm" asChild>
               <Link href={editParameterHref(param.name)}>
                 <Pencil /> Edit
               </Link>
-            </Button>
-            <Button variant="outline" size="sm" onClick={() => setDeleting(true)} className="text-destructive hover:text-destructive">
-              <Trash2 /> Delete
             </Button>
           </>
         }
@@ -281,13 +289,13 @@ function ValuePanel({ p }: { p: SsmParameter }) {
           {p.type === "StringList" && (
             <div className="flex flex-wrap gap-1.5">
               {listItems(v.value).map((it, i) => (
-                <span key={i} className="bg-muted rounded-md border px-2 py-0.5 font-mono text-xs">
+                <Tag key={i} className="text-foreground">
                   {it}
-                </span>
+                </Tag>
               ))}
             </div>
           )}
-          <pre className="bg-muted/40 max-h-96 overflow-auto rounded-md border p-3 font-mono text-[13px] break-all whitespace-pre-wrap">{v.value}</pre>
+          <CodeBlock code={v.value} wrap maxHeight="24rem" noCopy />
           {v.labels?.length ? (
             <div className="text-muted-foreground flex items-center gap-2 text-xs">
               Labels on this version: <Labels labels={v.labels} />
@@ -295,8 +303,10 @@ function ValuePanel({ p }: { p: SsmParameter }) {
           ) : null}
         </div>
       ) : secure ? (
-        <div className="flex flex-col gap-2">
-          <Mask />
+        <div className="flex flex-col gap-3">
+          <CodeBlock code="" noCopy>
+            <span className="text-code-muted tracking-widest">••••••••</span>
+          </CodeBlock>
           <p className="text-muted-foreground text-sm">
             This SecureString is encrypted with KMS. Choose <span className="text-foreground font-medium">Show decrypted value</span> to decrypt it; this requires
             kms:Decrypt on the key.
@@ -323,104 +333,89 @@ function History({ p, onChanged }: { p: SsmParameter; onChanged: () => void }) {
   // Versions keep their own type, so a parameter that was once a SecureString still has encrypted history.
   const secure = p.type === "SecureString" || versions.some((v) => v.type === "SecureString")
 
+  const columns: Column<SsmParameterVersion>[] = [
+    {
+      id: "version",
+      header: "Version",
+      cell: (v) => (
+        <span className="whitespace-nowrap tabular-nums">
+          {v.version}
+          {v.version === p.version && <span className="text-muted-foreground ml-1.5 text-xs">(current)</span>}
+        </span>
+      ),
+      value: (v) => v.version,
+    },
+    {
+      id: "value",
+      header: "Value",
+      className: "max-w-[16rem] sm:max-w-md",
+      cell: (v) =>
+        (v.type ?? p.type) === "SecureString" && !decrypt ? (
+          <Mask />
+        ) : (
+          <span className="flex items-start gap-1">
+            <span className="line-clamp-3 min-w-0 font-mono text-[13px] break-all whitespace-pre-wrap" title={v.value}>
+              {v.value}
+            </span>
+            <CopyButton value={v.value} label={`Copy version ${v.version}`} />
+          </span>
+        ),
+    },
+    { id: "type", header: "Type", cell: (v) => <TypeBadge type={v.type ?? p.type} />, value: (v) => v.type ?? p.type, hideBelow: "md" },
+    { id: "modified", header: "Last modified", cell: (v) => <TimeAgo value={v.last_modified} />, value: (v) => v.last_modified, hideBelow: "sm" },
+    {
+      id: "by",
+      header: "Modified by",
+      cell: (v) => <CellText title={v.modified_by}>{principalName(v.modified_by)}</CellText>,
+      value: (v) => v.modified_by,
+      hideBelow: "lg",
+    },
+    { id: "labels", header: "Labels", cell: (v) => <Labels labels={v.labels} disabled={unlabeling} onRemove={(l) => unlabel(v.version, l)} /> },
+    {
+      id: "actions",
+      header: "",
+      className: "text-right",
+      cell: (v) => (
+        <Button variant="outline" size="sm" onClick={() => setLabeling(v)}>
+          <TagIcon /> <span className="hidden sm:inline">Attach labels</span>
+        </Button>
+      ),
+    },
+  ]
+
   return (
-    <Section
-      title="Parameter history"
-      description="Up to 100 versions are kept. Labels point at one version each; attaching an existing label to another version moves it there."
-      flush
-      actions={
-        <>
-          {secure && (
+    <div className="flex flex-col gap-2">
+      <DataTable
+        title="Parameter history"
+        description="Up to 100 versions are kept. Labels point at one version each; attaching an existing label to another version moves it there."
+        data={data ? versions : undefined}
+        columns={columns}
+        rowId={(v) => String(v.version)}
+        loading={isLoading}
+        error={error && !data ? error : undefined}
+        onRefresh={() => mutate()}
+        refreshing={isValidating}
+        noSearch
+        pageSize={100}
+        actions={
+          secure && (
             <div className="flex items-center gap-2">
               <Switch id="ssm-history-decrypt" checked={decrypt} onCheckedChange={setDecrypt} />
               <Label htmlFor="ssm-history-decrypt" className="text-sm font-normal whitespace-nowrap">
                 Show decrypted values
               </Label>
             </div>
-          )}
-          <Button variant="outline" size="icon" className="size-8" onClick={() => mutate()} aria-label="Refresh history">
-            <RefreshCw className={cn(isValidating && "animate-spin")} />
-          </Button>
-        </>
-      }
-    >
-      {error && !data ? (
-        <div className="p-4">
-          <ErrorState error={error} onRetry={() => mutate()} />
-        </div>
-      ) : isLoading && !data ? (
-        <TableSkeleton rows={3} cols={4} />
-      ) : (
-        <div className="overflow-x-auto">
-          {error && (
-            <div className="px-4 pt-3">
-              <ErrorState error={error} onRetry={() => mutate()} />
-            </div>
-          )}
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-muted/40 text-muted-foreground border-b text-left text-xs">
-                <th className="px-4 py-2 font-semibold">Version</th>
-                <th className="px-3 py-2 font-semibold">Value</th>
-                <th className="hidden px-3 py-2 font-semibold md:table-cell">Type</th>
-                <th className="hidden px-3 py-2 font-semibold sm:table-cell">Last modified</th>
-                <th className="hidden px-3 py-2 font-semibold lg:table-cell">Modified by</th>
-                <th className="px-3 py-2 font-semibold">Labels</th>
-                <th className="px-4 py-2" />
-              </tr>
-            </thead>
-            <tbody>
-              {versions.map((v) => {
-                const masked = (v.type ?? p.type) === "SecureString" && !decrypt
-                return (
-                  <tr key={v.version} className="border-b last:border-0">
-                    <td className="px-4 py-2 align-top tabular-nums">
-                      {v.version}
-                      {v.version === p.version && <span className="text-muted-foreground ml-1.5 text-xs">(current)</span>}
-                    </td>
-                    <td className="max-w-[16rem] px-3 py-2 align-top sm:max-w-md">
-                      {masked ? (
-                        <Mask />
-                      ) : (
-                        <span className="flex items-start gap-1">
-                          <span className="line-clamp-3 min-w-0 font-mono text-[13px] break-all whitespace-pre-wrap" title={v.value}>
-                            {v.value}
-                          </span>
-                          <CopyButton value={v.value} label={`Copy version ${v.version}`} />
-                        </span>
-                      )}
-                    </td>
-                    <td className="hidden px-3 py-2 align-top md:table-cell">
-                      <TypeBadge type={v.type ?? p.type} />
-                    </td>
-                    <td className="hidden px-3 py-2 align-top whitespace-nowrap sm:table-cell">
-                      <TimeAgo value={v.last_modified} />
-                    </td>
-                    <td className="hidden px-3 py-2 align-top lg:table-cell" title={v.modified_by}>
-                      {principalName(v.modified_by) || "-"}
-                    </td>
-                    <td className="px-3 py-2 align-top">
-                      <Labels labels={v.labels} disabled={unlabeling} onRemove={(l) => unlabel(v.version, l)} />
-                    </td>
-                    <td className="px-4 py-2 text-right align-top">
-                      <Button variant="outline" size="sm" onClick={() => setLabeling(v)}>
-                        <Tag /> <span className="hidden sm:inline">Attach labels</span>
-                      </Button>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-          <p className="text-muted-foreground flex items-start gap-1.5 border-t px-4 py-2 text-xs">
-            <Info className="mt-px size-3.5 shrink-0" />
-            <span className="min-w-0 break-words">
-              Read a specific version with <span className="font-mono break-all">{`${p.name}:<version>`}</span> or a labelled one with{" "}
-              <span className="font-mono break-all">{`${p.name}:<label>`}</span>.
-            </span>
-          </p>
-        </div>
-      )}
+          )
+        }
+        empty={<EmptyState icon={HistoryIcon} title="No versions" description="This parameter has no stored versions." className="py-10" />}
+      />
+      <p className="text-muted-foreground flex items-start gap-1.5 px-1 text-xs">
+        <Info className="mt-px size-3.5 shrink-0" />
+        <span className="min-w-0 break-words">
+          Read a specific version with <span className="font-mono break-all">{`${p.name}:<version>`}</span> or a labelled one with{" "}
+          <span className="font-mono break-all">{`${p.name}:<label>`}</span>.
+        </span>
+      </p>
 
       <ConfirmDialog
         open={!!removing}
@@ -452,7 +447,7 @@ function History({ p, onChanged }: { p: SsmParameter; onChanged: () => void }) {
           onChanged()
         }}
       />
-    </Section>
+    </div>
   )
 }
 

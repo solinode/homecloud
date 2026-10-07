@@ -1,6 +1,7 @@
 "use client"
 
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Tag, type TagAccent } from "@/components/console/tag"
 import type { DynamoItem, DynamoTable, IndexProjection, KeyDef, KeyType, ProjectionType, StreamViewType, TableIndex } from "@/lib/types"
 import { cn } from "@/lib/utils"
 
@@ -51,18 +52,38 @@ export function KeyTypeSelect({
   )
 }
 
-/** KeySchema renders a table's or index's key schema as "PK: customer (S) · SK: ts (N)". */
+/** Tag accent per attribute type: strings info, numbers warning, booleans violet. */
+export const ATTR_TYPE_ACCENT: Record<string, TagAccent> = { S: "info", N: "warning", BOOL: "violet" }
+
+/** KeyTypeTag renders a key attribute type (S / N) as a Tag. */
+export function KeyTypeTag({ type }: { type: KeyType | string }) {
+  return (
+    <Tag accent={ATTR_TYPE_ACCENT[type] ?? "neutral"} title={KEY_TYPE_LABEL[type as KeyType] ?? type}>
+      {type}
+    </Tag>
+  )
+}
+
+/** KeyAttr renders one key attribute: mono name plus its type Tag, on one line. */
+export function KeyAttr({ k, className }: { k: KeyDef; className?: string }) {
+  return (
+    <span className={cn("inline-flex items-center gap-1.5 whitespace-nowrap", className)}>
+      <span className="font-mono text-[13px]">{k.name}</span>
+      <KeyTypeTag type={k.type} />
+    </span>
+  )
+}
+
+/** KeySchema renders a table's or index's key schema as "customer [S] + ts [N]". */
 export function KeySchema({ pk, sk, className }: { pk: KeyDef; sk?: KeyDef | null; className?: string }) {
   return (
-    <span className={cn("inline-flex flex-wrap items-center gap-x-2 gap-y-0.5", className)}>
-      <span>
-        <span className="font-mono text-[13px]">{pk.name}</span> <span className="text-muted-foreground text-xs">({pk.type})</span>
-      </span>
+    <span className={cn("inline-flex flex-wrap items-center gap-x-2 gap-y-0.5 align-middle", className)}>
+      <KeyAttr k={pk} />
       {sk && (
-        <span>
-          <span className="text-muted-foreground text-xs">+</span> <span className="font-mono text-[13px]">{sk.name}</span>{" "}
-          <span className="text-muted-foreground text-xs">({sk.type})</span>
-        </span>
+        <>
+          <span className="text-muted-foreground text-xs">+</span>
+          <KeyAttr k={sk} />
+        </>
       )}
     </span>
   )
@@ -238,7 +259,7 @@ export function AttrValue({ value, ttl }: { value: unknown; ttl?: boolean }) {
       </span>
     )
   }
-  if (typeof value === "boolean") return <span className="font-mono text-[13px] text-blue-700 dark:text-blue-300">{String(value)}</span>
+  if (typeof value === "boolean") return <span className="font-mono text-[13px] text-violet">{String(value)}</span>
   const full = JSON.stringify(value)
   return (
     <span className="text-muted-foreground block max-w-72 truncate font-mono text-[12.5px]" title={full.length > 60 ? full : undefined}>

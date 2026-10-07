@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { AlertCircle, ArrowLeft, Loader2, Pencil, Send, Undo2 } from "lucide-react"
+import { AlertCircle, ArrowLeft, Loader2, Pencil, RefreshCw, Send, Undo2 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -12,6 +12,7 @@ import { ErrorState } from "@/components/console/error-state"
 import { DetailSkeleton } from "@/components/console/loading"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
+import { StatTile } from "@/components/console/stat-tile"
 import { ApiError } from "@/lib/api"
 import { formatNumber } from "@/lib/format"
 import { useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
@@ -88,7 +89,7 @@ export function QueueDetail() {
         actions={
           <>
             <Button variant="outline" size="sm" onClick={() => mutate()} disabled={isValidating} aria-label="Refresh">
-              {isValidating ? <Loader2 className="animate-spin" /> : null}
+              {isValidating ? <Loader2 className="animate-spin" /> : <RefreshCw />}
               Refresh
             </Button>
             <Button variant="outline" size="sm" onClick={edit}>
@@ -99,10 +100,10 @@ export function QueueDetail() {
                 <Undo2 /> Start DLQ redrive
               </Button>
             )}
+            <ActionsMenu items={items} />
             <Button size="sm" onClick={() => setParam("tab", "send-receive")}>
               <Send /> Send and receive
             </Button>
-            <ActionsMenu items={items} />
           </>
         }
       />
@@ -151,15 +152,13 @@ export function QueueDetail() {
 
 function Stat({ label, value, tone, muted }: { label: string; value: number; tone?: "primary"; muted?: boolean }) {
   return (
-    <div className="bg-card flex flex-col gap-1 rounded-lg border px-3 py-2.5 shadow-xs">
-      <span className="text-muted-foreground text-xs font-medium">
-        {label}
-        {muted && <span className="sr-only"> (since start)</span>}
-      </span>
-      <span className={cn("text-xl font-semibold tabular-nums", tone === "primary" && value > 0 && "text-primary", muted && "text-muted-foreground")}>
-        {formatNumber(value)}
-      </span>
-    </div>
+    <StatTile
+      label={label}
+      value={<span className={cn(tone === "primary" && value > 0 && "text-primary", muted && "text-muted-foreground")}>{formatNumber(value)}</span>}
+      caption={muted ? "Since start" : undefined}
+      tone={tone === "primary" && value > 0 ? "info" : undefined}
+      className="p-4"
+    />
   )
 }
 

@@ -1,7 +1,6 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { Loader2, Plus, ScrollText, Trash2 } from "lucide-react"
 import { toast } from "sonner"
@@ -12,11 +11,11 @@ import { Input } from "@/components/ui/input"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ActionsMenu } from "@/components/console/actions-menu"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
-import { cellLinkClass, DataTable, type Column } from "@/components/console/data-table"
+import { CellLink, CellText, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
-import { StatusBadge } from "@/components/console/status-badge"
+import { Tag } from "@/components/console/tag"
 import { TimeAgo } from "@/components/console/time-ago"
 import { api, errorMessage, seg } from "@/lib/api"
 import { formatBytes } from "@/lib/format"
@@ -27,9 +26,11 @@ import { describeContainerGroup, logGroupHref, RETENTION_CHOICES, retentionLabel
 
 export function SourceBadge({ source }: { source: LogGroup["source"] }) {
   return source === "container" ? (
-    <StatusBadge status="container" tone="info" label="Container" />
+    <Tag accent="info" mono={false}>
+      Container
+    </Tag>
   ) : (
-    <StatusBadge status="stored" tone="neutral" label="Stored" />
+    <Tag mono={false}>Stored</Tag>
   )
 }
 
@@ -199,10 +200,14 @@ export function LogGroupList() {
         value: (g) => `${g.name} ${describeContainerGroup(g.name, names)}`,
         cell: (g) => (
           <div className="flex min-w-0 flex-col">
-            <Link href={logGroupHref(g.name)} className={`${cellLinkClass()} font-mono text-[13px] break-all`} onClick={(e) => e.stopPropagation()}>
+            <CellLink href={logGroupHref(g.name)} mono max="28rem">
               {g.name}
-            </Link>
-            {g.source === "container" && <span className="text-muted-foreground text-xs">{describeContainerGroup(g.name, names)}</span>}
+            </CellLink>
+            {g.source === "container" && (
+              <CellText muted max="28rem" className="text-xs">
+                {describeContainerGroup(g.name, names)}
+              </CellText>
+            )}
           </div>
         ),
       },

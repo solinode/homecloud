@@ -2,20 +2,21 @@
 
 import { useEffect, useState, type ReactNode } from "react"
 import Link from "next/link"
-import { Loader2 } from "lucide-react"
+import { ArrowRightLeft, CheckCircle2, Loader2, Undo2 } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { Label } from "@/components/ui/label"
-import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ConfirmDialog } from "@/components/console/confirm-dialog"
+import { Field } from "@/components/console/form-field"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
+import { Tag } from "@/components/console/tag"
 import { api, errorMessage, seg } from "@/lib/api"
 import { formatNumber, pluralize } from "@/lib/format"
 import { revalidate, useApi } from "@/lib/hooks"
 import type { Queue } from "@/lib/types"
-import { cn } from "@/lib/utils"
 
 export const QUEUES_PATH = "/api/v1/sqs/queues"
 
@@ -36,17 +37,9 @@ export function useQueues(refreshInterval = QUEUE_POLL) {
 /** QueueTypeBadge shows Standard / FIFO. */
 export function QueueTypeBadge({ fifo, className }: { fifo: boolean; className?: string }) {
   return (
-    <span
-      className={cn(
-        "inline-flex items-center rounded-md px-1.5 py-0.5 text-xs font-medium whitespace-nowrap ring-1 ring-inset",
-        fifo
-          ? "bg-violet-50 text-violet-700 ring-violet-600/20 dark:bg-violet-500/10 dark:text-violet-300 dark:ring-violet-400/20"
-          : "bg-muted text-muted-foreground ring-border",
-        className,
-      )}
-    >
+    <Tag accent={fifo ? "violet" : "neutral"} className={className}>
       {fifo ? "FIFO" : "Standard"}
-    </span>
+    </Tag>
   )
 }
 
@@ -203,50 +196,48 @@ function RedriveDialog({ queue, onClose }: { queue: Queue | null; onClose: () =>
               reset.
             </DialogDescription>
           </DialogHeader>
-          <RadioGroup value={mode} onValueChange={(v) => setMode(v as "source" | "custom")} className="gap-3">
-            <label className={cn("flex cursor-pointer items-start gap-3 rounded-md border p-3", mode === "source" && "border-primary bg-primary/5")}>
-              <RadioGroupItem value="source" className="mt-0.5" />
-              <div className="min-w-0 text-sm">
-                <div className="font-medium">Redrive to source queue(s)</div>
-                <p className="text-muted-foreground text-xs">
+          <OptionGroup label="Redrive destination" columns={1}>
+            <OptionCard
+              selected={mode === "source"}
+              onSelect={() => setMode("source")}
+              icon={Undo2}
+              title="Redrive to source queue(s)"
+              description={
+                <>
                   Each message goes back to the queue it was moved from{sources.length ? ` (${sources.join(", ")})` : ""}. Messages without a known source
                   stay here.
-                </p>
-              </div>
-            </label>
-            <label className={cn("flex cursor-pointer items-start gap-3 rounded-md border p-3", mode === "custom" && "border-primary bg-primary/5")}>
-              <RadioGroupItem value="custom" className="mt-0.5" />
-              <div className="flex min-w-0 flex-1 flex-col gap-2 text-sm">
-                <div>
-                  <div className="font-medium">Redrive to a custom destination</div>
-                  <p className="text-muted-foreground text-xs">Move every message to one queue of the same type.</p>
-                </div>
-                {mode === "custom" && (
-                  <div className="flex flex-col gap-1.5">
-                    <Label htmlFor="redrive-dest" className="sr-only">
-                      Destination queue
-                    </Label>
-                    <Select value={dest} onValueChange={setDest}>
-                      <SelectTrigger id="redrive-dest" className="w-full">
-                        <SelectValue placeholder="Choose a queue" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {candidates.map((q) => (
-                          <SelectItem key={q.name} value={q.name}>
-                            {q.name}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                )}
-              </div>
-            </label>
-          </RadioGroup>
+                </>
+              }
+            />
+            <OptionCard
+              selected={mode === "custom"}
+              onSelect={() => setMode("custom")}
+              icon={ArrowRightLeft}
+              title="Redrive to a custom destination"
+              description="Move every message to one queue of the same type."
+            />
+          </OptionGroup>
+          {mode === "custom" && (
+            <Field label="Destination queue" htmlFor="redrive-dest" help={candidates.length ? "Queues of the same type (standard or FIFO)." : "No other queue of the same type exists."}>
+              <Select value={dest} onValueChange={setDest}>
+                <SelectTrigger id="redrive-dest" className="w-full">
+                  <SelectValue placeholder="Choose a queue" />
+                </SelectTrigger>
+                <SelectContent>
+                  {candidates.map((q) => (
+                    <SelectItem key={q.name} value={q.name}>
+                      {q.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </Field>
+          )}
           {moved !== null && (
-            <p className="rounded-md border border-emerald-600/30 bg-emerald-50 p-3 text-sm text-emerald-800 dark:border-emerald-400/30 dark:bg-emerald-500/10 dark:text-emerald-300">
-              Moved {pluralize(moved, "message")}.
-            </p>
+            <Alert variant="success">
+              <CheckCircle2 />
+              <AlertDescription>Moved {pluralize(moved, "message")}.</AlertDescription>
+            </Alert>
           )}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose} disabled={pending}>

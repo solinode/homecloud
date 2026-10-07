@@ -7,7 +7,7 @@ import { Inbox, Plus } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { ActionsMenu, type ActionItem } from "@/components/console/actions-menu"
-import { DataTable, cellLinkClass, type Column } from "@/components/console/data-table"
+import { CellLink, DataTable, type Column } from "@/components/console/data-table"
 import { EmptyState } from "@/components/console/empty-state"
 import { PageHeader } from "@/components/console/page-header"
 import { TimeAgo } from "@/components/console/time-ago"
@@ -22,11 +22,7 @@ const columns: Column<Queue>[] = [
   {
     id: "name",
     header: "Name",
-    cell: (q) => (
-      <Link href={queueHref(q.name)} onClick={(e) => e.stopPropagation()} className={cellLinkClass()}>
-        {q.name}
-      </Link>
-    ),
+    cell: (q) => <CellLink href={queueHref(q.name)}>{q.name}</CellLink>,
     value: (q) => q.name,
   },
   { id: "type", header: "Type", cell: (q) => <QueueTypeBadge fifo={q.fifo} />, value: (q) => (q.fifo ? "FIFO" : "Standard") },

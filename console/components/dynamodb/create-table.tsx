@@ -1,15 +1,18 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useId, useMemo, useState } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Info, Loader2, Plus, X } from "lucide-react"
+import { AlertCircle, Gauge, Info, Loader2, Plus, X, Zap } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Field } from "@/components/console/form-field"
+import { OptionCard, OptionGroup } from "@/components/console/option-card"
+import { Tag } from "@/components/console/tag"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { TagsEditor, rowsToTags, type TagRow } from "@/components/console/tags-editor"
@@ -191,11 +194,13 @@ export function CreateTable() {
               </Field>
               <Field
                 label="Partition key"
+                htmlFor="tbl-pk"
                 error={err("pk")}
                 help="The partition key is part of the primary key. Queries always select a single partition value."
               >
                 <div className="flex max-w-md gap-2">
                   <Input
+                    id="tbl-pk"
                     value={pkName}
                     onChange={(e) => setPkName(e.target.value)}
                     placeholder="e.g. customer_id"
@@ -206,18 +211,20 @@ export function CreateTable() {
                 </div>
               </Field>
               <div className="flex flex-col gap-2">
-                <label className="flex items-center gap-2 text-sm font-medium">
+                <label className="flex w-fit cursor-pointer items-center gap-2 text-[13px] font-medium">
                   <Checkbox checked={useSort} onCheckedChange={(v) => setUseSort(v === true)} />
                   Add a sort key
                 </label>
                 {useSort && (
                   <Field
                     label="Sort key"
+                    htmlFor="tbl-sk"
                     error={err("sk")}
                     help="Items with the same partition key are stored sorted by this key, enabling range conditions (between, begins_with, <, >)."
                   >
                     <div className="flex max-w-md gap-2">
                       <Input
+                        id="tbl-sk"
                         value={skName}
                         onChange={(e) => setSkName(e.target.value)}
                         placeholder="e.g. created_at"
@@ -229,6 +236,27 @@ export function CreateTable() {
                   </Field>
                 )}
               </div>
+              <Field label="Capacity mode" help="Tables always use on-demand capacity; there is no throughput to provision.">
+                <OptionGroup label="Capacity mode" className="max-w-2xl">
+                  <OptionCard
+                    selected
+                    onSelect={() => {}}
+                    icon={Zap}
+                    title="On-demand"
+                    badge={<Tag accent="success">PAY_PER_REQUEST</Tag>}
+                    description="Reads and writes scale with traffic. No throughput settings."
+                  />
+                  <OptionCard
+                    selected={false}
+                    onSelect={() => {}}
+                    disabled
+                    icon={Gauge}
+                    title="Provisioned"
+                    badge={<Tag>Not supported</Tag>}
+                    description="Fixed read and write capacity units."
+                  />
+                </OptionGroup>
+              </Field>
             </div>
           </Section>
 
@@ -284,7 +312,7 @@ export function CreateTable() {
 
           <Section title="DynamoDB stream" description="Record every item change in a time-ordered log that DynamoDB Streams clients and Lambda triggers can read for 24 hours.">
             <div className="flex flex-col gap-3">
-              <label className="flex items-center gap-2 text-sm font-medium">
+              <label className="flex w-fit cursor-pointer items-center gap-2 text-[13px] font-medium">
                 <Checkbox checked={streamOn} onCheckedChange={(v) => setStreamOn(v === true)} />
                 Enable stream
               </label>
@@ -298,7 +326,7 @@ export function CreateTable() {
 
           <Section title="Time to live (TTL)" description="Expire items automatically when a numeric attribute holding an epoch time in seconds is in the past.">
             <div className="flex flex-col gap-3">
-              <label className="flex items-center gap-2 text-sm font-medium">
+              <label className="flex w-fit cursor-pointer items-center gap-2 text-[13px] font-medium">
                 <Checkbox checked={ttlOn} onCheckedChange={(v) => setTtlOn(v === true)} />
                 Enable TTL
               </label>
@@ -356,18 +384,25 @@ export function CreateTable() {
                 <SummaryItem label="Capacity mode">On-demand (pay per request)</SummaryItem>
                 <SummaryItem label="Tags">{pluralize(tagRows.filter((r) => r.key.trim()).length, "tag")}</SummaryItem>
               </dl>
-              <p className="text-muted-foreground flex gap-1.5 border-t pt-3 text-xs">
-                <Info className="mt-px size-3.5 shrink-0" />
-                The key schema and local indexes cannot be changed after creation. Global indexes, streams and TTL can be changed later.
-              </p>
-              {submitted && !valid && <p className="text-destructive text-xs">Some settings need attention. Check the highlighted fields.</p>}
-              <div className="flex flex-col gap-2 border-t pt-4">
+              <Alert variant="info">
+                <Info />
+                <AlertDescription>
+                  The key schema and local indexes cannot be changed after creation. Global indexes, streams and TTL can be changed later.
+                </AlertDescription>
+              </Alert>
+              {submitted && !valid && (
+                <Alert variant="destructive">
+                  <AlertCircle />
+                  <AlertDescription>Some settings need attention. Check the highlighted fields.</AlertDescription>
+                </Alert>
+              )}
+              <div className="flex justify-end gap-2 border-t pt-4">
+                <Button type="button" variant="outline" asChild>
+                  <Link href="/dynamodb/">Cancel</Link>
+                </Button>
                 <Button type="submit" disabled={pending}>
                   {pending && <Loader2 className="animate-spin" />}
                   Create table
-                </Button>
-                <Button type="button" variant="outline" asChild>
-                  <Link href="/dynamodb/">Cancel</Link>
                 </Button>
               </div>
             </div>
@@ -395,20 +430,30 @@ export function IndexRowEditor({
   errors?: IndexRowErrors
   localPk?: { name: string; type: KeyType }
 }) {
+  const id = useId()
   return (
-    <div className="relative grid grid-cols-1 gap-3 rounded-md border p-3 md:grid-cols-3">
-      <Field label="Index name" error={errors.name}>
-        <Input value={row.name} onChange={(e) => onChange({ name: e.target.value })} placeholder="e.g. by-status" className="h-8 font-mono" aria-label="Index name" />
+    <div className="bg-muted/30 relative grid grid-cols-1 gap-3 rounded-lg border p-3 md:grid-cols-3">
+      <Field label="Index name" htmlFor={`${id}-name`} error={errors.name}>
+        <Input
+          id={`${id}-name`}
+          value={row.name}
+          onChange={(e) => onChange({ name: e.target.value })}
+          placeholder="e.g. by-status"
+          className="h-8 font-mono"
+          autoComplete="off"
+          spellCheck={false}
+        />
       </Field>
-      <Field label="Partition key" error={errors.pk} help={localPk ? "Same as the table" : undefined}>
+      <Field label="Partition key" htmlFor={`${id}-pk`} error={errors.pk} help={localPk ? "Same as the table" : undefined}>
         {localPk ? (
           <div className="flex gap-2">
-            <Input value={localPk.name || "(table partition key)"} disabled className="h-8 min-w-0 flex-1 font-mono" aria-label="Index partition key name" />
+            <Input id={`${id}-pk`} value={localPk.name || "(table partition key)"} disabled className="h-8 min-w-0 flex-1 font-mono" />
             <KeyTypeSelect value={localPk.type} onChange={() => {}} className="w-24" disabled />
           </div>
         ) : (
           <div className="flex gap-2">
             <Input
+              id={`${id}-pk`}
               value={row.pkName}
               onChange={(e) => onChange({ pkName: e.target.value })}
               placeholder="attribute"
@@ -419,9 +464,10 @@ export function IndexRowEditor({
           </div>
         )}
       </Field>
-      <Field label="Sort key" optional={!localPk} error={errors.sk}>
+      <Field label="Sort key" htmlFor={`${id}-sk`} optional={!localPk} error={errors.sk}>
         <div className="flex gap-2">
           <Input
+            id={`${id}-sk`}
             value={row.skName}
             onChange={(e) => onChange({ skName: e.target.value })}
             placeholder="attribute"
@@ -440,8 +486,15 @@ export function IndexRowEditor({
         <ProjectionTypeSelect value={row.projType} onChange={(v) => onChange({ projType: v })} />
       </Field>
       {row.projType === "INCLUDE" && (
-        <Field label="Included attributes" error={errors.include} help="Comma-separated. Key attributes are always included." className="md:col-span-2">
+        <Field
+          label="Included attributes"
+          htmlFor={`${id}-include`}
+          error={errors.include}
+          help="Comma-separated. Key attributes are always included."
+          className="md:col-span-2"
+        >
           <Input
+            id={`${id}-include`}
             value={row.include}
             onChange={(e) => onChange({ include: e.target.value })}
             placeholder="e.g. status, total"
@@ -457,7 +510,7 @@ export function IndexRowEditor({
 function SummaryItem({ label, children }: { label: string; children: React.ReactNode }) {
   return (
     <div>
-      <dt className="text-muted-foreground text-xs font-medium">{label}</dt>
+      <dt className="text-faint mb-0.5 text-xs font-medium">{label}</dt>
       <dd className="min-w-0 break-words">{children}</dd>
     </div>
   )

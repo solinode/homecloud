@@ -1,15 +1,17 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { Loader2, Play } from "lucide-react"
+import { CircleAlert, Loader2, Play, SearchX } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Textarea } from "@/components/ui/textarea"
+import { EmptyState } from "@/components/console/empty-state"
 import { Field } from "@/components/console/form-field"
 import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
@@ -90,9 +92,11 @@ export function LogsInsights() {
             <div className="flex max-h-64 flex-col gap-1 overflow-y-auto">
               {groups.data && shown.length === 0 && <p className="text-muted-foreground text-sm">No log groups.</p>}
               {shown.map((g) => (
-                <Label key={g.name} className="flex items-center gap-2 text-sm font-normal">
+                <Label key={g.name} className="flex min-w-0 items-center gap-2 text-sm font-normal">
                   <Checkbox checked={picked.includes(g.name)} onCheckedChange={(c) => toggle(g.name, c === true)} />
-                  <span className="font-mono text-[13px] break-all">{g.name}</span>
+                  <span className="min-w-0 truncate font-mono text-[13px]" title={g.name}>
+                    {g.name}
+                  </span>
                 </Label>
               ))}
             </div>
@@ -114,21 +118,28 @@ export function LogsInsights() {
                 </SelectContent>
               </Select>
             </Field>
-            <Textarea
-              aria-label="Query"
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
-              rows={6}
-              className="font-mono text-[13px]"
-              spellCheck={false}
-            />
+            <Field label="Query" htmlFor="ins-query" help="Commands are separated by | and run top to bottom.">
+              <Textarea
+                id="ins-query"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                rows={6}
+                className="font-mono text-[13px]"
+                spellCheck={false}
+              />
+            </Field>
             <div className="flex items-center gap-3">
               <Button onClick={run} disabled={running || picked.length === 0 || !query.trim()}>
                 {running ? <Loader2 className="animate-spin" /> : <Play />} Run query
               </Button>
               {picked.length === 0 && <span className="text-muted-foreground text-sm">Select at least one log group.</span>}
             </div>
-            {error && <p className="text-destructive text-sm">{error}</p>}
+            {error && (
+              <Alert variant="destructive">
+                <CircleAlert />
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
           </div>
         </Section>
       </div>
@@ -139,11 +150,11 @@ export function LogsInsights() {
           flush
         >
           {result.results.length === 0 ? (
-            <p className="text-muted-foreground p-4 text-sm">No results for this query and time range.</p>
+            <EmptyState icon={SearchX} title="No results" description="Nothing matched this query in the selected log groups and time range." />
           ) : (
             <div className="max-h-[60vh] overflow-auto">
               <table className="w-full text-sm">
-                <thead className="bg-card text-muted-foreground sticky top-0 border-b text-left">
+                <thead className="bg-card text-muted-foreground sticky top-0 border-b text-left text-xs">
                   <tr>
                     {columns.map((c) => (
                       <th key={c} className="px-3 py-2 font-medium whitespace-nowrap">

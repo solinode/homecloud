@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { AlertTriangle, ChevronLeft, ChevronRight, Loader2, Pencil, Play, Plus, Trash2, X } from "lucide-react"
 import { toast } from "sonner"
 
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -19,7 +20,7 @@ import { formatNumber, pluralize } from "@/lib/format"
 import { revalidate } from "@/lib/hooks"
 import type { Condition, ConditionOp, DynamoItem, DynamoTable, KeyDef, PageInput, PageResult, QueryInput } from "@/lib/types"
 import { cn } from "@/lib/utils"
-import { AttrValue, KeySchema, TABLES_PATH, compactJson, allIndexes, itemKey, keyError, keyId, keySkeleton, parseKeyValue, primaryKeys } from "./common"
+import { AttrValue, KeySchema, KeyTypeTag, TABLES_PATH, compactJson, allIndexes, itemKey, keyError, keyId, keySkeleton, parseKeyValue, primaryKeys } from "./common"
 
 type Mode = "scan" | "query"
 type ValueType = "S" | "N" | "BOOL"
@@ -227,13 +228,21 @@ export function ItemExplorer({ table }: { table: DynamoTable }) {
   // ---- result columns ----
   const items = useMemo(() => page?.items ?? [], [page])
   const columns = useMemo<Column<DynamoItem>[]>(() => {
-    const keys = primaryKeys(table).map((k) => k.name)
-    if (ix) for (const k of [ix.partition_key, ix.sort_key]) if (k && !keys.includes(k.name)) keys.push(k.name)
+    const keyDefs: KeyDef[] = [...primaryKeys(table)]
+    if (ix) for (const k of [ix.partition_key, ix.sort_key]) if (k && !keyDefs.some((d) => d.name === k.name)) keyDefs.push(k)
+    const keys = keyDefs.map((k) => k.name)
     const others: string[] = []
     for (const it of items) for (const a of Object.keys(it)) if (!keys.includes(a) && !others.includes(a)) others.push(a)
     const attrCol = (a: string, isKey: boolean): Column<DynamoItem> => ({
       id: `a:${a}`,
-      header: <span className={cn(isKey && "text-foreground")}>{a}</span>,
+      header: isKey ? (
+        <span className="text-foreground inline-flex items-center gap-1.5">
+          {a}
+          <KeyTypeTag type={keyDefs.find((d) => d.name === a)!.type} />
+        </span>
+      ) : (
+        a
+      ),
       cell: (it) => <AttrValue value={it[a]} ttl={a === table.ttl_attribute} />,
       value: (it) => {
         const v = it[a]
@@ -348,9 +357,10 @@ export function ItemExplorer({ table }: { table: DynamoTable }) {
                   <Field
                     label={
                       <>
-                        <span className="font-mono">{skDef.name}</span> (sort key) <span className="text-muted-foreground font-normal">- optional</span>
+                        <span className="font-mono">{skDef.name}</span> (sort key)
                       </>
                     }
+                    optional
                     error={formErrors.sv || formErrors.sv2}
                   >
                     <div className="flex flex-wrap gap-2">
@@ -416,9 +426,12 @@ export function ItemExplorer({ table }: { table: DynamoTable }) {
           )}
 
           <div className="flex flex-col gap-2">
-            <span className="text-sm font-medium">
-              Filters <span className="text-muted-foreground font-normal">- optional, applied after items are read</span>
-            </span>
+            <div>
+              <span className="text-[13px] font-medium">
+                Filters <span className="text-faint ml-1.5 text-xs font-normal">optional</span>
+              </span>
+              <p className="text-muted-foreground text-xs">Applied after items are read.</p>
+            </div>
             {filters.map((f, i) => {
               const noValue = f.op === "exists" || f.op === "not_exists"
               return (
@@ -485,13 +498,13 @@ export function ItemExplorer({ table }: { table: DynamoTable }) {
                 </SelectContent>
               </Select>
             </Field>
-            <div className="flex gap-2">
+            <div className="ml-auto flex gap-2">
+              <Button type="button" variant="outline" size="sm" onClick={reset}>
+                Reset
+              </Button>
               <Button type="submit" size="sm" disabled={loading}>
                 {loading ? <Loader2 className="animate-spin" /> : <Play />}
                 Run
-              </Button>
-              <Button type="button" variant="outline" size="sm" onClick={reset}>
-                Reset
               </Button>
             </div>
           </div>
@@ -705,13 +718,16 @@ export function ItemEditorDialog({
           </DialogHeader>
           <JsonEditor value={text} onChange={setText} rows={14} validate={validate} />
           {keyChanged && (
-            <p className="flex gap-2 rounded-md border border-amber-600/30 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-400/30 dark:bg-amber-500/10 dark:text-amber-300">
-              <AlertTriangle className="mt-0.5 size-4 shrink-0" />
-              <span>
-                You changed a key attribute. Saving creates a new item with key <span className="font-mono">{compactJson(itemKey(table, parsed!), 80)}</span> and
-                keeps the original item <span className="font-mono">{compactJson(itemKey(table, original!), 80)}</span>.
-              </span>
-            </p>
+            <Alert variant="warning">
+              <AlertTriangle />
+              <AlertTitle>Key attribute changed</AlertTitle>
+              <AlertDescription>
+                <span>
+                  Saving creates a new item with key <span className="font-mono break-all">{compactJson(itemKey(table, parsed!), 80)}</span> and keeps the
+                  original item <span className="font-mono break-all">{compactJson(itemKey(table, original!), 80)}</span>.
+                </span>
+              </AlertDescription>
+            </Alert>
           )}
           {tooBig && <p className="text-destructive text-xs">Items are limited to 400 KB.</p>}
           <DialogFooter>
