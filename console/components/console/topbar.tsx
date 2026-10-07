@@ -1,89 +1,79 @@
 "use client"
 
-import { useEffect, useMemo, useRef, useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
-import { useRouter } from "next/navigation"
+import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
-import { Cloud, LayoutGrid, LogOut, Menu, Moon, Search, Sun, User } from "lucide-react"
+import { BookOpen, ChevronsUpDown, KeyRound, LayoutGrid, LogOut, Menu, Monitor, Moon, Search, Sun } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip"
+import { BrandMark, Logo } from "@/components/console/brand"
+import { Kbd, useCommandPalette } from "@/components/console/command-palette"
 import { CopyButton } from "@/components/console/copy-button"
+import { ServiceIcon } from "@/components/console/service-icon"
 import { useSession } from "@/components/console/auth"
+import { DOCS_URL } from "@/lib/actions"
 import { DEMO, logout } from "@/lib/api"
 import { useApi } from "@/lib/hooks"
 import type { Health } from "@/lib/types/common"
-import { SERVICES, servicesByCategory, type ServiceDef } from "@/lib/services"
+import { serviceForPath, servicesByCategory } from "@/lib/services"
 import { cn } from "@/lib/utils"
 
-export function Logo({ className, compact }: { className?: string; compact?: boolean }) {
-  return (
-    <span className={cn("flex items-center gap-2 font-semibold tracking-tight", className)}>
-      <span className="bg-brand flex size-7 items-center justify-center rounded-md text-white shadow-sm">
-        <Cloud className="size-4" strokeWidth={2.5} />
-      </span>
-      {!compact && <span>HomeCloud</span>}
-    </span>
-  )
-}
+export { Logo }
 
-function ServiceIcon({ s, className }: { s: ServiceDef; className?: string }) {
-  const Icon = s.icon
-  return (
-    <span className={cn("flex size-7 shrink-0 items-center justify-center rounded-md", s.color, className)}>
-      <Icon className="size-4" />
-    </span>
-  )
-}
-
-/** ServicesMenu is the grid of every service, grouped by category. */
-function ServicesMenu() {
+/** ServiceSwitcher shows the current service and opens the grid of every service. */
+function ServiceSwitcher() {
+  const pathname = usePathname() ?? "/"
+  const current = serviceForPath(pathname)
   const [open, setOpen] = useState(false)
   return (
     <Popover open={open} onOpenChange={setOpen}>
       <PopoverTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-topbar-foreground hover:bg-topbar-muted hover:text-topbar-foreground data-[state=open]:bg-topbar-muted h-8"
+        <button
+          type="button"
+          className="hover:bg-accent data-[state=open]:bg-accent flex h-8 min-w-0 items-center gap-2 rounded-md px-2 text-sm font-medium transition-colors"
         >
-          <LayoutGrid /> <span className="hidden sm:inline">Services</span>
-        </Button>
+          {current ? <ServiceIcon service={current} size="xs" /> : <LayoutGrid className="text-muted-foreground size-4" />}
+          <span className="max-w-[9rem] truncate">{current ? current.name : "Services"}</span>
+          <ChevronsUpDown className="text-faint size-3.5 shrink-0" />
+        </button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={8} className="max-h-[80vh] w-[min(92vw,760px)] overflow-y-auto p-0">
-        <div className="border-b px-4 py-3">
-          <p className="text-sm font-semibold">All services</p>
+      <PopoverContent align="start" sideOffset={8} className="max-h-[78vh] w-[min(94vw,820px)] overflow-y-auto p-0">
+        <div className="flex items-center justify-between border-b px-4 py-3">
+          <p className="text-sm font-semibold tracking-tight">All services</p>
+          <Link href="/" onClick={() => setOpen(false)} className="text-muted-foreground hover:text-foreground text-xs">
+            Console Home
+          </Link>
         </div>
         <div className="grid grid-cols-1 gap-x-6 gap-y-5 p-4 sm:grid-cols-2 md:grid-cols-3">
           {servicesByCategory().map((g) => (
             <div key={g.category}>
-              <p className="text-muted-foreground mb-1.5 text-xs font-semibold tracking-wide uppercase">{g.category}</p>
-              <ul className="flex flex-col gap-0.5">
+              <p className="hc-eyebrow mb-2 px-2">{g.category}</p>
+              <ul className="flex flex-col gap-px">
                 {g.services.map((s) => (
                   <li key={s.id}>
-                    {s.comingSoon ? (
-                      <span className="text-muted-foreground flex cursor-not-allowed items-center gap-2 rounded-md px-2 py-1.5 text-sm opacity-70">
-                        <ServiceIcon s={s} className="grayscale" />
-                        <span className="truncate">{s.name}</span>
-                        <span className="bg-muted ml-auto rounded px-1.5 py-0.5 text-[10px] font-medium uppercase">Soon</span>
+                    <Link
+                      href={s.href}
+                      onClick={() => setOpen(false)}
+                      aria-current={current?.id === s.id ? "page" : undefined}
+                      className="hover:bg-accent aria-[current=page]:bg-accent flex items-center gap-2.5 rounded-md px-2 py-1.5"
+                    >
+                      <ServiceIcon service={s} size="sm" />
+                      <span className="min-w-0">
+                        <span className="block truncate text-sm font-medium">{s.name}</span>
+                        <span className="text-faint block truncate text-xs">{s.description}</span>
                       </span>
-                    ) : (
-                      <Link href={s.href} onClick={() => setOpen(false)} className="hover:bg-accent flex items-center gap-2 rounded-md px-2 py-1.5 text-sm">
-                        <ServiceIcon s={s} />
-                        <span className="min-w-0">
-                          <span className="block truncate font-medium">{s.name}</span>
-                          <span className="text-muted-foreground block truncate text-xs">{s.description}</span>
-                        </span>
-                      </Link>
-                    )}
+                    </Link>
                   </li>
                 ))}
               </ul>
@@ -95,138 +85,28 @@ function ServicesMenu() {
   )
 }
 
-interface SearchHit {
-  service: ServiceDef
-  label: string
-  href: string
-  sub?: string
-}
-
-function buildIndex(): SearchHit[] {
-  const out: SearchHit[] = []
-  for (const s of SERVICES) {
-    out.push({ service: s, label: s.name, href: s.href, sub: s.comingSoon ? "Coming soon" : s.description })
-    for (const sec of s.nav ?? []) {
-      for (const it of sec.items) {
-        if (it.href === s.href) continue
-        out.push({ service: s, label: `${s.name} › ${it.label}`, href: it.href })
-      }
-    }
-  }
-  return out
-}
-
-/** GlobalSearch filters services and their pages; "/" focuses it. */
-function GlobalSearch() {
-  const router = useRouter()
-  const [q, setQ] = useState("")
-  const [open, setOpen] = useState(false)
-  const [active, setActive] = useState(0)
-  const inputRef = useRef<HTMLInputElement>(null)
-  const index = useMemo(buildIndex, [])
-
-  const hits = useMemo(() => {
-    const t = q.trim().toLowerCase()
-    if (!t) return index.filter((h) => !h.label.includes("›")).slice(0, 10)
-    return index
-      .filter((h) => `${h.label} ${h.service.description} ${h.service.category}`.toLowerCase().includes(t))
-      .slice(0, 12)
-  }, [q, index])
-
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      const el = e.target as HTMLElement
-      if (e.key === "/" && !["INPUT", "TEXTAREA"].includes(el.tagName) && !el.isContentEditable && !el.closest(".xterm")) {
-        e.preventDefault()
-        inputRef.current?.focus()
-      }
-    }
-    window.addEventListener("keydown", onKey)
-    return () => window.removeEventListener("keydown", onKey)
-  }, [])
-
-  const go = (h: SearchHit) => {
-    if (h.service.comingSoon) return
-    setOpen(false)
-    setQ("")
-    inputRef.current?.blur()
-    router.push(h.href)
-  }
-
+function SearchTrigger() {
+  const { setOpen } = useCommandPalette()
+  const [mac, setMac] = useState(true)
+  useEffect(() => setMac(/Mac|iP(hone|ad)/.test(navigator.platform)), [])
   return (
-    <Popover open={open && hits.length >= 0} onOpenChange={setOpen}>
-      <PopoverAnchor asChild>
-        <div className="relative w-full max-w-md">
-          <Search className="pointer-events-none absolute top-1/2 left-2.5 size-4 -translate-y-1/2 text-white/50" />
-          <input
-            ref={inputRef}
-            value={q}
-            onChange={(e) => {
-              setQ(e.target.value)
-              setActive(0)
-              setOpen(true)
-            }}
-            onFocus={() => setOpen(true)}
-            onKeyDown={(e) => {
-              if (e.key === "ArrowDown") {
-                e.preventDefault()
-                setActive((a) => Math.min(a + 1, hits.length - 1))
-              } else if (e.key === "ArrowUp") {
-                e.preventDefault()
-                setActive((a) => Math.max(a - 1, 0))
-              } else if (e.key === "Enter" && hits[active]) {
-                e.preventDefault()
-                go(hits[active])
-              } else if (e.key === "Escape") {
-                setOpen(false)
-                inputRef.current?.blur()
-              }
-            }}
-            placeholder="Search services"
-            aria-label="Search services"
-            className="bg-topbar-muted h-8 w-full rounded-md border border-white/10 pr-8 pl-8 text-sm text-white placeholder:text-white/50 focus:border-white/30 focus:outline-none"
-          />
-          <kbd className="pointer-events-none absolute top-1/2 right-2 hidden -translate-y-1/2 rounded border border-white/20 px-1.5 text-[10px] text-white/50 sm:block">/</kbd>
-        </div>
-      </PopoverAnchor>
-      <PopoverContent
-        align="start"
-        sideOffset={6}
-        onOpenAutoFocus={(e) => e.preventDefault()}
-        onInteractOutside={(e) => {
-          if (e.target === inputRef.current) e.preventDefault()
-        }}
-        className="w-[var(--radix-popover-trigger-width)] min-w-72 p-1"
+    <>
+      <button
+        type="button"
+        onClick={() => setOpen(true)}
+        className="bg-muted/60 hover:bg-muted hover:border-border-strong text-faint hidden h-8 w-full max-w-[22rem] items-center gap-2 rounded-md border px-2.5 text-sm transition-colors md:flex"
       >
-        {hits.length === 0 ? (
-          <p className="text-muted-foreground px-3 py-6 text-center text-sm">No services match “{q}”</p>
-        ) : (
-          <ul role="listbox">
-            {!q && <li className="text-muted-foreground px-2 pt-1 pb-1.5 text-xs font-medium">Services</li>}
-            {hits.map((h, i) => (
-              <li key={h.href + h.label} role="option" aria-selected={i === active}>
-                <button
-                  type="button"
-                  onMouseEnter={() => setActive(i)}
-                  onClick={() => go(h)}
-                  disabled={h.service.comingSoon}
-                  className={cn(
-                    "flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm disabled:cursor-not-allowed disabled:opacity-60",
-                    i === active && "bg-accent",
-                  )}
-                >
-                  <ServiceIcon s={h.service} className="size-6" />
-                  <span className="min-w-0 flex-1">
-                    <span className="block truncate">{h.label}</span>
-                    {h.sub && <span className="text-muted-foreground block truncate text-xs">{h.sub}</span>}
-                  </span>
-                </button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </PopoverContent>
-    </Popover>
+        <Search className="size-4" />
+        <span className="flex-1 text-left">Search…</span>
+        <span className="flex items-center gap-0.5">
+          <Kbd>{mac ? "⌘" : "Ctrl"}</Kbd>
+          <Kbd>K</Kbd>
+        </span>
+      </button>
+      <Button variant="ghost" size="icon-sm" className="md:hidden" onClick={() => setOpen(true)} aria-label="Search">
+        <Search />
+      </Button>
+    </>
   )
 }
 
@@ -234,80 +114,120 @@ function ThemeToggle() {
   const { resolvedTheme, setTheme } = useTheme()
   const [mounted, setMounted] = useState(false)
   useEffect(() => setMounted(true), [])
-  const dark = mounted && resolvedTheme === "dark"
+  const dark = !mounted || resolvedTheme === "dark"
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-topbar-foreground hover:bg-topbar-muted hover:text-topbar-foreground size-8"
-          onClick={() => setTheme(dark ? "light" : "dark")}
-          aria-label="Toggle dark mode"
-        >
+        <Button variant="ghost" size="icon-sm" onClick={() => setTheme(dark ? "light" : "dark")} aria-label="Toggle dark mode">
           {dark ? <Sun /> : <Moon />}
         </Button>
       </TooltipTrigger>
-      <TooltipContent>{dark ? "Light mode" : "Dark mode"}</TooltipContent>
+      <TooltipContent>{dark ? "Light theme" : "Dark theme"}</TooltipContent>
     </Tooltip>
   )
 }
 
+function RegionBadge() {
+  const region = useApi<Health>("/api/v1/health").data?.region ?? "us-east-1"
+  return (
+    <Tooltip>
+      <TooltipTrigger asChild>
+        <span className="text-muted-foreground hidden h-7 items-center gap-1.5 rounded-md border px-2 font-mono text-xs lg:inline-flex">
+          <span className="bg-success size-1.5 rounded-full shadow-[0_0_8px_var(--success)]" />
+          {region}
+        </span>
+      </TooltipTrigger>
+      <TooltipContent>Region</TooltipContent>
+    </Tooltip>
+  )
+}
+
+function initials(name: string) {
+  const parts = name.split(/[-_.\s@]+/).filter(Boolean)
+  return ((parts[0]?.[0] ?? "?") + (parts[1]?.[0] ?? "")).toUpperCase()
+}
+
 function AccountMenu() {
   const s = useSession()
+  const { theme, setTheme } = useTheme()
   const onSignOut = async () => {
     await logout()
     window.location.href = DEMO ? "/" : "/login/"
   }
+  const themes = [
+    { id: "system", label: "System", icon: Monitor },
+    { id: "dark", label: "Dark", icon: Moon },
+    { id: "light", label: "Light", icon: Sun },
+  ]
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button
-          variant="ghost"
-          size="sm"
-          className="text-topbar-foreground hover:bg-topbar-muted hover:text-topbar-foreground data-[state=open]:bg-topbar-muted h-8 max-w-72"
+        <button
+          type="button"
+          className="hover:bg-accent data-[state=open]:bg-accent flex h-8 max-w-72 items-center gap-2 rounded-md pr-2 pl-1 text-sm transition-colors"
+          aria-label="Account menu"
         >
-          <span className="flex size-5 items-center justify-center rounded-full bg-white/15">
-            <User className="size-3" />
+          <span className="bg-brand-soft text-primary border-brand-line flex size-6 items-center justify-center rounded-full border font-mono text-[10px] font-semibold">
+            {initials(s.user.name)}
           </span>
-          <span className="hidden truncate md:inline">
-            {s.user.name}
-            <span className="text-white/50"> @ {s.account_id}</span>
+          <span className="hidden min-w-0 flex-col items-start leading-none xl:flex">
+            <span className="truncate text-[13px] font-medium">{s.user.name}</span>
           </span>
-        </Button>
+          <span className="text-faint hidden font-mono text-xs xl:inline">{s.account_id}</span>
+        </button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-72">
-        <div className="flex flex-col gap-2 px-2 py-2 text-sm">
-          <div>
-            <p className="text-muted-foreground text-xs">Signed in as</p>
-            <p className="font-medium">
-              {s.user.name}
-              {s.user.root && <span className="bg-muted ml-2 rounded px-1.5 py-0.5 text-[10px] font-medium uppercase">root</span>}
+      <DropdownMenuContent align="end" className="w-80">
+        <div className="flex items-start gap-3 px-2 py-2.5">
+          <span className="bg-brand-soft text-primary border-brand-line flex size-9 shrink-0 items-center justify-center rounded-full border font-mono text-xs font-semibold">
+            {initials(s.user.name)}
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="flex items-center gap-2 text-sm font-medium">
+              <span className="truncate">{s.user.name}</span>
+              {s.user.root && <span className="text-faint rounded border px-1 font-mono text-[10px] uppercase">root</span>}
             </p>
-          </div>
-          <div>
-            <p className="text-muted-foreground text-xs">Account ID</p>
-            <p className="flex items-center gap-1 font-mono text-[13px]">
-              {s.account_id} <CopyButton value={s.account_id} label="Copy account ID" />
+            <p className="text-muted-foreground mt-1 flex items-center gap-1 font-mono text-xs">
+              {s.account_id} <CopyButton value={s.account_id} label="Copy account ID" className="size-5" />
             </p>
-          </div>
-          {s.user.arn && (
-            <div>
-              <p className="text-muted-foreground text-xs">ARN</p>
-              <p className="flex items-center gap-1 font-mono text-xs break-all">
-                <span className="min-w-0">{s.user.arn}</span> <CopyButton value={s.user.arn} label="Copy ARN" />
+            {s.user.arn && (
+              <p className="text-faint mt-1 flex items-start gap-1 font-mono text-[11px] break-all">
+                <span className="min-w-0">{s.user.arn}</span> <CopyButton value={s.user.arn} label="Copy ARN" className="size-5" />
               </p>
-            </div>
-          )}
+            )}
+          </div>
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuLabel className="hc-eyebrow px-2 pt-2 pb-1.5">Theme</DropdownMenuLabel>
+        <div className="grid grid-cols-3 gap-1 px-1 pb-1">
+          {themes.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => setTheme(t.id)}
+              aria-pressed={theme === t.id}
+              className={cn(
+                "text-muted-foreground hover:bg-accent hover:text-foreground flex h-8 items-center justify-center gap-1.5 rounded-md border border-transparent text-xs",
+                theme === t.id && "bg-accent text-foreground border-border",
+              )}
+            >
+              <t.icon className="size-3.5" /> {t.label}
+            </button>
+          ))}
         </div>
         <DropdownMenuSeparator />
         {s.user.name && (
           <DropdownMenuItem asChild>
             <Link href={`/iam/user/?name=${encodeURIComponent(s.user.name)}`}>
-              <User /> Security credentials
+              <KeyRound /> Security credentials
             </Link>
           </DropdownMenuItem>
         )}
+        <DropdownMenuItem asChild>
+          <a href={DOCS_URL} target="_blank" rel="noreferrer">
+            <BookOpen /> Documentation
+          </a>
+        </DropdownMenuItem>
+        <DropdownMenuSeparator />
         <DropdownMenuItem onSelect={onSignOut}>
           <LogOut /> Sign out
         </DropdownMenuItem>
@@ -316,36 +236,28 @@ function AccountMenu() {
   )
 }
 
+/** Topbar: brand, service switcher, search (⌘K), region, theme and account. */
 export function Topbar({ onMenu, showMenu }: { onMenu?: () => void; showMenu?: boolean }) {
-  const region = useApi<Health>("/api/v1/health").data?.region ?? "us-east-1"
   return (
-    <header className="bg-topbar text-topbar-foreground sticky top-0 z-40 flex h-12 shrink-0 items-center gap-2 border-b border-black/20 px-2 sm:px-3">
+    <header className="bg-background/80 supports-[backdrop-filter]:bg-background/70 sticky top-0 z-40 flex h-[var(--header-h)] shrink-0 items-center gap-1 border-b px-2 backdrop-blur-xl backdrop-saturate-150 sm:gap-2 sm:px-4">
       {showMenu && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="text-topbar-foreground hover:bg-topbar-muted hover:text-topbar-foreground size-8 lg:hidden"
-          onClick={onMenu}
-          aria-label="Open navigation"
-        >
+        <Button variant="ghost" size="icon-sm" className="lg:hidden" onClick={onMenu} aria-label="Open navigation">
           <Menu />
         </Button>
       )}
-      <Link href="/" className="mr-1 flex items-center rounded-md px-1 py-1 hover:bg-white/5" aria-label="Console home">
-        <Logo className="hidden sm:flex" />
-        <Logo compact className="sm:hidden" />
+      <Link href="/" className="hover:bg-accent flex h-9 shrink-0 items-center rounded-md px-1.5 transition-colors" aria-label="Console home">
+        <Logo className="hidden sm:inline-flex" />
+        <BrandMark className="sm:hidden" />
       </Link>
-      <ServicesMenu />
-      <div className="flex min-w-0 flex-1 justify-center px-1">
-        <GlobalSearch />
+      <span className="text-border-strong mx-0.5 hidden text-lg font-light select-none sm:inline" aria-hidden>
+        /
+      </span>
+      <ServiceSwitcher />
+      <div className="flex min-w-0 flex-1 justify-end px-1 md:justify-center">
+        <SearchTrigger />
       </div>
-      <div className="flex items-center gap-1">
-        <Tooltip>
-          <TooltipTrigger asChild>
-            <span className="hidden h-6 items-center rounded border border-white/20 px-2 font-mono text-xs text-white/80 sm:inline-flex">{region}</span>
-          </TooltipTrigger>
-          <TooltipContent>Region</TooltipContent>
-        </Tooltip>
+      <div className="flex shrink-0 items-center gap-1">
+        <RegionBadge />
         <ThemeToggle />
         <AccountMenu />
       </div>
