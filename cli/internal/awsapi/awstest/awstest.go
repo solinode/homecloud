@@ -15,7 +15,11 @@ package awstest
 
 import (
 	"bytes"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -131,6 +135,45 @@ func (h *Harness) Environ(akid, secret, token string) []string {
 		env = append(env, "AWS_SESSION_TOKEN="+token)
 	}
 	return env
+}
+
+// Signed sends a request signed with SigV4 as root for the given signing name,
+// for protocols the AWS CLI does not speak (Smithy RPC v2 CBOR), and returns
+// the response status, headers and body.
+func (h *Harness) Signed(t *testing.T, service, method, path string, header http.Header, body []byte) (int, http.Header, []byte) {
+	t.Helper()
+	h.sync()
+	r, err := http.NewRequest(method, h.URL+path, bytes.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for k, v := range header {
+		r.Header[k] = v
+	}
+	now := time.Now().UTC()
+	hash := awsapi.HashHex(body)
+	r.Header.Set("X-Amz-Date", now.Format("20060102T150405Z"))
+	r.Header.Set("X-Amz-Content-Sha256", hash)
+	r.Header.Set("Host", r.URL.Host)
+	signed := []string{"host", "x-amz-content-sha256", "x-amz-date"}
+	cred := h.AccessKeyID + "/" + now.Format("20060102") + "/us-east-1/" + service + "/aws4_request"
+	r.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+cred+", SignedHeaders="+strings.Join(signed, ";")+", Signature=0")
+	sig, err := awsapi.ParseSignature(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	mac := hmac.New(sha256.New, sig.SigningKey(h.SecretKey))
+	r.RequestURI = r.URL.RequestURI() // the canonical request reads the path as the server sees it
+	mac.Write([]byte(awsapi.StringToSign(sig, awsapi.CanonicalRequest(r, sig, hash))))
+	r.RequestURI = ""
+	r.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+cred+", SignedHeaders="+strings.Join(signed, ";")+", Signature="+hex.EncodeToString(mac.Sum(nil)))
+	resp, err := http.DefaultClient.Do(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer resp.Body.Close()
+	out, _ := io.ReadAll(resp.Body)
+	return resp.StatusCode, resp.Header, out
 }
 
 func awsBin(t *testing.T) string {
