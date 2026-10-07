@@ -81,12 +81,19 @@ if [ "${HC_VM_NET:-}" != "user" ]; then
     done ) &
   n=0
   while [ ! -S /tmp/passt.sock ] && [ $n -lt 50 ]; do n=$((n+1)); sleep 0.1; done
-  # passt binds its socket (as nobody: /tmp is world-writable, /run is not) and sandboxes itself; it can still exit then.
-  sleep 0.5
+  # passt binds its socket (as nobody: /tmp is world-writable, /run is not),
+  # then probes the kernel and sandboxes itself, and it can still exit then
+  # ("Failed to sandbox process" where AppArmor restricts user namespaces):
+  # give it 3 seconds, so that a passt that cannot run is caught here, before
+  # the guest boots, rather than by the supervisor below (a second boot).
+  n=0
+  while [ $n -lt 30 ] && kill -0 "$pid" 2>/dev/null && ! grep -q "Failed to sandbox" /run/passt.log; do n=$((n+1)); sleep 0.1; done
   # Confinement by a host AppArmor profile is what breaks passt on some hosts: say so.
   aa=$(cat /proc/$pid/attr/current 2>/dev/null || true)
   case "$aa" in ""|unconfined) ;; *) echo "[homecloud] passt runs under the AppArmor profile $aa" ;; esac
-  if [ ! -S /tmp/passt.sock ] || ! kill -0 "$pid" 2>/dev/null; then
+  if [ ! -S /tmp/passt.sock ] || ! kill -0 "$pid" 2>/dev/null || grep -q "Failed to sandbox" /run/passt.log; then
+    kill "$pid" 2>/dev/null || true
+    pid=""
     echo "[homecloud] passt did not start; falling back to user-mode networking:" >&2
     tail -n 40 /run/passt.log >&2 || true
     if grep -q "Too many open files" /run/passt.log; then

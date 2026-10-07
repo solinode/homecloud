@@ -13,10 +13,10 @@ RUN set -eu; \
       $pkgs qemu-utils passt genisoimage socat curl ca-certificates; \
     rm -rf /var/lib/apt/lists/*; \
     # passt runs from a path of its own: a Docker host with the passt package
-    # has an AppArmor profile attached to /usr/bin/passt, written for the host's
-    # passt version, and it would confine this one (on Ubuntu 24.04 that passt
-    # then dies at its first inbound connection). The AVX2 build is found next
-    # to the binary.
+    # attaches its AppArmor profile, written for the host's passt version, to
+    # /usr/bin/passt, and it would confine this one too (on GitHub's Ubuntu
+    # 24.04 runners that passt lost its network at the first inbound
+    # connection). The AVX2 build is found next to the binary.
     mkdir -p /usr/local/libexec/homecloud; \
     cp -L /usr/bin/passt /usr/local/libexec/homecloud/passt; \
     if [ -e /usr/bin/passt.avx2 ]; then cp -L /usr/bin/passt.avx2 /usr/local/libexec/homecloud/passt.avx2; fi
