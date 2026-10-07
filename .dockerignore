@@ -1,0 +1,13 @@
+# Only the sources the image build needs (see Dockerfile).
+**/node_modules
+**/.next
+**/.next-demo
+console/out
+bin
+dist
+pages
+examples
+signatures
+.git
+.github
+.claude
