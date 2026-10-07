@@ -1,0 +1,60 @@
+name: Bug report
+description: Something in HomeCloud (server, CLI, console, install) does not work as documented.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for reporting. If an AWS tool (AWS CLI, SDK, Terraform) fails because an operation or option is missing, use the **AWS compatibility gap** form instead.
+        **Security problems:** do not file them here; see [SECURITY.md](https://github.com/solinode/homecloud/blob/main/SECURITY.md).
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Commands, a small Terraform file or script, or console clicks. The smaller the better.
+      render: shell
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs and error output
+      description: The error message, and the relevant lines of the `homecloud serve` output. Remove secrets and access keys.
+      render: text
+  - type: input
+    id: version
+    attributes:
+      label: HomeCloud version
+      description: Output of `homecloud version`.
+    validations:
+      required: true
+  - type: dropdown
+    id: docker
+    attributes:
+      label: Docker
+      options:
+        - Docker Engine on Linux
+        - Docker Desktop (macOS)
+        - Docker Desktop (Windows)
+        - OrbStack
+        - Other
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: Operating system and architecture
+      placeholder: e.g. Ubuntu 24.04 amd64, macOS 15 arm64
+  - type: textarea
+    id: doctor
+    attributes:
+      label: homecloud doctor
+      description: Output of `homecloud doctor`, if relevant.
+      render: text
