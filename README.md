@@ -4,6 +4,15 @@
   <a href="https://homecloud.pages.dev"><img src="docs/images/landing.png" alt="HomeCloud: your own AWS, on your hardware" width="100%"></a>
 </p>
 
+<p align="center">
+  <a href="https://github.com/solinode/homecloud/releases/latest"><img src="https://img.shields.io/github/v/release/solinode/homecloud?label=release" alt="Latest release"></a>
+  <a href="https://github.com/solinode/homecloud/actions/workflows/ci.yml?query=branch%3Amain"><img src="https://img.shields.io/github/actions/workflow/status/solinode/homecloud/ci.yml?branch=main&label=CI" alt="CI status"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/license-AGPL--3.0-blue" alt="License: AGPL-3.0"></a>
+  <a href="https://github.com/solinode/homecloud/pkgs/container/homecloud"><img src="https://img.shields.io/badge/docker-ghcr.io%2Fsolinode%2Fhomecloud-2496ED?logo=docker&logoColor=white" alt="Docker image: ghcr.io/solinode/homecloud"></a>
+  <a href="docs/compatibility.md"><img src="https://img.shields.io/badge/Terraform%20modules-17%2F17-7B42BC?logo=terraform&logoColor=white" alt="Terraform modules: 17 of 17 pass"></a>
+  <a href="https://discord.gg/pemra9uaC9"><img src="https://img.shields.io/badge/Discord-join%20chat-5865F2?logo=discord&logoColor=white" alt="Discord"></a>
+</p>
+
 **A self-hosted, AWS-compatible cloud in one binary: point your real Terraform, AWS CLI and SDK code at it, and it runs on real containers and VMs on your machine.**
 
 <p align="center">
