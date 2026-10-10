@@ -1,0 +1,81 @@
+/* Guide pages. Loaded after site.css and uses its tokens, header, footer and code styles. */
+
+.g-hero { position: relative; isolation: isolate; padding: 48px 0 8px; }
+.g-hero .hero-bg { height: 640px; }
+.crumbs { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; list-style: none; padding: 0; font-size: 13.5px; color: var(--faint); }
+.crumbs li { display: inline-flex; align-items: center; gap: 6px; }
+.crumbs li + li::before { content: "/"; color: var(--line-3); }
+.crumbs li a { color: var(--muted); text-decoration: none; transition: color .15s; }
+.crumbs li a:hover { color: var(--fg); }
+.crumbs [aria-current] { color: var(--fg-2); }
+.g-hero .eyebrow { margin-top: 28px; }
+.g-hero h1 { margin-top: 16px; max-width: 860px; font-size: clamp(34px, 5vw, 56px); letter-spacing: -0.045em; line-height: 1.04; }
+.g-hero .lead { max-width: 760px; margin-top: 18px; }
+.g-meta { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 6px 18px; font: 13px/1.5 var(--mono); color: var(--faint); }
+
+.g-layout { display: grid; grid-template-columns: minmax(0, 1fr) 248px; gap: 64px; align-items: start; padding-top: 40px; }
+.g-aside { position: sticky; top: 96px; display: grid; gap: 20px; font-size: 14px; }
+.g-aside h2 { font: 500 12px/1 var(--mono); text-transform: uppercase; letter-spacing: .08em; color: var(--faint); margin-bottom: 12px; }
+.g-aside ol, .g-aside ul { list-style: none; padding: 0; display: grid; gap: 2px; }
+.g-aside li a { display: block; padding: 5px 0 5px 12px; border-left: 1px solid var(--line-2); color: var(--muted); text-decoration: none; line-height: 1.4; transition: color .15s, border-color .15s; }
+.g-aside li a:hover { color: var(--fg); border-left-color: var(--accent); }
+
+/* prose */
+.prose { max-width: 740px; font-size: 16.5px; line-height: 1.7; color: var(--fg-2); }
+.prose > * + * { margin-top: 18px; }
+.prose h2 { margin-top: 56px; font-size: clamp(25px, 3vw, 31px); letter-spacing: -0.035em; line-height: 1.15; color: var(--fg); scroll-margin-top: 88px; }
+.prose h3 { margin-top: 34px; font-size: 19px; letter-spacing: -0.02em; line-height: 1.3; color: var(--fg); scroll-margin-top: 88px; }
+.prose h2 + *, .prose h3 + * { margin-top: 14px; }
+.prose > :first-child { margin-top: 0; }
+.prose ul, .prose ol { padding-left: 22px; display: grid; gap: 8px; }
+.prose li::marker { color: var(--faint); }
+.prose strong { color: var(--fg); }
+.prose .code, .prose .g-table, .prose .try, .prose .note-box { margin-top: 22px; }
+.prose .code + p, .prose .g-table + p { margin-top: 22px; }
+.prose :not(pre) > code { white-space: normal; overflow-wrap: anywhere; }
+.prose .ticks { margin-top: 16px; font-size: 16px; }
+
+.note-box { padding: 16px 18px; border-radius: 12px; border: 1px solid var(--line-2); background: var(--panel); font-size: 15px; color: var(--muted); }
+.note-box b { color: var(--fg); }
+.note-box.warn { border-color: color-mix(in srgb, var(--warn) 35%, transparent); background: color-mix(in srgb, var(--warn) 6%, var(--panel)); }
+
+/* tables */
+.g-table { border-radius: var(--radius); border: 1px solid var(--line); background: var(--panel); overflow-x: auto; }
+.g-table table { width: 100%; border-collapse: collapse; font-size: 14.5px; line-height: 1.55; }
+.g-table th, .g-table td { text-align: left; padding: 12px 16px; border-top: 1px solid var(--line); vertical-align: top; }
+.g-table thead th { border-top: 0; font: 500 12px/1.3 var(--mono); text-transform: uppercase; letter-spacing: .06em; color: var(--faint); padding-top: 15px; }
+.g-table tbody th { font-weight: 600; color: var(--fg); white-space: nowrap; }
+.g-table td { color: var(--muted); }
+.g-table .us { color: var(--fg-2); }
+.g-table thead .us { color: var(--accent-ink); }
+.g-wide table { min-width: 640px; }
+
+/* try it */
+.try { position: relative; overflow: hidden; padding: 24px; border-radius: 18px; border: 1px solid var(--line-2); background: var(--panel); background-image: radial-gradient(ellipse 70% 80% at 100% 0%, var(--accent-soft), transparent 70%); }
+.try h2, .prose .try h2 { margin: 0; font-size: 20px; letter-spacing: -0.025em; }
+.try > p { margin-top: 8px; font-size: 15px; color: var(--muted); }
+.try .cmd { margin-top: 16px; }
+.try .cmd pre { font-size: 13.5px; }
+.try-actions { margin-top: 16px; display: flex; flex-wrap: wrap; gap: 10px; }
+.try-note { margin-top: 12px; font-size: 13.5px; color: var(--faint); }
+
+/* related guides */
+.related { margin-top: 88px; padding-top: 40px; border-top: 1px solid var(--line); }
+.related h2 { font-size: clamp(24px, 3vw, 30px); letter-spacing: -0.035em; }
+.related .guide-grid { margin-top: 24px; }
+
+@media (max-width: 1080px) {
+  .g-layout { grid-template-columns: minmax(0, 1fr); gap: 0; }
+  .g-aside { display: none; }
+}
+@media (max-width: 640px) {
+  .g-hero { padding-top: 28px; }
+  .g-hero h1 { font-size: clamp(30px, 8.6vw, 40px); }
+  .g-layout { padding-top: 28px; }
+  .prose { font-size: 16px; }
+  .prose h2 { margin-top: 44px; }
+  .try { padding: 18px; }
+  .try-actions .btn { flex: 1; justify-content: center; }
+  .g-table th, .g-table td { padding: 10px 12px; }
+  .related { margin-top: 64px; }
+}

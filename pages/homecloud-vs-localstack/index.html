@@ -1,0 +1,254 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>HomeCloud vs LocalStack: an honest comparison</title>
+<meta name="description" content="HomeCloud, LocalStack Community and LocalStack Pro side by side: what runs behind the API, IAM, console, persistence, coverage, cost and maturity.">
+<link rel="canonical" href="https://homecloud.pages.dev/homecloud-vs-localstack/">
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HomeCloud">
+<meta property="og:url" content="https://homecloud.pages.dev/homecloud-vs-localstack/">
+<meta property="og:title" content="HomeCloud vs LocalStack">
+<meta property="og:description" content="HomeCloud, LocalStack Community and LocalStack Pro side by side: what runs behind the API, IAM, console, persistence, coverage, cost and maturity.">
+<meta property="og:image" content="https://homecloud.pages.dev/images/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="HomeCloud: your own AWS, on your own machine. Shown next to the HomeCloud web console.">
+<meta property="article:modified_time" content="2026-10-11">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="HomeCloud vs LocalStack">
+<meta name="twitter:description" content="HomeCloud, LocalStack Community and LocalStack Pro side by side: what runs behind the API, IAM, console, persistence, coverage, cost and maturity.">
+<meta name="twitter:image" content="https://homecloud.pages.dev/images/og.png">
+<meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/images/apple-touch-icon.png">
+<script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/geist-mono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/guides.css">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-SW07QRM18M"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-SW07QRM18M');
+</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"TechArticle","@id":"https://homecloud.pages.dev/homecloud-vs-localstack/#article","headline":"HomeCloud vs LocalStack","name":"HomeCloud vs LocalStack","description":"HomeCloud, LocalStack Community and LocalStack Pro side by side: what runs behind the API, IAM, console, persistence, coverage, cost and maturity.","url":"https://homecloud.pages.dev/homecloud-vs-localstack/","mainEntityOfPage":"https://homecloud.pages.dev/homecloud-vs-localstack/","image":"https://homecloud.pages.dev/images/og.png","inLanguage":"en","dateModified":"2026-10-11","author":{"@type":"Organization","name":"HomeCloud","url":"https://homecloud.pages.dev/"},"publisher":{"@type":"Organization","name":"HomeCloud","url":"https://homecloud.pages.dev/","logo":{"@type":"ImageObject","url":"https://homecloud.pages.dev/images/apple-touch-icon.png"}},"about":{"@type":"SoftwareApplication","name":"HomeCloud","applicationCategory":"DeveloperApplication","softwareVersion":"0.4.0","url":"https://homecloud.pages.dev/"},"proficiencyLevel":"Intermediate"},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"HomeCloud","item":"https://homecloud.pages.dev/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://homecloud.pages.dev/#guides"},{"@type":"ListItem","position":3,"name":"HomeCloud vs LocalStack","item":"https://homecloud.pages.dev/homecloud-vs-localstack/"}]}]}</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-row">
+    <a class="brand" href="/" aria-label="HomeCloud home">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#hc-mark"/></svg>
+      <span>HomeCloud</span>
+    </a>
+    <nav class="site-nav" id="site-nav" aria-label="Main">
+      <a href="/#unchanged">How it works</a>
+      <a href="/#services">Services</a>
+      <a href="/#ci">Tests &amp; CI</a>
+      <a href="/#self-hosting">Self-hosting</a>
+      <a href="/#guides">Guides</a>
+      <a href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
+      <a class="nav-demo" href="/demo/">Demo</a>
+    </nav>
+    <div class="header-actions">
+      <button class="icon-btn" id="theme" type="button" aria-label="Toggle color theme">
+        <svg class="moon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z" stroke-linejoin="round"/></svg>
+        <svg class="sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg>
+      </button>
+      <a class="btn btn-ghost btn-sm gh" href="https://github.com/solinode/homecloud">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.07 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .32.21.69.82.57A12 12 0 0 0 12 .3"/></svg>
+        <span>GitHub</span>
+      </a>
+      <button class="icon-btn menu-btn" id="menu" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="site-nav">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path class="l1" d="M2.5 5.5h11"/><path class="l2" d="M2.5 10.5h11"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="hc-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF8F45"/><stop offset="1" stop-color="#E5480C"/></linearGradient>
+    <symbol id="hc-mark" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="url(#hc-grad)"/><path fill="#fff" fill-rule="evenodd" d="M15.06 6.3a1.5 1.5 0 0 1 1.88 0l8.2 6.62c.35.28.56.71.56 1.17v9.41A2.5 2.5 0 0 1 23.2 26H8.8a2.5 2.5 0 0 1-2.5-2.5v-9.41c0-.46.2-.89.56-1.17ZM11.3 15.6a1.3 1.3 0 0 0 0 2.6h6.4a1.3 1.3 0 0 0 0-2.6Zm0 4.6a1.3 1.3 0 0 0 0 2.6h6.4a1.3 1.3 0 0 0 0-2.6Zm8.4-3.3a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0Zm0 4.6a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0Z"/></symbol>
+  </defs>
+</svg>
+
+<main id="main">
+<article>
+  <header class="g-hero">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <div class="wrap">
+      <nav aria-label="Breadcrumb">
+        <ol class="crumbs">
+          <li><a href="/">HomeCloud</a></li>
+          <li><a href="/#guides">Guides</a></li>
+          <li><span aria-current="page">HomeCloud vs LocalStack</span></li>
+        </ol>
+      </nav>
+      <p class="eyebrow">Comparison</p>
+      <h1>HomeCloud vs LocalStack</h1>
+      <p class="lead">Both run AWS APIs on your own machine. LocalStack emulates a very wide range of services; HomeCloud covers about 30 and runs each on a real engine, with IAM always enforced and a console built in. This is the side-by-side, including the rows where LocalStack wins.</p>
+      <p class="g-meta"><span>HomeCloud v0.4.0</span><span>Updated 2026-10-11</span><span>6 min read</span></p>
+    </div>
+  </header>
+
+  <div class="wrap g-layout">
+    <div class="prose">
+<p>We maintain HomeCloud, so read this with that in mind. We have tried to state LocalStack's strengths as plainly as our own, and the source for every row is our <a href="https://github.com/solinode/homecloud/blob/main/docs/comparison.md">comparison document</a>, which also covers moto, MinIO with k3s, OpenStack and the AWS free tier. LocalStack changes quickly: check its current documentation and licensing before deciding.</p>
+
+<h2 id="table">At a glance</h2>
+<div class="g-table g-wide">
+  <table>
+    <caption class="sr-only">HomeCloud compared with LocalStack Community and LocalStack Pro</caption>
+    <thead>
+      <tr><th scope="col"></th><th scope="col" class="us">HomeCloud</th><th scope="col">LocalStack Community</th><th scope="col">LocalStack Pro</th></tr>
+    </thead>
+    <tbody>
+      <tr><th scope="row">AWS APIs</th><td class="us">About 30 services</td><td>Core services</td><td>The most services of any emulator</td></tr>
+      <tr><th scope="row">Behind the API</th><td class="us">Real engines in Docker: Lambda runtime images, PostgreSQL/MySQL/MariaDB, Redis/Valkey, MinIO, nginx, CoreDNS</td><td>Emulation; some services start real containers (for example Lambda)</td><td>Emulation plus real engines for several services</td></tr>
+      <tr><th scope="row">IAM enforcement</th><td class="us">On by default, one evaluator for every service</td><td>Not enforced</td><td>Available, opt-in</td></tr>
+      <tr><th scope="row">Web console</th><td class="us">Built in, works offline, modeled on AWS's</td><td>Hosted web app, needs an account</td><td>Hosted web app</td></tr>
+      <tr><th scope="row">Persistence</th><td class="us">State on disk by default; backup and restore commands</td><td>Ephemeral by default</td><td>Persistence and snapshots</td></tr>
+      <tr><th scope="row">Deployment</th><td class="us">One Go binary plus Docker, or one image</td><td>One container</td><td>One container plus a licence</td></tr>
+      <tr><th scope="row">Regions / accounts</th><td class="us">One region, one account</td><td>Many</td><td>Many</td></tr>
+      <tr><th scope="row">Multi-node</th><td class="us">No (designed, not built)</td><td>No</td><td>No</td></tr>
+      <tr><th scope="row">Cost and licence</th><td class="us">Free, AGPL-3.0, no paid tier</td><td>Free tier; check current terms</td><td>Paid subscription</td></tr>
+      <tr><th scope="row">Maturity</th><td class="us">Young: first release September 2026</td><td>Mature, large community</td><td>Mature, commercial support</td></tr>
+    </tbody>
+  </table>
+</div>
+<p>"Yes" in a row never means "the same as AWS". Every emulator has gaps; HomeCloud's are listed per service and per operation in <a href="https://github.com/solinode/homecloud/blob/main/docs/aws-compat.md">docs/aws-compat.md</a>.</p>
+
+<h2 id="homecloud">Where HomeCloud is stronger</h2>
+<ul>
+  <li><strong>Real workloads by default.</strong> RDS gives you a real PostgreSQL, MySQL or MariaDB; ElastiCache a real Redis or Valkey; EC2 instances are containers you can shell into, or QEMU/KVM virtual machines for two images; ECS services sit behind a real nginx load balancer; security groups really filter traffic. With LocalStack Community several of these services are not available, and with Pro the depth varies per service.</li>
+  <li><strong>IAM is always on.</strong> Requests from the CLI, SDKs, Terraform and the console go through one policy evaluator with resource policies, conditions, permissions boundaries and <code>iam:PassRole</code>. A test that passes has at least been checked for the permissions it needs.</li>
+  <li><strong>A console in the box</strong>, with CloudWatch metrics and logs for every resource and a CloudTrail record of every API call, so a failed run can be inspected rather than guessed at.</li>
+  <li><strong>Built to be left running:</strong> IAM users and access keys for a team or a class, backups, upgrades, TLS, a system service.</li>
+  <li><strong>Fully open source.</strong> Every feature is in the AGPL-3.0 code.</li>
+</ul>
+
+<h2 id="localstack">Where LocalStack is stronger</h2>
+<ul>
+  <li><strong>Service coverage.</strong> LocalStack Pro covers far more services and operations. Kinesis, EKS, Athena, Glue, OpenSearch, REST API Gateway, WebSocket APIs and AppSync are not in HomeCloud.</li>
+  <li><strong>Multi-region and multi-account</strong> setups work. HomeCloud has <code>us-east-1</code> and one account; cross-region features are refused.</li>
+  <li><strong>Start-up time and footprint.</strong> A single container emulating services in-process is light. HomeCloud starts MinIO on first boot and real engines on demand, which takes longer and uses more memory.</li>
+  <li><strong>Ecosystem and maturity:</strong> years of production use, the <code>awslocal</code>, <code>tflocal</code> and <code>cdklocal</code> wrappers, testing integrations, extensive documentation and commercial support.</li>
+</ul>
+
+<h2 id="tests">The same test on each</h2>
+<p>A concrete way to see the difference is a test that depends on permissions. Give a user read-only access to S3 and try to write:</p>
+<div class="code">
+  <div class="code-bar"><span class="file">shell</span><span class="tag">HomeCloud</span></div>
+<pre><code><span class="f">homecloud</span> iam create-user reader --policy AmazonS3ReadOnlyAccess
+<span class="f">homecloud</span> iam create-access-key reader
+<span class="c"># with reader's keys exported:</span>
+<span class="f">aws</span> s3 cp ./report.csv s3://reports/          <span class="c"># fails with AccessDenied, as on AWS</span></code></pre>
+</div>
+<p>On an emulator that does not enforce IAM, the same upload succeeds, and the missing permission shows up only after deployment. Conversely, if the test needs Kinesis, it cannot run on HomeCloud at all.</p>
+
+<h2 id="others">Other options</h2>
+<div class="g-table">
+  <table>
+    <caption class="sr-only">Other ways to run AWS without AWS</caption>
+    <thead><tr><th scope="col">Tool</th><th scope="col">Pick it when</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">moto</th><td>You want fast, in-process mocks for Python unit tests that reset between tests.</td></tr>
+      <tr><th scope="row">MinIO + k3s</th><td>You only need S3-compatible storage, plus Kubernetes for compute.</td></tr>
+      <tr><th scope="row">OpenStack</th><td>You need a multi-node private cloud with real VMs, and have people to run it.</td></tr>
+      <tr><th scope="row">AWS itself</th><td>You need exactly AWS's behavior. For final integration and staging tests, nothing replaces it.</td></tr>
+    </tbody>
+  </table>
+</div>
+
+<h2 id="verdict">So which one?</h2>
+<p>Use HomeCloud when your stack fits within its services and you want real compute, enforced IAM, a console and persistent state on your own machine or server, for free. Use LocalStack when you need wider coverage, several regions or accounts, or the lightest possible container in CI. Many teams will reasonably use both. If you are moving tests over, <a href="/localstack-alternative/">the LocalStack alternative guide</a> lists what to change; for specific workloads see <a href="/terraform-local-aws/">Terraform</a>, <a href="/test-aws-lambda-locally/">Lambda</a> and <a href="/self-hosted-s3-iam-lambda/">self-hosting</a>.</p>
+<p class="note-box">Spotted something out of date about LocalStack or HomeCloud? <a href="https://github.com/solinode/homecloud/issues/new/choose">Open an issue</a> or a pull request against <code>docs/comparison.md</code>.</p>
+
+<aside class="try" aria-labelledby="try-h">
+  <h2 id="try-h">Try it</h2>
+  <p>The quickest way to compare is to run your own tests against both.</p>
+  <div class="cmd">
+    <pre><span class="prompt" aria-hidden="true">$</span><code id="cmd-try" data-script="sh">curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh</code></pre>
+    <button class="copy" type="button" data-copy="cmd-try" aria-label="Copy install command"><svg class="i-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.6V3.3a1.8 1.8 0 0 0-1.8-1.8H4.3a1.8 1.8 0 0 0-1.8 1.8v4.4a1.8 1.8 0 0 0 1.8 1.8h.3"/></svg><svg class="i-ok" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg></button>
+  </div>
+  <p class="try-note">Then <code>homecloud serve</code> and open <code>127.0.0.1:8080</code>. Needs Docker. Windows: <code>irm https://homecloud.pages.dev/scripts/install.ps1 | iex</code></p>
+  <div class="try-actions">
+    <a class="btn btn-primary btn-sm" href="/demo/">Open the live demo <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9m-4-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    <a class="btn btn-ghost btn-sm" href="https://github.com/solinode/homecloud/blob/main/docs/comparison.md">Comparison doc on GitHub</a>
+  </div>
+  <p class="sr-only" role="status" id="copy-status"></p>
+</aside>
+    </div>
+    <aside class="g-aside" aria-label="On this page">
+      <nav aria-labelledby="toc-h">
+        <h2 id="toc-h">On this page</h2>
+        <ol>
+          <li><a href="#table">At a glance</a></li>
+          <li><a href="#homecloud">Where HomeCloud is stronger</a></li>
+          <li><a href="#localstack">Where LocalStack is stronger</a></li>
+          <li><a href="#tests">The same test on each</a></li>
+          <li><a href="#others">Other options</a></li>
+          <li><a href="#verdict">So which one?</a></li>
+        </ol>
+      </nav>
+    </aside>
+  </div>
+
+  <div class="wrap">
+    <section class="related" aria-labelledby="related-h">
+      <h2 id="related-h">More guides</h2>
+      <ul class="guide-grid">
+  <li><a href="/terraform-local-aws/"><b>Run Terraform against a local AWS</b><span>The provider block, path-style S3, a full example stack and the modules that pass.</span></a></li>
+  <li><a href="/localstack-alternative/"><b>A LocalStack alternative with real compute</b><span>What changes when the engines behind the API are real, and when to stay with LocalStack.</span></a></li>
+  <li><a href="/test-aws-lambda-locally/"><b>Test AWS Lambda locally</b><span>AWS's runtime images, invoked with the AWS CLI or boto3, with SQS triggers and logs.</span></a></li>
+  <li><a href="/self-hosted-s3-iam-lambda/"><b>Self-host S3, IAM and Lambda</b><span>A home server or VPS with AWS APIs: install, expose it safely, back it up.</span></a></li>
+  <li><a href="/teach-aws-without-aws-account/"><b>Teach AWS without an AWS account</b><span>College labs with an IAM user per student, the real CLI and no bills.</span></a></li>
+</ul>
+    </section>
+  </div>
+</article>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="/" aria-label="HomeCloud home"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#hc-mark"/></svg><span>HomeCloud</span></a>
+      <p>An AWS-compatible cloud you run yourself.</p>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="/demo/">Demo console</a>
+      <a href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/docs/compatibility.md">Compatibility</a>
+    </nav>
+    <nav aria-label="Community">
+      <h2>Community</h2>
+      <a href="https://github.com/solinode/homecloud">GitHub</a>
+      <a href="https://discord.gg/pemra9uaC9">Discord</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/CONTRIBUTING.md">Contributing</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
+      <a href="/files/Project%20Concept_%20_HomeCloud_.pdf">Concept (PDF)</a>
+      <a href="/files/but,%20why_.pdf">But, why? (PDF)</a>
+      <a href="/files/funding.json">funding.json</a>
+    </nav>
+  </div>
+  <div class="wrap footer-legal">
+    <p>&copy; 2026 HomeCloud &middot; AGPL-3.0</p>
+    <p>AWS and the names of AWS services are trademarks of Amazon.com, Inc. HomeCloud is not affiliated with or endorsed by Amazon. LocalStack and other names belong to their owners.</p>
+  </div>
+</footer>
+
+<script src="/site.js" defer></script>
+</body>
+</html>

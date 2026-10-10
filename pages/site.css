@@ -526,6 +526,16 @@ li:hover .logo-img, .ci-tab[aria-selected="true"] .logo-img { filter: none; opac
 .wm-ts { --src: url(/images/logos/tailscale-wordmark.svg); width: 135px; height: 26px; }
 .wm-cr { --src: url(/images/logos/coderabbit-wordmark.svg); width: 172px; height: 25px; }
 
+/* ---------- guides (landing section and guide pages) ---------- */
+.guides-sec { padding-top: 96px; }
+.guides-sec .section-head { margin-bottom: 28px; }
+.guides-sec .section-head h2 { font-size: clamp(28px, 3.4vw, 38px); }
+.guide-grid { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.guide-grid li a { display: flex; flex-direction: column; gap: 6px; height: 100%; padding: 20px; border-radius: 14px; border: 1px solid var(--line); background: var(--panel); color: var(--fg); text-decoration: none; transition: border-color .2s, transform .2s; }
+.guide-grid li a:hover { border-color: var(--line-3); transform: translateY(-1px); }
+.guide-grid b { font-size: 16px; font-weight: 600; letter-spacing: -0.02em; line-height: 1.3; }
+.guide-grid span { font-size: 14px; line-height: 1.5; color: var(--muted); }
+
 /* ---------- footer ---------- */
 .site-footer { margin-top: 96px; border-top: 1px solid var(--line); background: var(--bg-2); }
 .site-footer .footer-grid { display: grid; grid-template-columns: 2fr 1fr 1fr 1fr; gap: 32px; padding-top: 56px; padding-bottom: 48px; }
@@ -562,6 +572,7 @@ li:hover .logo-img, .ci-tab[aria-selected="true"] .logo-img { filter: none; opac
   .t-obs, .t-cfn, .t-limits { grid-column: span 12; }
   .two-col { grid-template-columns: minmax(0, 1fr); gap: 40px; }
   .two-col .section-head { position: static; }
+  .guide-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 @media (max-width: 920px) {
   .site-nav {
@@ -650,4 +661,6 @@ li:hover .logo-img, .ci-tab[aria-selected="true"] .logo-img { filter: none; opac
   .partners { gap: 16px 32px; }
   .partners p { flex-basis: 100%; text-align: center; }
   .site-footer .footer-grid { grid-template-columns: 1fr 1fr; }
+  .guide-grid { grid-template-columns: minmax(0, 1fr); }
+  .guides-sec { padding-top: 72px; }
 }
