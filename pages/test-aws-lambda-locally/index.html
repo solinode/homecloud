@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Test AWS Lambda locally with real containers · HomeCloud</title>
+<meta name="description" content="Run Lambda functions on AWS&#x27;s official runtime images on your machine. Invoke them with the AWS CLI or boto3, wire SQS triggers and read the logs.">
+<link rel="canonical" href="https://homecloud.pages.dev/test-aws-lambda-locally/">
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HomeCloud">
+<meta property="og:url" content="https://homecloud.pages.dev/test-aws-lambda-locally/">
+<meta property="og:title" content="Test AWS Lambda locally with real containers">
+<meta property="og:description" content="Run Lambda functions on AWS&#x27;s official runtime images on your machine. Invoke them with the AWS CLI or boto3, wire SQS triggers and read the logs.">
+<meta property="og:image" content="https://homecloud.pages.dev/images/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="HomeCloud: your own AWS, on your own machine. Shown next to the HomeCloud web console.">
+<meta property="article:modified_time" content="2026-10-11">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Test AWS Lambda locally with real containers">
+<meta name="twitter:description" content="Run Lambda functions on AWS&#x27;s official runtime images on your machine. Invoke them with the AWS CLI or boto3, wire SQS triggers and read the logs.">
+<meta name="twitter:image" content="https://homecloud.pages.dev/images/og.png">
+<meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/images/apple-touch-icon.png">
+<script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/geist-mono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/guides.css">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-SW07QRM18M"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-SW07QRM18M');
+</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"HowTo","@id":"https://homecloud.pages.dev/test-aws-lambda-locally/#article","headline":"Test AWS Lambda locally with real containers","name":"Test AWS Lambda locally with real containers","description":"Run Lambda functions on AWS's official runtime images on your machine. Invoke them with the AWS CLI or boto3, wire SQS triggers and read the logs.","url":"https://homecloud.pages.dev/test-aws-lambda-locally/","mainEntityOfPage":"https://homecloud.pages.dev/test-aws-lambda-locally/","image":"https://homecloud.pages.dev/images/og.png","inLanguage":"en","dateModified":"2026-10-11","author":{"@type":"Organization","name":"HomeCloud","url":"https://homecloud.pages.dev/"},"publisher":{"@type":"Organization","name":"HomeCloud","url":"https://homecloud.pages.dev/","logo":{"@type":"ImageObject","url":"https://homecloud.pages.dev/images/apple-touch-icon.png"}},"about":{"@type":"SoftwareApplication","name":"HomeCloud","applicationCategory":"DeveloperApplication","softwareVersion":"0.4.0","url":"https://homecloud.pages.dev/"},"totalTime":"PT8M","tool":[{"@type":"HowToTool","name":"Docker"},{"@type":"HowToTool","name":"HomeCloud 0.4.0"}],"step":[{"@type":"HowToStep","position":1,"name":"1. Start HomeCloud","text":"Install HomeCloud, run homecloud serve, and export the endpoint and keys with eval \"$(homecloud aws-env)\".","url":"https://homecloud.pages.dev/test-aws-lambda-locally/#setup"},{"@type":"HowToStep","position":2,"name":"2. Create a function","text":"Zip the handler, create an execution role that trusts lambda.amazonaws.com, and run aws lambda create-function with a runtime such as python3.12.","url":"https://homecloud.pages.dev/test-aws-lambda-locally/#create"},{"@type":"HowToStep","position":3,"name":"3. Invoke it","text":"Invoke the function with aws lambda invoke (with --log-type Tail for the log tail) or from boto3, which reads AWS_ENDPOINT_URL.","url":"https://homecloud.pages.dev/test-aws-lambda-locally/#invoke"},{"@type":"HowToStep","position":4,"name":"4. Trigger it from SQS","text":"Create an SQS queue and an event source mapping with aws lambda create-event-source-mapping, send a message, and read the result with aws logs tail.","url":"https://homecloud.pages.dev/test-aws-lambda-locally/#sqs"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"HomeCloud","item":"https://homecloud.pages.dev/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://homecloud.pages.dev/#guides"},{"@type":"ListItem","position":3,"name":"Test AWS Lambda locally with real containers","item":"https://homecloud.pages.dev/test-aws-lambda-locally/"}]}]}</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-row">
+    <a class="brand" href="/" aria-label="HomeCloud home">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#hc-mark"/></svg>
+      <span>HomeCloud</span>
+    </a>
+    <nav class="site-nav" id="site-nav" aria-label="Main">
+      <a href="/#unchanged">How it works</a>
+      <a href="/#services">Services</a>
+      <a href="/#ci">Tests &amp; CI</a>
+      <a href="/#self-hosting">Self-hosting</a>
+      <a href="/#guides">Guides</a>
+      <a href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
+      <a class="nav-demo" href="/demo/">Demo</a>
+    </nav>
+    <div class="header-actions">
+      <button class="icon-btn" id="theme" type="button" aria-label="Toggle color theme">
+        <svg class="moon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z" stroke-linejoin="round"/></svg>
+        <svg class="sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg>
+      </button>
+      <a class="btn btn-ghost btn-sm gh" href="https://github.com/solinode/homecloud">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.07 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .32.21.69.82.57A12 12 0 0 0 12 .3"/></svg>
+        <span>GitHub</span>
+      </a>
+      <button class="icon-btn menu-btn" id="menu" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="site-nav">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path class="l1" d="M2.5 5.5h11"/><path class="l2" d="M2.5 10.5h11"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="hc-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF8F45"/><stop offset="1" stop-color="#E5480C"/></linearGradient>
+    <symbol id="hc-mark" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="url(#hc-grad)"/><path fill="#fff" fill-rule="evenodd" d="M15.06 6.3a1.5 1.5 0 0 1 1.88 0l8.2 6.62c.35.28.56.71.56 1.17v9.41A2.5 2.5 0 0 1 23.2 26H8.8a2.5 2.5 0 0 1-2.5-2.5v-9.41c0-.46.2-.89.56-1.17ZM11.3 15.6a1.3 1.3 0 0 0 0 2.6h6.4a1.3 1.3 0 0 0 0-2.6Zm0 4.6a1.3 1.3 0 0 0 0 2.6h6.4a1.3 1.3 0 0 0 0-2.6Zm8.4-3.3a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0Zm0 4.6a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0Z"/></symbol>
+  </defs>
+</svg>
+
+<main id="main">
+<article>
+  <header class="g-hero">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <div class="wrap">
+      <nav aria-label="Breadcrumb">
+        <ol class="crumbs">
+          <li><a href="/">HomeCloud</a></li>
+          <li><a href="/#guides">Guides</a></li>
+          <li><span aria-current="page">Test AWS Lambda locally</span></li>
+        </ol>
+      </nav>
+      <p class="eyebrow">Guide · Lambda</p>
+      <h1>Test AWS Lambda locally with real containers</h1>
+      <p class="lead">HomeCloud runs each Lambda function in AWS's official runtime image, as a Docker container on your machine. You create and invoke functions with the AWS CLI or boto3 exactly as on AWS, wire them to SQS queues, and read their output in CloudWatch Logs.</p>
+      <p class="g-meta"><span>HomeCloud v0.4.0</span><span>Updated 2026-10-11</span><span>8 min read</span></p>
+    </div>
+  </header>
+
+  <div class="wrap g-layout">
+    <div class="prose">
+<p>There are two common ways to test Lambda code without deploying it. You can call the handler directly in a unit test, which is fast but skips the runtime, the event shape and permissions. Or you can run something that behaves like the Lambda service. HomeCloud is the second kind: the Lambda API is implemented in HomeCloud, and the function runs inside <code>public.ecr.aws/lambda/python:3.12</code> (or whichever runtime you choose), the same base image AWS publishes for container-image functions. Your handler sees the real runtime, the real event and context objects, and real environment variables.</p>
+
+<h2 id="setup">1. Start HomeCloud</h2>
+<div class="code">
+  <div class="code-bar"><span class="file">shell</span></div>
+<pre><code><span class="f">curl</span> -fsSL https://homecloud.pages.dev/scripts/install.sh | sh
+<span class="f">homecloud</span> serve &amp;
+<span class="k">eval</span> <span class="s">"$(homecloud aws-env)"</span>    <span class="c"># AWS_ENDPOINT_URL, keys and region for the AWS CLI and SDKs</span></code></pre>
+</div>
+<p>Supported runtimes in v0.4.0: Python 3.9 to 3.13, Node.js 18, 20 and 22, Java 17 and 21, Ruby 3.3, .NET 8, and the OS-only runtimes <code>provided.al2023</code> and <code>provided.al2</code> for Go, Rust or any binary that implements the runtime API. Container-image functions work too.</p>
+
+<h2 id="create">2. Create a function</h2>
+<p>A minimal Python handler:</p>
+<div class="code">
+  <div class="code-bar"><span class="file">lambda_function.py</span></div>
+<pre><code><span class="k">import</span> json
+
+<span class="k">def</span> <span class="f">lambda_handler</span>(event, context):
+    <span class="f">print</span>(<span class="s">"event:"</span>, json.dumps(event))
+    name = event.get(<span class="s">"name"</span>, <span class="s">"world"</span>)
+    <span class="k">return</span> {<span class="s">"statusCode"</span>: <span class="n">200</span>, <span class="s">"body"</span>: f<span class="s">"Hello, {name}!"</span>}</code></pre>
+</div>
+<p>The AWS CLI requires an execution role, as it does on AWS. HomeCloud checks that the role exists, that its trust policy allows <code>lambda.amazonaws.com</code>, and that you may pass it (<code>iam:PassRole</code>):</p>
+<div class="code">
+  <div class="code-bar"><span class="file">shell</span></div>
+<pre><code><span class="f">zip</span> function.zip lambda_function.py
+
+ROLE=$(<span class="f">aws</span> iam create-role --role-name hello-role \
+  --assume-role-policy-document <span class="s">'{"Version":"2012-10-17","Statement":[{"Effect":"Allow",
+    "Principal":{"Service":"lambda.amazonaws.com"},"Action":"sts:AssumeRole"}]}'</span> \
+  --query Role.Arn --output text)
+
+<span class="f">aws</span> lambda create-function --function-name hello \
+  --runtime python3.12 --handler lambda_function.lambda_handler \
+  --role <span class="s">"$ROLE"</span> --zip-file fileb://function.zip</code></pre>
+</div>
+<p>Inside the container the function gets temporary credentials for its role and <code>AWS_ENDPOINT_URL</code> pointing back at HomeCloud, so boto3 or the JavaScript SDK called from the handler reaches your local S3, DynamoDB or SQS without code changes. The role's policies are enforced on those calls.</p>
+
+<h2 id="invoke">3. Invoke it</h2>
+<p>From the AWS CLI, with the last 4 KB of the log returned in the response:</p>
+<div class="code">
+  <div class="code-bar"><span class="file">shell</span></div>
+<pre><code><span class="f">aws</span> lambda invoke --function-name hello \
+  --cli-binary-format raw-in-base64-out --payload <span class="s">'{"name":"dev"}'</span> \
+  --log-type Tail --query LogResult --output text out.json | <span class="f">base64</span> --decode
+<span class="f">cat</span> out.json      <span class="c"># {"statusCode": 200, "body": "Hello, dev!"}</span></code></pre>
+</div>
+<p>The first invoke pulls the runtime image, which takes a while once. After that, an environment stays warm and is reused for later invokes, and is removed after 15 idle minutes. A code or configuration change replaces it, as on AWS.</p>
+<p>From a test, boto3 1.28 and later read <code>AWS_ENDPOINT_URL</code>, so nothing in the client needs to change:</p>
+<div class="code">
+  <div class="code-bar"><span class="file">test_hello.py</span></div>
+<pre><code><span class="k">import</span> json, boto3
+
+<span class="k">def</span> <span class="f">test_hello</span>():
+    lam = boto3.<span class="f">client</span>(<span class="s">"lambda"</span>)     <span class="c"># endpoint, keys and region from the environment</span>
+    resp = lam.<span class="f">invoke</span>(FunctionName=<span class="s">"hello"</span>, Payload=json.<span class="f">dumps</span>({<span class="s">"name"</span>: <span class="s">"ci"</span>}))
+    body = json.<span class="f">load</span>(resp[<span class="s">"Payload"</span>])
+    <span class="k">assert</span> body[<span class="s">"statusCode"</span>] == <span class="n">200</span></code></pre>
+</div>
+<p>To start HomeCloud from the test itself, the <a href="https://github.com/solinode/homecloud/blob/main/docs/integrations.md#testcontainers-python">testcontainers-python module</a> gives you a session fixture; <code>homecloud.get_client("lambda")</code> returns a client already pointed at it. There is a Go module too.</p>
+<p>Versions, aliases (<code>--function-name hello:live</code>), layers, async invokes, destinations, reserved concurrency and function URLs are supported. API Gateway HTTP APIs can proxy to a function with payload format 1.0 or 2.0.</p>
+
+<h2 id="sqs">4. Trigger it from SQS</h2>
+<p>Event source mappings poll a queue and invoke the function with batches, as on AWS:</p>
+<div class="code">
+  <div class="code-bar"><span class="file">shell</span></div>
+<pre><code>QURL=$(<span class="f">aws</span> sqs create-queue --queue-name jobs --query QueueUrl --output text)
+QARN=$(<span class="f">aws</span> sqs get-queue-attributes --queue-url <span class="s">"$QURL"</span> \
+  --attribute-names QueueArn --query Attributes.QueueArn --output text)
+
+<span class="f">aws</span> lambda create-event-source-mapping --function-name hello \
+  --event-source-arn <span class="s">"$QARN"</span> --batch-size <span class="n">10</span> \
+  --function-response-types ReportBatchItemFailures
+
+<span class="f">aws</span> sqs send-message --queue-url <span class="s">"$QURL"</span> --message-body <span class="s">'{"name":"queue"}'</span></code></pre>
+</div>
+<p>Two differences from AWS to know about. The batch size is capped at 10 for SQS sources. And HomeCloud checks <code>sqs:ReceiveMessage</code> and <code>sqs:DeleteMessage</code> against the identity that creates the mapping, while AWS checks the function's execution role; grant the role those permissions anyway so the same setup works when you deploy. Failed messages follow the queue's redrive policy to its dead-letter queue. DynamoDB streams can trigger functions the same way; Kinesis and other sources are not available.</p>
+
+<h2 id="logs">5. Read the logs</h2>
+<p>Everything the function prints goes to CloudWatch Logs, in the group <code>/aws/lambda/&lt;name&gt;</code> with one stream per environment:</p>
+<div class="code">
+  <div class="code-bar"><span class="file">shell</span></div>
+<pre><code><span class="f">aws</span> logs tail /aws/lambda/hello --since 10m
+<span class="f">aws</span> logs filter-log-events --log-group-name /aws/lambda/hello --filter-pattern <span class="s">'"event:"'</span></code></pre>
+</div>
+<p>The web console at <code>127.0.0.1:8080</code> shows the same logs next to the function, with invocation metrics, an in-browser code editor and a test-event button. Logs Insights queries work on these groups as well. You can look around a <a href="/demo/lambda/">demo of the Lambda console</a> without installing anything.</p>
+
+<h2 id="limits">Where it differs from AWS Lambda</h2>
+<ul>
+  <li>Functions run on your Docker host, so cold starts depend on your machine and on whether the image is cached. Do not use HomeCloud for performance numbers.</li>
+  <li>Memory and timeout settings are applied to the environment, but there is no billing, no account concurrency quota and one region.</li>
+  <li>Event sources are SQS and DynamoDB streams. API Gateway REST and WebSocket APIs are not supported; HTTP APIs are.</li>
+</ul>
+<p>The full list of supported operations is in <a href="https://github.com/solinode/homecloud/blob/main/docs/aws-compat.md">docs/aws-compat.md</a>. To deploy the same functions with Terraform, see <a href="/terraform-local-aws/">running Terraform against a local AWS</a>; to keep a Lambda-capable server running at home, see <a href="/self-hosted-s3-iam-lambda/">self-hosting S3, IAM and Lambda</a>.</p>
+
+<aside class="try" aria-labelledby="try-h">
+  <h2 id="try-h">Try it</h2>
+  <p>Install HomeCloud, start it, and the commands on this page work as written.</p>
+  <div class="cmd">
+    <pre><span class="prompt" aria-hidden="true">$</span><code id="cmd-try" data-script="sh">curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh</code></pre>
+    <button class="copy" type="button" data-copy="cmd-try" aria-label="Copy install command"><svg class="i-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.6V3.3a1.8 1.8 0 0 0-1.8-1.8H4.3a1.8 1.8 0 0 0-1.8 1.8v4.4a1.8 1.8 0 0 0 1.8 1.8h.3"/></svg><svg class="i-ok" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg></button>
+  </div>
+  <p class="try-note">Then <code>homecloud serve</code> and open <code>127.0.0.1:8080</code>. Needs Docker. Windows: <code>irm https://homecloud.pages.dev/scripts/install.ps1 | iex</code></p>
+  <div class="try-actions">
+    <a class="btn btn-primary btn-sm" href="/demo/">Open the live demo <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9m-4-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    <a class="btn btn-ghost btn-sm" href="https://github.com/solinode/homecloud/blob/main/docs/aws-compat.md">Lambda API coverage</a>
+  </div>
+  <p class="sr-only" role="status" id="copy-status"></p>
+</aside>
+    </div>
+    <aside class="g-aside" aria-label="On this page">
+      <nav aria-labelledby="toc-h">
+        <h2 id="toc-h">On this page</h2>
+        <ol>
+          <li><a href="#setup">1. Start HomeCloud</a></li>
+          <li><a href="#create">2. Create a function</a></li>
+          <li><a href="#invoke">3. Invoke it</a></li>
+          <li><a href="#sqs">4. Trigger it from SQS</a></li>
+          <li><a href="#logs">5. Read the logs</a></li>
+          <li><a href="#limits">Where it differs from AWS Lambda</a></li>
+        </ol>
+      </nav>
+    </aside>
+  </div>
+
+  <div class="wrap">
+    <section class="related" aria-labelledby="related-h">
+      <h2 id="related-h">More guides</h2>
+      <ul class="guide-grid">
+  <li><a href="/terraform-local-aws/"><b>Run Terraform against a local AWS</b><span>The provider block, path-style S3, a full example stack and the modules that pass.</span></a></li>
+  <li><a href="/localstack-alternative/"><b>A LocalStack alternative with real compute</b><span>What changes when the engines behind the API are real, and when to stay with LocalStack.</span></a></li>
+  <li><a href="/self-hosted-s3-iam-lambda/"><b>Self-host S3, IAM and Lambda</b><span>A home server or VPS with AWS APIs: install, expose it safely, back it up.</span></a></li>
+  <li><a href="/teach-aws-without-aws-account/"><b>Teach AWS without an AWS account</b><span>College labs with an IAM user per student, the real CLI and no bills.</span></a></li>
+  <li><a href="/homecloud-vs-localstack/"><b>HomeCloud vs LocalStack</b><span>Side by side with Community and Pro, including where LocalStack is the better pick.</span></a></li>
+</ul>
+    </section>
+  </div>
+</article>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="/" aria-label="HomeCloud home"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#hc-mark"/></svg><span>HomeCloud</span></a>
+      <p>An AWS-compatible cloud you run yourself.</p>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="/demo/">Demo console</a>
+      <a href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/docs/compatibility.md">Compatibility</a>
+    </nav>
+    <nav aria-label="Community">
+      <h2>Community</h2>
+      <a href="https://github.com/solinode/homecloud">GitHub</a>
+      <a href="https://discord.gg/pemra9uaC9">Discord</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/CONTRIBUTING.md">Contributing</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
+      <a href="/files/Project%20Concept_%20_HomeCloud_.pdf">Concept (PDF)</a>
+      <a href="/files/but,%20why_.pdf">But, why? (PDF)</a>
+      <a href="/files/funding.json">funding.json</a>
+    </nav>
+  </div>
+  <div class="wrap footer-legal">
+    <p>&copy; 2026 HomeCloud &middot; AGPL-3.0</p>
+    <p>AWS and the names of AWS services are trademarks of Amazon.com, Inc. HomeCloud is not affiliated with or endorsed by Amazon. LocalStack and other names belong to their owners.</p>
+  </div>
+</footer>
+
+<script src="/site.js" defer></script>
+</body>
+</html>

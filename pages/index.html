@@ -51,6 +51,7 @@
       <a href="#services">Services</a>
       <a href="#ci">Tests &amp; CI</a>
       <a href="#self-hosting">Self-hosting</a>
+      <a href="#guides">Guides</a>
       <a href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
       <a class="nav-demo" href="/demo/">Demo</a>
     </nav>
@@ -573,6 +574,23 @@ s3c := s3.<span class="f">NewFromConfig</span>(hc.<span class="f">AWSConfig</spa
       <a href="https://tailscale.com/" class="partner"><span class="wordmark wm-ts" role="img" aria-label="Tailscale"></span></a>
       <a href="https://www.coderabbit.ai/" class="partner"><span class="wordmark wm-cr" role="img" aria-label="CodeRabbit"></span></a>
     </div>
+  </div>
+</section>
+
+<section class="section guides-sec" id="guides" aria-labelledby="guides-h">
+  <div class="wrap">
+    <header class="section-head reveal">
+      <p class="eyebrow">Guides</p>
+      <h2 id="guides-h">Guides for common setups.</h2>
+    </header>
+    <ul class="guide-grid reveal">
+      <li><a href="/terraform-local-aws/"><b>Run Terraform against a local AWS</b><span>The provider block, path-style S3, a full example stack and the modules that pass.</span></a></li>
+      <li><a href="/localstack-alternative/"><b>A LocalStack alternative with real compute</b><span>What changes when the engines behind the API are real, and when to stay with LocalStack.</span></a></li>
+      <li><a href="/test-aws-lambda-locally/"><b>Test AWS Lambda locally</b><span>AWS's runtime images, invoked with the AWS CLI or boto3, with SQS triggers and logs.</span></a></li>
+      <li><a href="/self-hosted-s3-iam-lambda/"><b>Self-host S3, IAM and Lambda</b><span>A home server or VPS with AWS APIs: install, expose it safely, back it up.</span></a></li>
+      <li><a href="/teach-aws-without-aws-account/"><b>Teach AWS without an AWS account</b><span>College labs with an IAM user per student, the real CLI and no bills.</span></a></li>
+      <li><a href="/homecloud-vs-localstack/"><b>HomeCloud vs LocalStack</b><span>Side by side with Community and Pro, including where LocalStack is the better pick.</span></a></li>
+    </ul>
   </div>
 </section>
 

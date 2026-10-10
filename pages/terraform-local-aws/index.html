@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Run Terraform against a local AWS · HomeCloud</title>
+<meta name="description" content="Point the stock hashicorp/aws provider at HomeCloud: the endpoints block, s3_use_path_style, a full example stack, and 17/17 terraform-aws-modules passing.">
+<link rel="canonical" href="https://homecloud.pages.dev/terraform-local-aws/">
+<link rel="sitemap" type="application/xml" href="/sitemap.xml">
+<meta property="og:type" content="article">
+<meta property="og:site_name" content="HomeCloud">
+<meta property="og:url" content="https://homecloud.pages.dev/terraform-local-aws/">
+<meta property="og:title" content="Run Terraform against a local AWS">
+<meta property="og:description" content="Point the stock hashicorp/aws provider at HomeCloud: the endpoints block, s3_use_path_style, a full example stack, and 17/17 terraform-aws-modules passing.">
+<meta property="og:image" content="https://homecloud.pages.dev/images/og.png">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta property="og:image:alt" content="HomeCloud: your own AWS, on your own machine. Shown next to the HomeCloud web console.">
+<meta property="article:modified_time" content="2026-10-11">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="Run Terraform against a local AWS">
+<meta name="twitter:description" content="Point the stock hashicorp/aws provider at HomeCloud: the endpoints block, s3_use_path_style, a full example stack, and 17/17 terraform-aws-modules passing.">
+<meta name="twitter:image" content="https://homecloud.pages.dev/images/og.png">
+<meta name="theme-color" content="#fafaf9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#09090b" media="(prefers-color-scheme: dark)">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="/images/apple-touch-icon.png">
+<script>document.documentElement.classList.add("js");try{var t=localStorage.getItem("theme");if(t==="dark"||t==="light")document.documentElement.dataset.theme=t}catch(e){}</script>
+<link rel="preload" href="/fonts/geist.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="preload" href="/fonts/geist-mono.woff2" as="font" type="font/woff2" crossorigin>
+<link rel="stylesheet" href="/site.css">
+<link rel="stylesheet" href="/guides.css">
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-SW07QRM18M"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+  gtag('config', 'G-SW07QRM18M');
+</script>
+<script type="application/ld+json">{"@context":"https://schema.org","@graph":[{"@type":"HowTo","@id":"https://homecloud.pages.dev/terraform-local-aws/#article","headline":"Run Terraform against a local AWS","name":"Run Terraform against a local AWS","description":"Point the stock hashicorp/aws provider at HomeCloud: the endpoints block, s3_use_path_style, a full example stack, and 17/17 terraform-aws-modules passing.","url":"https://homecloud.pages.dev/terraform-local-aws/","mainEntityOfPage":"https://homecloud.pages.dev/terraform-local-aws/","image":"https://homecloud.pages.dev/images/og.png","inLanguage":"en","dateModified":"2026-10-11","author":{"@type":"Organization","name":"HomeCloud","url":"https://homecloud.pages.dev/"},"publisher":{"@type":"Organization","name":"HomeCloud","url":"https://homecloud.pages.dev/","logo":{"@type":"ImageObject","url":"https://homecloud.pages.dev/images/apple-touch-icon.png"}},"about":{"@type":"SoftwareApplication","name":"HomeCloud","applicationCategory":"DeveloperApplication","softwareVersion":"0.4.0","url":"https://homecloud.pages.dev/"},"totalTime":"PT8M","tool":[{"@type":"HowToTool","name":"Docker"},{"@type":"HowToTool","name":"HomeCloud 0.4.0"}],"step":[{"@type":"HowToStep","position":1,"name":"1. Start HomeCloud and export credentials","text":"Install HomeCloud with the install script, run homecloud serve, then eval \"$(homecloud aws-env)\" to export AWS_ENDPOINT_URL, the access keys and the region.","url":"https://homecloud.pages.dev/terraform-local-aws/#start"},{"@type":"HowToStep","position":2,"name":"2. Configure the provider","text":"Configure the hashicorp/aws provider with region us-east-1 and s3_use_path_style = true, and either rely on AWS_ENDPOINT_URL or list each service in an endpoints block.","url":"https://homecloud.pages.dev/terraform-local-aws/#provider"},{"@type":"HowToStep","position":3,"name":"3. Apply a complete stack","text":"Run terraform init and terraform apply in examples/terraform/shop, check the load balancer, API and queue, then run terraform plan (no changes) and terraform destroy.","url":"https://homecloud.pages.dev/terraform-local-aws/#shop"}]},{"@type":"BreadcrumbList","itemListElement":[{"@type":"ListItem","position":1,"name":"HomeCloud","item":"https://homecloud.pages.dev/"},{"@type":"ListItem","position":2,"name":"Guides","item":"https://homecloud.pages.dev/#guides"},{"@type":"ListItem","position":3,"name":"Run Terraform against a local AWS","item":"https://homecloud.pages.dev/terraform-local-aws/"}]}]}</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="site-header">
+  <div class="wrap header-row">
+    <a class="brand" href="/" aria-label="HomeCloud home">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#hc-mark"/></svg>
+      <span>HomeCloud</span>
+    </a>
+    <nav class="site-nav" id="site-nav" aria-label="Main">
+      <a href="/#unchanged">How it works</a>
+      <a href="/#services">Services</a>
+      <a href="/#ci">Tests &amp; CI</a>
+      <a href="/#self-hosting">Self-hosting</a>
+      <a href="/#guides">Guides</a>
+      <a href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
+      <a class="nav-demo" href="/demo/">Demo</a>
+    </nav>
+    <div class="header-actions">
+      <button class="icon-btn" id="theme" type="button" aria-label="Toggle color theme">
+        <svg class="moon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M13.5 9.5A5.5 5.5 0 0 1 6.5 2.5a5.5 5.5 0 1 0 7 7Z" stroke-linejoin="round"/></svg>
+        <svg class="sun" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><circle cx="8" cy="8" r="3"/><path d="M8 1v1.5M8 13.5V15M1 8h1.5M13.5 8H15M3 3l1 1M12 12l1 1M3 13l1-1M12 4l1-1"/></svg>
+      </button>
+      <a class="btn btn-ghost btn-sm gh" href="https://github.com/solinode/homecloud">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.07 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .32.21.69.82.57A12 12 0 0 0 12 .3"/></svg>
+        <span>GitHub</span>
+      </a>
+      <button class="icon-btn menu-btn" id="menu" type="button" aria-label="Open menu" aria-expanded="false" aria-controls="site-nav">
+        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path class="l1" d="M2.5 5.5h11"/><path class="l2" d="M2.5 10.5h11"/></svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <linearGradient id="hc-grad" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#FF8F45"/><stop offset="1" stop-color="#E5480C"/></linearGradient>
+    <symbol id="hc-mark" viewBox="0 0 32 32"><rect width="32" height="32" rx="8" fill="url(#hc-grad)"/><path fill="#fff" fill-rule="evenodd" d="M15.06 6.3a1.5 1.5 0 0 1 1.88 0l8.2 6.62c.35.28.56.71.56 1.17v9.41A2.5 2.5 0 0 1 23.2 26H8.8a2.5 2.5 0 0 1-2.5-2.5v-9.41c0-.46.2-.89.56-1.17ZM11.3 15.6a1.3 1.3 0 0 0 0 2.6h6.4a1.3 1.3 0 0 0 0-2.6Zm0 4.6a1.3 1.3 0 0 0 0 2.6h6.4a1.3 1.3 0 0 0 0-2.6Zm8.4-3.3a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0Zm0 4.6a1.3 1.3 0 1 0 2.6 0a1.3 1.3 0 1 0-2.6 0Z"/></symbol>
+  </defs>
+</svg>
+
+<main id="main">
+<article>
+  <header class="g-hero">
+    <div class="hero-bg" aria-hidden="true"></div>
+    <div class="wrap">
+      <nav aria-label="Breadcrumb">
+        <ol class="crumbs">
+          <li><a href="/">HomeCloud</a></li>
+          <li><a href="/#guides">Guides</a></li>
+          <li><span aria-current="page">Run Terraform against a local AWS</span></li>
+        </ol>
+      </nav>
+      <p class="eyebrow">Guide · Terraform</p>
+      <h1>Run Terraform against a local AWS</h1>
+      <p class="lead">HomeCloud speaks the AWS APIs, so the stock <code>hashicorp/aws</code> provider works against it unchanged. You point the provider at a local endpoint, turn on path-style S3, and <code>terraform apply</code> creates real containers, databases and load balancers on your machine.</p>
+      <p class="g-meta"><span>HomeCloud v0.4.0</span><span>Updated 2026-10-11</span><span>8 min read</span></p>
+    </div>
+  </header>
+
+  <div class="wrap g-layout">
+    <div class="prose">
+<p>Most "local AWS" setups for Terraform are about testing configuration without a bill or a sandbox account. The catch with emulators is that a successful <code>apply</code> often means only that the API accepted the call. With HomeCloud, an <code>aws_db_instance</code> is a PostgreSQL container you can connect to, an <code>aws_lambda_function</code> runs on AWS's own runtime image, and an <code>aws_lb</code> is nginx forwarding to your tasks. This guide sets up the provider, runs a complete example stack, and explains what the nightly module tests cover.</p>
+
+<h2 id="start">1. Start HomeCloud and export credentials</h2>
+<p>You need Docker (Engine on Linux, Docker Desktop or OrbStack on macOS and Windows) and Terraform 1.5+ or OpenTofu.</p>
+<div class="code">
+  <div class="code-bar"><span class="file">shell</span></div>
+<pre><code><span class="f">curl</span> -fsSL https://homecloud.pages.dev/scripts/install.sh | sh
+<span class="f">homecloud</span> serve                    <span class="c"># first start prints the root console password once</span>
+
+<span class="c"># in another terminal</span>
+<span class="k">eval</span> <span class="s">"$(homecloud aws-env)"</span>        <span class="c"># AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION</span>
+<span class="k">export</span> AWS_ENDPOINT_URL=http://localhost:8080   <span class="c"># a host name for Terraform, see below</span>
+<span class="f">aws</span> sts get-caller-identity</code></pre>
+</div>
+<p>The keys belong to the account HomeCloud created on first start. They are real credentials: HomeCloud verifies SigV4 signatures and evaluates IAM policies on every call, so dummy keys such as <code>test</code>/<code>test</code> are rejected.</p>
+
+<h2 id="provider">2. Configure the provider</h2>
+<p>There are two ways to point the provider at HomeCloud. The simplest relies on <code>AWS_ENDPOINT_URL</code>, which the provider reads for every service. This is what HomeCloud's own module test suite does:</p>
+<div class="code">
+  <div class="code-bar"><span class="file">providers.tf</span><span class="tag">endpoint from the environment</span></div>
+<pre><code><span class="k">provider</span> <span class="s">"aws"</span> {
+  region = <span class="s">"us-east-1"</span>
+
+  <span class="c"># HomeCloud serves buckets by path, so bucket names need not resolve as host names.</span>
+  s3_use_path_style = <span class="n">true</span>
+}</code></pre>
+</div>
+<p>If you prefer the configuration to say where it deploys, list the services in an <code>endpoints</code> block. This is the form used by the shop example; delete the block and the same files target AWS:</p>
+<div class="code">
+  <div class="code-bar"><span class="file">main.tf</span><span class="tag">explicit endpoints</span></div>
+<pre><code><span class="k">variable</span> <span class="s">"endpoint"</span> {
+  default = <span class="s">"http://localhost:8080"</span>   <span class="c"># a host name, not an IP address</span>
+}
+
+<span class="k">provider</span> <span class="s">"aws"</span> {
+  region            = <span class="s">"us-east-1"</span>
+  s3_use_path_style = <span class="n">true</span>
+
+  <span class="k">endpoints</span> {
+    s3     = var.endpoint
+    sts    = var.endpoint
+    iam    = var.endpoint
+    lambda = var.endpoint
+    sqs    = var.endpoint
+    rds    = var.endpoint
+    ec2    = var.endpoint
+    <span class="c"># ...one line per service the configuration uses</span>
+  }
+}</code></pre>
+</div>
+<p>Three details matter:</p>
+<ul>
+  <li><strong><code>s3_use_path_style = true</code></strong> is the only HomeCloud-specific setting. Without it the provider puts the bucket name in the host name.</li>
+  <li><strong>Use <code>localhost</code>, not <code>127.0.0.1</code>,</strong> in the endpoint. The provider's S3 client prefixes the host with the account ID, which does not work with an IP address. <code>homecloud aws-env</code> prints <code>127.0.0.1</code>, which is fine for the AWS CLI and SDKs, hence the extra <code>export</code> above.</li>
+  <li><strong>No <code>skip_credentials_validation</code>, <code>skip_requesting_account_id</code> or <code>skip_metadata_api_check</code>.</strong> HomeCloud implements STS, so the provider's start-up checks pass as they do on AWS.</li>
+</ul>
+<p>There is one region, <code>us-east-1</code>, and one account. Configurations that create resources in a second region (Secrets Manager replicas, multi-Region KMS replicas, cross-region RDS replicas) get an AWS-shaped error.</p>
+
+<h2 id="shop">3. Apply a complete stack</h2>
+<p>The repository ships a realistic example in <a href="https://github.com/solinode/homecloud/tree/main/examples/terraform/shop"><code>examples/terraform/shop</code></a>: a VPC with public subnets, an application load balancer with HTTP and HTTPS (an ACM certificate validated through Route 53), an ECS Fargate service running nginx, RDS PostgreSQL with the master password managed in Secrets Manager, S3, DynamoDB, SNS to SQS to a Lambda consumer, and an API Gateway HTTP API.</p>
+<div class="code">
+  <div class="code-bar"><span class="file">shell</span></div>
+<pre><code><span class="k">eval</span> <span class="s">"$(homecloud aws-env)"</span>
+<span class="k">export</span> TF_VAR_endpoint=http://localhost:8080      <span class="c"># the variable's default; set it for another host or port</span>
+
+<span class="k">cd</span> examples/terraform/shop
+<span class="f">terraform</span> init
+<span class="f">terraform</span> apply -auto-approve       <span class="c"># about four minutes, mostly the database and load balancer</span></code></pre>
+</div>
+<p>Then check that the pieces actually work, not just that they exist:</p>
+<div class="code">
+  <div class="code-bar"><span class="file">shell</span></div>
+<pre><code><span class="f">curl</span> <span class="s">"$(terraform output -raw api_url)"</span>    <span class="c"># {"service": "shop-api", "path": "/hello"}</span>
+
+<span class="f">aws</span> sqs send-message --queue-url <span class="s">"$(terraform output -raw queue_url)"</span> \
+  --message-body <span class="s">'{"order":1}'</span>
+<span class="f">aws</span> logs tail <span class="s">"$(terraform output -raw consumer_log_group)"</span> --since 5m   <span class="c"># "order received: ..."</span>
+
+<span class="f">docker</span> port hc-elb-shop-alb             <span class="c"># the host port nginx is published on</span>
+
+<span class="f">terraform</span> plan                         <span class="c"># No changes.</span>
+<span class="f">terraform</span> destroy -auto-approve         <span class="c"># removes the containers, networks and volumes too</span></code></pre>
+</div>
+<p>The example's <a href="https://github.com/solinode/homecloud/blob/main/examples/terraform/shop/README.md">README</a> also shows how to connect to the database with the password Terraform never saw, read from Secrets Manager.</p>
+
+<h2 id="modules">What the module tests cover</h2>
+<p>The shop stack uses plain resources. Real projects lean on community modules, so HomeCloud runs 17 scenarios built from <a href="https://registry.terraform.io/namespaces/terraform-aws-modules"><code>terraform-aws-modules</code></a> at pinned versions, nightly, with OpenTofu and the stock provider (6.x). Each scenario has to apply, pass a check that the resources really work (an object read back, a message delivered, a function invoked through its alias and its queue, nginx served through the load balancer, a DNS answer, a decrypted ciphertext), re-plan with no changes, and destroy cleanly. The last run passed all 17.</p>
+<div class="g-table">
+  <table>
+    <caption class="sr-only">terraform-aws-modules scenarios that pass on HomeCloud</caption>
+    <thead><tr><th scope="col">Area</th><th scope="col">Modules</th></tr></thead>
+    <tbody>
+      <tr><th scope="row">Network</th><td>vpc, security-group, alb, route53, acm</td></tr>
+      <tr><th scope="row">Compute</th><td>lambda (with alias), ecs (Fargate behind an ALB), apigateway-v2</td></tr>
+      <tr><th scope="row">Data</th><td>s3-bucket, dynamodb-table, rds (PostgreSQL 16)</td></tr>
+      <tr><th scope="row">Messaging</th><td>sqs, sns, eventbridge</td></tr>
+      <tr><th scope="row">Security</th><td>iam (policy, role, user, group), kms, secrets-manager, ssm-parameter</td></tr>
+      <tr><th scope="row">Observability</th><td>cloudwatch (log groups, metric filters, alarms, composite alarms, saved queries)</td></tr>
+    </tbody>
+  </table>
+</div>
+<p>Module versions, per-service scores and how to run the suite yourself (<code>compat/run.sh</code>) are in <a href="https://github.com/solinode/homecloud/blob/main/docs/compatibility.md">docs/compatibility.md</a>.</p>
+
+<h2 id="limits">What is stored but not enforced</h2>
+<p>Some resources apply, re-plan and destroy as on AWS but have no single-host equivalent, so HomeCloud keeps them as records. Plan your tests around these:</p>
+<ul>
+  <li><strong>NAT gateways:</strong> a VPC with an internet gateway and a default route reaches the internet from every subnet; private subnets do not need the NAT gateway.</li>
+  <li><strong>Network ACLs:</strong> stored and reported, never enforced. Security groups are enforced, as iptables rules inside the VPC.</li>
+  <li><strong>Application Auto Scaling:</strong> targets and policies are stored; the ECS desired count does not change.</li>
+  <li><strong>S3 <code>AbortIncompleteMultipartUpload</code></strong> lifecycle rules are stored; MinIO cannot run them.</li>
+</ul>
+<p>Coverage beyond these modules is listed per service and per operation in <a href="https://github.com/solinode/homecloud/blob/main/docs/aws-compat.md">docs/aws-compat.md</a>. CloudFormation works too, including <code>aws_cloudformation_stack</code>, minus nested stacks and custom resources.</p>
+
+<h2 id="ci">In CI</h2>
+<p>The same flow runs on a stock GitHub Actions runner. The HomeCloud action downloads a checksum-verified release, starts the server and exports the <code>AWS_*</code> variables; a post step removes every container it started.</p>
+<div class="code">
+  <div class="code-bar"><span class="file">.github/workflows/terraform.yml</span></div>
+<pre><code><span class="k">steps</span>:
+  - <span class="k">uses</span>: actions/checkout@v4
+  - <span class="k">uses</span>: <span class="f">solinode/homecloud/integrations/github-action@main</span>
+    <span class="k">with</span>:
+      <span class="k">services-wait</span>: s3                  <span class="c"># wait for MinIO too</span>
+  - <span class="k">uses</span>: hashicorp/setup-terraform@v3
+  - <span class="k">env</span>:
+      <span class="k">AWS_ENDPOINT_URL</span>: http://localhost:8080   <span class="c"># a host name, as above</span>
+    <span class="k">run</span>: |
+      terraform init
+      terraform apply -auto-approve
+      terraform plan -detailed-exitcode   <span class="c"># fails the job if the re-plan shows drift</span>
+      terraform destroy -auto-approve</code></pre>
+</div>
+<p>More options, including testcontainers for Go and Python, are in the <a href="https://github.com/solinode/homecloud/blob/main/docs/integrations.md">testing and CI guide</a>. If you are moving from another emulator, read <a href="/localstack-alternative/">the LocalStack alternative guide</a>; for Lambda-heavy stacks, <a href="/test-aws-lambda-locally/">testing Lambda locally</a>.</p>
+
+<aside class="try" aria-labelledby="try-h">
+  <h2 id="try-h">Try it</h2>
+  <p>Install HomeCloud, start it, then run the shop example or your own configuration.</p>
+  <div class="cmd">
+    <pre><span class="prompt" aria-hidden="true">$</span><code id="cmd-try" data-script="sh">curl -fsSL https://homecloud.pages.dev/scripts/install.sh | sh</code></pre>
+    <button class="copy" type="button" data-copy="cmd-try" aria-label="Copy install command"><svg class="i-copy" viewBox="0 0 16 16" aria-hidden="true"><rect x="5.5" y="5.5" width="8" height="8" rx="1.8"/><path d="M10.5 3.6V3.3a1.8 1.8 0 0 0-1.8-1.8H4.3a1.8 1.8 0 0 0-1.8 1.8v4.4a1.8 1.8 0 0 0 1.8 1.8h.3"/></svg><svg class="i-ok" viewBox="0 0 16 16" aria-hidden="true"><path d="M3.5 8.5l3 3 6-7"/></svg></button>
+  </div>
+  <p class="try-note">Then <code>homecloud serve</code> and open <code>127.0.0.1:8080</code>. Needs Docker. Windows: <code>irm https://homecloud.pages.dev/scripts/install.ps1 | iex</code></p>
+  <div class="try-actions">
+    <a class="btn btn-primary btn-sm" href="/demo/">Open the live demo <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 8h9m-4-4 4 4-4 4" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg></a>
+    <a class="btn btn-ghost btn-sm" href="https://github.com/solinode/homecloud/blob/main/examples/terraform/shop/README.md">The shop example</a>
+  </div>
+  <p class="sr-only" role="status" id="copy-status"></p>
+</aside>
+    </div>
+    <aside class="g-aside" aria-label="On this page">
+      <nav aria-labelledby="toc-h">
+        <h2 id="toc-h">On this page</h2>
+        <ol>
+          <li><a href="#start">1. Start HomeCloud and export credentials</a></li>
+          <li><a href="#provider">2. Configure the provider</a></li>
+          <li><a href="#shop">3. Apply a complete stack</a></li>
+          <li><a href="#modules">What the module tests cover</a></li>
+          <li><a href="#limits">What is stored but not enforced</a></li>
+          <li><a href="#ci">In CI</a></li>
+        </ol>
+      </nav>
+    </aside>
+  </div>
+
+  <div class="wrap">
+    <section class="related" aria-labelledby="related-h">
+      <h2 id="related-h">More guides</h2>
+      <ul class="guide-grid">
+  <li><a href="/localstack-alternative/"><b>A LocalStack alternative with real compute</b><span>What changes when the engines behind the API are real, and when to stay with LocalStack.</span></a></li>
+  <li><a href="/test-aws-lambda-locally/"><b>Test AWS Lambda locally</b><span>AWS's runtime images, invoked with the AWS CLI or boto3, with SQS triggers and logs.</span></a></li>
+  <li><a href="/self-hosted-s3-iam-lambda/"><b>Self-host S3, IAM and Lambda</b><span>A home server or VPS with AWS APIs: install, expose it safely, back it up.</span></a></li>
+  <li><a href="/teach-aws-without-aws-account/"><b>Teach AWS without an AWS account</b><span>College labs with an IAM user per student, the real CLI and no bills.</span></a></li>
+  <li><a href="/homecloud-vs-localstack/"><b>HomeCloud vs LocalStack</b><span>Side by side with Community and Pro, including where LocalStack is the better pick.</span></a></li>
+</ul>
+    </section>
+  </div>
+</article>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-grid">
+    <div class="footer-brand">
+      <a class="brand" href="/" aria-label="HomeCloud home"><svg class="mark" viewBox="0 0 32 32" aria-hidden="true"><use href="#hc-mark"/></svg><span>HomeCloud</span></a>
+      <p>An AWS-compatible cloud you run yourself.</p>
+    </div>
+    <nav aria-label="Product">
+      <h2>Product</h2>
+      <a href="/demo/">Demo console</a>
+      <a href="https://github.com/solinode/homecloud/tree/main/docs">Docs</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/CHANGELOG.md">Changelog</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/docs/compatibility.md">Compatibility</a>
+    </nav>
+    <nav aria-label="Community">
+      <h2>Community</h2>
+      <a href="https://github.com/solinode/homecloud">GitHub</a>
+      <a href="https://discord.gg/pemra9uaC9">Discord</a>
+      <a href="https://github.com/solinode/homecloud/blob/main/CONTRIBUTING.md">Contributing</a>
+    </nav>
+    <nav aria-label="Project">
+      <h2>Project</h2>
+      <a href="/files/Project%20Concept_%20_HomeCloud_.pdf">Concept (PDF)</a>
+      <a href="/files/but,%20why_.pdf">But, why? (PDF)</a>
+      <a href="/files/funding.json">funding.json</a>
+    </nav>
+  </div>
+  <div class="wrap footer-legal">
+    <p>&copy; 2026 HomeCloud &middot; AGPL-3.0</p>
+    <p>AWS and the names of AWS services are trademarks of Amazon.com, Inc. HomeCloud is not affiliated with or endorsed by Amazon. LocalStack and other names belong to their owners.</p>
+  </div>
+</footer>
+
+<script src="/site.js" defer></script>
+</body>
+</html>
