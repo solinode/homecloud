@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.4.1 (2026-10-11)
+
+A redesigned console, a new website and easier ways to use HomeCloud in CI.
+
+- **Console redesign:** a design system shared with the website (Geist type, the HomeCloud mark, an orange accent, dark and light themes), a new top bar with a service switcher and a ⌘K command palette, a home dashboard (resources by service, recent activity, alarms, quick actions, a connect-the-AWS-CLI snippet) with a short getting-started guide for new accounts, and every service page moved onto shared components: stat tiles and action menus on detail pages, consistent tables, dialogs and wizards, copyable code blocks and terminal panes.
+- **Website:** a new homecloud.pages.dev with guides for running Terraform against a local AWS, testing Lambda locally, self-hosting S3, IAM and Lambda, teaching AWS without an AWS account, and an honest comparison with LocalStack; plus robots.txt, a sitemap, a real 404 page and structured data. The demo console uses the redesigned UI.
+- **GitHub Action:** now published as [`solinode/setup-homecloud`](https://github.com/solinode/setup-homecloud): `uses: solinode/setup-homecloud@v1`.
+- **testcontainers-homecloud** (Python) can be published to PyPI from the repository (Trusted Publishing).
+- Test coverage is collected in CI and reported to Codecov.
+
 ## 0.4.0 (2026-10-07)
 
 - HomeCloud as a drop-in AWS for tests ([docs/integrations.md](docs/integrations.md)): a GitHub Action (`integrations/github-action`) that installs a checksum-verified release, starts the server and exports `AWS_ENDPOINT_URL` and credentials, and testcontainers modules for Go (`integrations/testcontainers-go`) and Python (`integrations/testcontainers-python`) that run the HomeCloud image and clean up every container it started.
