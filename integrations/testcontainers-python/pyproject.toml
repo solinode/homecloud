@@ -5,18 +5,37 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "testcontainers-homecloud"
 version = "0.1.0"
-description = "testcontainers module for HomeCloud, a self-hosted AWS"
+description = "Testcontainers module for HomeCloud, a self-hosted AWS-compatible cloud: run S3, SQS, DynamoDB, Lambda and more in your tests"
 readme = "README.md"
 license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
+authors = [{ name = "solinode" }]
 requires-python = ">=3.9"
-dependencies = ["testcontainers>=4.0", "boto3>=1.28"]
+dependencies = ["testcontainers>=4.0,<5", "boto3>=1.28,<2"]
+keywords = ["testcontainers", "aws", "s3", "sqs", "dynamodb", "lambda", "testing", "homecloud"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Framework :: Pytest",
+    "Intended Audience :: Developers",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Topic :: Software Development :: Testing",
+]
 
 [project.optional-dependencies]
 test = ["pytest>=7"]
 
 [project.urls]
-Homepage = "https://github.com/solinode/homecloud"
+Homepage = "https://homecloud.pages.dev"
+Documentation = "https://github.com/solinode/homecloud/blob/main/docs/integrations.md#testcontainers-python"
 Source = "https://github.com/solinode/homecloud/tree/main/integrations/testcontainers-python"
+Issues = "https://github.com/solinode/homecloud/issues"
 
 [tool.setuptools.packages.find]
 where = ["src"]

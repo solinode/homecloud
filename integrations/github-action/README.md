@@ -1,5 +1,12 @@
 # Set up HomeCloud (GitHub Action)
 
+> **The action now lives in its own repository:
+> [solinode/setup-homecloud](https://github.com/solinode/setup-homecloud)**, which is
+> what the GitHub Marketplace listing "Setup HomeCloud" points at. Use `uses: solinode/setup-homecloud@v1`.
+> That repository is the canonical home and where releases are tagged; this directory is a
+> mirror kept for HomeCloud's own CI (`.github/workflows/action-test.yml`). Make changes in
+> both places. `solinode/homecloud/integrations/github-action@main` keeps working.
+
 Runs [HomeCloud](https://github.com/solinode/homecloud), a self-hosted AWS, inside your
 workflow so tests can call S3, SQS, DynamoDB, Lambda and the rest of the AWS API without
 an AWS account.
@@ -23,7 +30,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: solinode/homecloud/integrations/github-action@main
+      - uses: solinode/setup-homecloud@v1
         with:
           services-wait: s3
       - run: aws s3 mb s3://my-bucket && aws s3 ls
@@ -54,7 +61,7 @@ AWS CLI v2 and current AWS SDKs read `AWS_ENDPOINT_URL`, so most tools need no c
 ### AWS CLI
 
 ```yaml
-      - uses: solinode/homecloud/integrations/github-action@main
+      - uses: solinode/setup-homecloud@v1
         with:
           services-wait: s3
       - run: |
@@ -69,7 +76,7 @@ AWS CLI v2 and current AWS SDKs read `AWS_ENDPOINT_URL`, so most tools need no c
 boto3 1.28 and later pick up `AWS_ENDPOINT_URL`:
 
 ```yaml
-      - uses: solinode/homecloud/integrations/github-action@main
+      - uses: solinode/setup-homecloud@v1
         with:
           services-wait: s3
       - uses: actions/setup-python@v5
@@ -93,7 +100,7 @@ def test_upload():
 The AWS provider (5.x and later) honours `AWS_ENDPOINT_URL`; tell it not to look for a real account:
 
 ```yaml
-      - uses: solinode/homecloud/integrations/github-action@main
+      - uses: solinode/setup-homecloud@v1
         with:
           services-wait: s3
       - uses: hashicorp/setup-terraform@v3
@@ -112,7 +119,7 @@ provider "aws" {
 
 ```yaml
       - id: homecloud
-        uses: solinode/homecloud/integrations/github-action@main
+        uses: solinode/setup-homecloud@v1
       - run: ./run-tests.sh --endpoint "${{ steps.homecloud.outputs.endpoint }}"
 ```
 

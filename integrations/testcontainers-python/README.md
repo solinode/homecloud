@@ -5,8 +5,11 @@ A [testcontainers-python](https://testcontainers-python.readthedocs.io/) module 
 test and talk to it with boto3.
 
 ```sh
-pip install "testcontainers-homecloud @ git+https://github.com/solinode/homecloud#subdirectory=integrations/testcontainers-python"
+pip install testcontainers-homecloud
 ```
+
+(Before the first PyPI release, install from the repository:
+`pip install "testcontainers-homecloud @ git+https://github.com/solinode/homecloud#subdirectory=integrations/testcontainers-python"`.)
 
 ```python
 import pytest

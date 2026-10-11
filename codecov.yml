@@ -1,0 +1,42 @@
+# Codecov settings. Coverage comes from the go job in .github/workflows/ci.yml
+# (cli/coverage.out). Status checks are informational: coverage never blocks a PR.
+codecov:
+  require_ci_to_pass: false
+
+coverage:
+  precision: 1
+  round: down
+  range: "50...85"
+  status:
+    project:
+      default:
+        target: auto
+        threshold: 1%
+        informational: true
+    patch:
+      default:
+        target: auto
+        informational: true
+
+comment:
+  layout: "condensed_header, diff, flags, files"
+  behavior: default
+  require_changes: false
+
+# Paths in the profile are Go import paths; fixes map them back to the repository.
+fixes:
+  - "github.com/homecloudhq/homecloud/cli/::cli/"
+
+ignore:
+  - "cli/internal/web/dist/**"
+  - "console/**"
+  - "pages/**"
+  - "integrations/**"
+  - "examples/**"
+  - "compat/**"
+  - "scripts/**"
+  - "cli/internal/dockertest/**"
+  - "cli/internal/svc/svctest/**"
+  - "cli/internal/awsapi/awstest/**"
+  - "**/testdata/**"
+  - "**/*_test.go"

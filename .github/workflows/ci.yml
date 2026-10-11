@@ -38,9 +38,16 @@ jobs:
       # AWS compatibility tests drive the real AWS CLI (preinstalled on the runner) and boto3.
       - run: pip install boto3 cryptography pycognito && aws --version
       - run: go vet ./...
-      - run: go test -race -timeout 30m ./...
+      - run: go test -race -timeout 30m -coverprofile=coverage.out -covermode=atomic ./...
         env:
           HC_TEST_PYTHON: python3
+      # Never fails the job; needs the CODECOV_TOKEN secret unless tokenless upload is enabled.
+      - uses: codecov/codecov-action@v5
+        if: success()
+        with:
+          files: cli/coverage.out
+          token: ${{ secrets.CODECOV_TOKEN }}
+          fail_ci_if_error: false
       - name: Cross-compile
         run: |
           for p in linux/amd64 linux/arm64 darwin/arm64 windows/amd64; do
