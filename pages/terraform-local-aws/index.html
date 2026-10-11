@@ -112,7 +112,6 @@
 
 <span class="c"># in another terminal</span>
 <span class="k">eval</span> <span class="s">"$(homecloud aws-env)"</span>        <span class="c"># AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION</span>
-<span class="k">export</span> AWS_ENDPOINT_URL=http://localhost:8080   <span class="c"># a host name for Terraform, see below</span>
 <span class="f">aws</span> sts get-caller-identity</code></pre>
 </div>
 <p>The keys belong to the account HomeCloud created on first start. They are real credentials: HomeCloud verifies SigV4 signatures and evaluates IAM policies on every call, so dummy keys such as <code>test</code>/<code>test</code> are rejected.</p>
@@ -154,7 +153,7 @@
 <p>Three details matter:</p>
 <ul>
   <li><strong><code>s3_use_path_style = true</code></strong> is the only HomeCloud-specific setting. Without it the provider puts the bucket name in the host name.</li>
-  <li><strong>Use <code>localhost</code>, not <code>127.0.0.1</code>,</strong> in the endpoint. The provider's S3 client prefixes the host with the account ID, which does not work with an IP address. <code>homecloud aws-env</code> prints <code>127.0.0.1</code>, which is fine for the AWS CLI and SDKs, hence the extra <code>export</code> above.</li>
+  <li><strong>Use a host name, not an IP address,</strong> in the endpoint: <code>localhost</code> for a local server, which is what <code>homecloud aws-env</code> and the GitHub Action set. Every <code>aws_s3_bucket</code> also calls S3 Control (provider 6.x reads bucket tags that way), which prefixes the host with the account ID: <code>123456789012.localhost</code> resolves, <code>123456789012.127.0.0.1</code> does not.</li>
   <li><strong>No <code>skip_credentials_validation</code>, <code>skip_requesting_account_id</code> or <code>skip_metadata_api_check</code>.</strong> HomeCloud implements STS, so the provider's start-up checks pass as they do on AWS.</li>
 </ul>
 <p>There is one region, <code>us-east-1</code>, and one account. Configurations that create resources in a second region (Secrets Manager replicas, multi-Region KMS replicas, cross-region RDS replicas) get an AWS-shaped error.</p>
@@ -164,7 +163,7 @@
 <div class="code">
   <div class="code-bar"><span class="file">shell</span></div>
 <pre><code><span class="k">eval</span> <span class="s">"$(homecloud aws-env)"</span>
-<span class="k">export</span> TF_VAR_endpoint=http://localhost:8080      <span class="c"># the variable's default; set it for another host or port</span>
+<span class="k">export</span> TF_VAR_endpoint=<span class="s">"$AWS_ENDPOINT_URL"</span>   <span class="c"># http://localhost:8080 for a local server</span>
 
 <span class="k">cd</span> examples/terraform/shop
 <span class="f">terraform</span> init
@@ -224,9 +223,7 @@
     <span class="k">with</span>:
       <span class="k">services-wait</span>: s3                  <span class="c"># wait for MinIO too</span>
   - <span class="k">uses</span>: hashicorp/setup-terraform@v3
-  - <span class="k">env</span>:
-      <span class="k">AWS_ENDPOINT_URL</span>: http://localhost:8080   <span class="c"># a host name, as above</span>
-    <span class="k">run</span>: |
+  - <span class="k">run</span>: |
       terraform init
       terraform apply -auto-approve
       terraform plan -detailed-exitcode   <span class="c"># fails the job if the re-plan shows drift</span>

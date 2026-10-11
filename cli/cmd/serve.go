@@ -167,7 +167,7 @@ credentials, so AWS tools work against HomeCloud:
 			if region == "" || region == core.LegacyRegion {
 				region = core.DefaultRegion
 			}
-			vars := [][2]string{{"AWS_ENDPOINT_URL", p.Endpoint}, {"AWS_ACCESS_KEY_ID", p.AccessKeyID},
+			vars := [][2]string{{"AWS_ENDPOINT_URL", client.AWSEndpoint(p.Endpoint)}, {"AWS_ACCESS_KEY_ID", p.AccessKeyID},
 				{"AWS_SECRET_ACCESS_KEY", p.SecretAccessKey}, {"AWS_REGION", region}}
 			if p.CAFile != "" {
 				vars = append(vars, [2]string{"AWS_CA_BUNDLE", p.CAFile})

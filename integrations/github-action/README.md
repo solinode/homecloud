@@ -49,12 +49,16 @@ jobs:
 
 | Output | Description |
 | --- | --- |
-| `endpoint` | e.g. `http://127.0.0.1:8080` (same as `AWS_ENDPOINT_URL`) |
+| `endpoint` | e.g. `http://localhost:8080` (same as `AWS_ENDPOINT_URL`) |
 | `access-key-id` | root access key ID |
 | `region` | region HomeCloud serves (`us-east-1`) |
 | `log-file` | path of the server log |
 
 AWS CLI v2 and current AWS SDKs read `AWS_ENDPOINT_URL`, so most tools need no configuration.
+The endpoint names the server `localhost` (it listens on `127.0.0.1`), as `homecloud aws-env`
+does: S3 Control, which the Terraform AWS provider calls for every bucket, puts the account ID
+in front of the host name, and `123456789012.localhost` resolves where `123456789012.127.0.0.1`
+does not.
 
 ## Examples
 
@@ -97,7 +101,8 @@ def test_upload():
 
 ### Terraform
 
-The AWS provider (5.x and later) honours `AWS_ENDPOINT_URL`; tell it not to look for a real account:
+The AWS provider (5.x and later) honours `AWS_ENDPOINT_URL`. HomeCloud implements STS, so the
+provider's account checks pass unchanged; only path-style S3 addressing needs setting:
 
 ```yaml
       - uses: solinode/setup-homecloud@v1
@@ -109,9 +114,7 @@ The AWS provider (5.x and later) honours `AWS_ENDPOINT_URL`; tell it not to look
 
 ```hcl
 provider "aws" {
-  skip_credentials_validation = true
-  skip_requesting_account_id  = true
-  s3_use_path_style           = true
+  s3_use_path_style = true
 }
 ```
 

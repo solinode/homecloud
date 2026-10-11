@@ -440,8 +440,10 @@ aws sts get-caller-identity
 ```
 
 **Terraform and OpenTofu** use the standard `hashicorp/aws` provider with its `endpoints {}` block
-pointing at HomeCloud; the credentials come from the same environment variables. Use a host name, not an
-IP address, in the endpoint. See [`examples/terraform/shop`](../examples/terraform/shop/README.md) and
+pointing at HomeCloud (or just `AWS_ENDPOINT_URL`); the credentials come from the same environment
+variables. Use a host name, not an IP address, in the endpoint (`localhost` for a local server, as
+`homecloud aws-env` prints it): S3 Control, which the provider calls for every bucket, puts the account ID
+in front of the host. See [`examples/terraform/shop`](../examples/terraform/shop/README.md) and
 [aws-compat.md](aws-compat.md) for the supported services.
 
 ## 10. Backups and restore

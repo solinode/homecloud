@@ -92,9 +92,8 @@ start_server() {
   done
   grep -q "s3: MinIO ready" "$WORK/serve.log" || { cat "$WORK/serve.log"; echo "S3 not ready" >&2; exit 2; }
   ACCOUNT=$(sed -n 's/.*created account \([0-9]*\).*/\1/p' "$WORK/serve.log" | head -1)
+  # aws-env names the server localhost: S3 Control puts the account ID in the host name.
   eval "$(HOMECLOUD_DATA_DIR=$DATA "$bin" aws-env)"
-  # The S3 client puts the account in the host name: use a name, not an IP address.
-  export AWS_ENDPOINT_URL=http://localhost:$api
   export HC_DNS_PORT=$dns
   echo "HomeCloud $AWS_ENDPOINT_URL (account $ACCOUNT, data $DATA)"
 }

@@ -31,7 +31,7 @@ import { StatTile } from "@/components/console/stat-tile"
 import { StatusDot } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
 import { DOCS_URL, QUICK_ACTIONS, REPO_URL } from "@/lib/actions"
-import { API_BASE, DEMO } from "@/lib/api"
+import { awsEndpoint } from "@/lib/api"
 import { formatDuration, pluralize } from "@/lib/format"
 import { useApi } from "@/lib/hooks"
 import { SERVICES } from "@/lib/services"
@@ -76,12 +76,6 @@ interface ServiceCount {
   error: boolean
   /** counted towards "resources" (IAM users and VPCs exist on a fresh install) */
   counts?: boolean
-}
-
-function endpoint(): string {
-  if (DEMO) return "http://127.0.0.1:8080"
-  if (API_BASE) return API_BASE
-  return typeof window === "undefined" ? "" : window.location.origin
 }
 
 function greeting(): string {
@@ -439,7 +433,7 @@ function Panel({ title, action, children, className }: { title: ReactNode; actio
 }
 
 function ConnectCli({ compact }: { compact?: boolean }) {
-  const ep = endpoint()
+  const ep = awsEndpoint()
   return (
     <Panel
       title="Connect the AWS CLI"
@@ -478,7 +472,7 @@ function Step({ n, title, children, aside }: { n: number; title: ReactNode; chil
 
 /** GetStarted replaces the dashboard while the account has no resources. */
 function GetStarted() {
-  const ep = endpoint()
+  const ep = awsEndpoint()
   return (
     <div className="flex flex-col gap-6">
       <section className="hc-backdrop bg-card overflow-hidden rounded-2xl border px-6 py-8 shadow-xs sm:px-10 sm:py-10">
