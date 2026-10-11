@@ -1,5 +1,5 @@
 import { badRequest, conflict, getState, later, notFound, type DemoService, type Router, type State } from "../engine"
-import { DAY, MIN, ACCOUNT, REGION, ago, arn, clone, nowIso, rng, stableId, uuid } from "../util"
+import { DAY, MIN, ACCOUNT, REGION, ago, arn, clone, nowIso, rng, stableId, uuid, random } from "../util"
 import { NAMES, SG, SUBNET, VPC_DEFAULT, VPC_SHOP } from "../ids"
 import { ECR_REGISTRY } from "./ecr"
 import type { EcsService, EcsServiceEvent, EcsTask, EcsTaskDefinition } from "@/lib/types"
@@ -208,7 +208,7 @@ function launch(tdk: string, o: { service?: string; subnet?: string; command?: s
     created_at: nowIso(),
     started_at: null,
     stopped_at: null,
-    ...(!o.service && def.container_port ? { public_ports: { [`${def.container_port}/tcp`]: 32768 + Math.floor(Math.random() * 2000) } } : {}),
+    ...(!o.service && def.container_port ? { public_ports: { [`${def.container_port}/tcp`]: 32768 + Math.floor(random() * 2000) } } : {}),
   }
   S().tasks.push(t)
   later(2500, () => {

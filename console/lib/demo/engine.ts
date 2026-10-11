@@ -4,6 +4,8 @@
 // and keep their data under state[<service>]. State is plain JSON so it can be
 // persisted in sessionStorage; "Reset demo" clears it and re-seeds.
 
+import { seeded } from "./util"
+
 export class DemoError extends Error {
   readonly status: number
   readonly code: string
@@ -131,9 +133,12 @@ export function getState(): State {
   return state
 }
 
+/** seedService builds a service's fixtures with a per-service seeded random(), so their ids are stable across page loads. */
+const seedService = (svc: DemoService) => seeded(`demo:${svc.name}`, svc.seed)
+
 export function seedState(): State {
   const s: State = {}
-  for (const svc of services) s[svc.name] = svc.seed()
+  for (const svc of services) s[svc.name] = seedService(svc)
   return s
 }
 
@@ -148,7 +153,7 @@ export function load(svcs: DemoService[]) {
   }
   state = restored ?? seedState()
   // Any service added since the snapshot (or a corrupt snapshot) is re-seeded.
-  for (const svc of services) if (state[svc.name] === undefined) state[svc.name] = svc.seed()
+  for (const svc of services) if (state[svc.name] === undefined) state[svc.name] = seedService(svc)
   for (const svc of services) svc.onLoad?.(state)
 }
 

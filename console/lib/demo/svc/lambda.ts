@@ -1,5 +1,5 @@
 import { badRequest, conflict, err, getState, later, notFound, unavailable, type DemoService, type Req, type Router, type State } from "../engine"
-import { DAY, HOUR, MIN, ACCOUNT, REGION, ago, arn, clone, nowIso, stableId, uuid, hex, rng } from "../util"
+import { DAY, HOUR, MIN, ACCOUNT, REGION, ago, arn, clone, nowIso, stableId, uuid, hex, rng, random } from "../util"
 import { NAMES, SG, SUBNET } from "../ids"
 import type {
   EventInvokeConfig,
@@ -719,8 +719,8 @@ function invokeFn(f: LambdaFunction, event: Json, executed: string): InvokeResul
   const rid = uuid()
   const cold = warmCount(f.name) === 0
   const fail = !!(event && typeof event === "object" && (event.fail || event.error || event.simulate_error))
-  const initMs = cold ? 180 + Math.floor(Math.random() * 300) : 0
-  const dur = Math.round((f.runtime.startsWith("java") ? 120 : 8) + Math.random() * 90 + (cold ? 40 : 0))
+  const initMs = cold ? 180 + Math.floor(random() * 300) : 0
+  const dur = Math.round((f.runtime.startsWith("java") ? 120 : 8) + random() * 90 + (cold ? 40 : 0))
   const py = f.runtime.startsWith("python")
   const log = (level: string, msg: string) => (py ? `[${level}]\t${stamp()}\t${rid}\t${msg}` : `${stamp()}\t${rid}\t${level}\t${msg}`)
   const lines = [`START RequestId: ${rid} Version: ${executed}`]
@@ -741,7 +741,7 @@ function invokeFn(f: LambdaFunction, event: Json, executed: string): InvokeResul
   }
   lines.push(`END RequestId: ${rid}`)
   const billed = Math.ceil((dur + initMs) / 1) || 1
-  lines.push(`REPORT RequestId: ${rid}\tDuration: ${dur}.${Math.floor(Math.random() * 90 + 10)} ms\tBilled Duration: ${billed} ms\tMemory Size: ${f.memory_mb} MB\tMax Memory Used: ${Math.round(f.memory_mb * (0.18 + Math.random() * 0.2))} MB${cold ? `\tInit Duration: ${initMs}.${Math.floor(Math.random() * 90 + 10)} ms` : ""}`)
+  lines.push(`REPORT RequestId: ${rid}\tDuration: ${dur}.${Math.floor(random() * 90 + 10)} ms\tBilled Duration: ${billed} ms\tMemory Size: ${f.memory_mb} MB\tMax Memory Used: ${Math.round(f.memory_mb * (0.18 + random() * 0.2))} MB${cold ? `\tInit Duration: ${initMs}.${Math.floor(random() * 90 + 10)} ms` : ""}`)
   st.invoked[f.name] = nowIso()
   return {
     request_id: rid,

@@ -1,5 +1,5 @@
 import { badRequest, conflict, err, getState, notFound, type DemoService, type Router, type State } from "../engine"
-import { AZ_A, AZ_B, DAY, REGION, ago, arn, stableId, uid } from "../util"
+import { AZ_A, AZ_B, DAY, REGION, ago, arn, stableId, uid, random } from "../util"
 import { IGW_DEFAULT, IGW_SHOP, SG, SUBNET, VPC_DEFAULT, VPC_SHOP } from "../ids"
 import type { InternetGateway, RouteEntry, RouteTable, SecurityGroup, SecurityGroupRule, Subnet, Tags, Vpc } from "@/lib/types"
 
@@ -71,7 +71,7 @@ export function allocIp(subnetId: string): string {
   const st = getState()
   for (const i of (st.ec2?.instances ?? []) as { subnet_id: string; private_ip: string; state: string }[]) if (i.subnet_id === subnetId && i.state !== "terminated") taken.add(i.private_ip)
   for (const l of (st.elb?.lbs ?? []) as { subnet_id: string; private_ip: string }[]) if (l.subnet_id === subnetId) taken.add(l.private_ip)
-  for (let n = 10 + Math.floor(Math.random() * 40); n < c.size - 2; n++) {
+  for (let n = 10 + Math.floor(random() * 40); n < c.size - 2; n++) {
     const ip = intToIp(c.base + n)
     if (!taken.has(ip)) return ip
   }

@@ -1,6 +1,6 @@
 import type { TrailEvent } from "@/lib/types"
 import { getState, type DemoService } from "../engine"
-import { ACCOUNT, DAY, HOUR, MIN, arn, hex, rng } from "../util"
+import { ACCOUNT, DAY, HOUR, MIN, arn, hex, rng, random } from "../util"
 import { INSTANCE, NAMES } from "../ids"
 
 interface Actor {
@@ -221,7 +221,7 @@ export function recordTrail(e: Omit<TrailEvent, "id" | "time" | "user_arn" | "so
     user_arn: userArn(e.user),
     source_ip: a.ip,
     user_agent: a.ua,
-    latency_ms: 5 + Math.floor(Math.random() * 40),
+    latency_ms: 5 + Math.floor(random() * 40),
     ...e,
   })
 }

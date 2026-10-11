@@ -1,5 +1,5 @@
 import { badRequest, conflict, err, getState, notFound, type DemoService, type Router } from "../engine"
-import { ACCOUNT, DAY, HOUR, REGION, ago, ahead, hex, stableId, uuid } from "../util"
+import { ACCOUNT, DAY, HOUR, REGION, ago, ahead, hex, stableId, uuid, random } from "../util"
 import { NAMES } from "../ids"
 import type { Secret, SecretValue, SecretVersion } from "@/lib/types"
 
@@ -183,7 +183,7 @@ function routes(r: Router) {
     if (body?.rotate_immediately !== false) {
       const cur = s.versions.find((v) => v.stages.includes("AWSCURRENT"))
       const old = (cur && st().values[s.name]?.[cur.id]) || "demo-not-a-real-secret"
-      const nv = putVersion(s, old.replace(/(-r\d+)?$/, "") + `-r${Math.floor(Math.random() * 900 + 100)}`)
+      const nv = putVersion(s, old.replace(/(-r\d+)?$/, "") + `-r${Math.floor(random() * 900 + 100)}`)
       versionId = nv.id
       s.last_rotated = new Date().toISOString()
     }
@@ -251,7 +251,7 @@ function routes(r: Router) {
     const n = Number(query.length) || 32
     if (n < 8 || n > 4096) throw badRequest("length must be between 8 and 4096")
     const cs = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
-    return { password: Array.from({ length: n }, () => cs[Math.floor(Math.random() * cs.length)]).join("") }
+    return { password: Array.from({ length: n }, () => cs[Math.floor(random() * cs.length)]).join("") }
   })
 }
 

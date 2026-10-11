@@ -1,6 +1,6 @@
 import { badRequest, conflict, getState, later, notFound, unavailable, err, type DemoService, type Router, type State } from "../engine"
 import type { DbClass, DbEngine, DbEngines, DbInstance, DbSnapshot } from "@/lib/types"
-import { DAY, HOUR, MIN, AZ_A, AZ_B, ago, arn, nowIso, rng } from "../util"
+import { DAY, HOUR, MIN, AZ_A, AZ_B, ago, arn, nowIso, rng, random } from "../util"
 import { NAMES, SG, SUBNET, VPC_SHOP } from "../ids"
 
 interface RdsState {
@@ -122,7 +122,7 @@ const findSnap = (id: string) => {
 const ID_RE = /^[a-z][a-z0-9-]{0,62}$/
 
 function setStatus(id: string, status: string, reason?: string) {
-  later(2500 + Math.random() * 1500, () => {
+  later(2500 + random() * 1500, () => {
     const i = st().instances.find((x) => x.id === id)
     if (i && TRANSITIONAL.includes(i.status)) {
       i.status = status
@@ -156,7 +156,7 @@ function provision(body: any, snap?: DbSnapshot, status: "creating" | "restoring
   })
   if (pub) {
     inst.endpoint.public_host = "homecloud.local"
-    inst.endpoint.public_port = body?.port || 15000 + Math.floor(Math.random() * 2000)
+    inst.endpoint.public_port = body?.port || 15000 + Math.floor(random() * 2000)
   }
   inst.endpoint.connect_hint = connectHint(inst)
   st().instances.push(inst)

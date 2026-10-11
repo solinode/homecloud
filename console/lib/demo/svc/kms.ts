@@ -1,5 +1,5 @@
 import { badRequest, err, getState, notFound, type DemoService, type Router } from "../engine"
-import { ACCOUNT, DAY, REGION, ago, ahead, hashStr, hex, stableId } from "../util"
+import { ACCOUNT, DAY, REGION, ago, ahead, hashStr, hex, stableId, random } from "../util"
 import type { KmsAlias, KmsGrant, KmsKey } from "@/lib/types"
 
 interface StoredKey extends Omit<KmsKey, "aliases"> {
@@ -298,7 +298,7 @@ function routes(r: Router) {
   r.post(`${P}/generate-random`, ({ body }) => {
     const n = Number(body?.number_of_bytes)
     if (!(n >= 1 && n <= 1024)) throw badRequest("number_of_bytes must be 1-1024")
-    return { plaintext: btoa(String.fromCharCode(...Array.from({ length: n }, () => Math.floor(Math.random() * 256)))) }
+    return { plaintext: btoa(String.fromCharCode(...Array.from({ length: n }, () => Math.floor(random() * 256)))) }
   })
   r.post(`${P}/sign`, ({ body }) => {
     const k = find(body?.key_id ?? "")
