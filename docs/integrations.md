@@ -7,9 +7,9 @@ credentials it creates on first start. This page covers the ready-made integrati
 
 | | |
 | --- | --- |
-| [GitHub Action](#github-actions) | `integrations/github-action`: install, start, export `AWS_*` |
+| [GitHub Action](#github-actions) | [`solinode/setup-homecloud`](https://github.com/solinode/setup-homecloud): install, start, export `AWS_*` |
 | [testcontainers-go](#testcontainers-go) | `integrations/testcontainers-go`: start HomeCloud from a Go test |
-| [testcontainers-python](#testcontainers-python) | `integrations/testcontainers-python`: start HomeCloud from pytest |
+| [testcontainers-python](#testcontainers-python) | `pip install testcontainers-homecloud`: start HomeCloud from pytest |
 | [Plain binary or Docker](#plain-binary-or-docker) | anything else |
 
 Everything HomeCloud runs (MinIO for S3, Lambda runtimes, databases) is a container on
@@ -27,7 +27,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: solinode/homecloud/integrations/github-action@main
+      - uses: solinode/setup-homecloud@v1
         with:
           version: latest      # or v0.3.0
           services-wait: s3    # wait for MinIO too
@@ -43,7 +43,14 @@ serve` in the background (data and log under `$RUNNER_TEMP`), waits for
 `AWS_SECRET_ACCESS_KEY` (masked), `AWS_REGION` and `AWS_DEFAULT_REGION`. After the job,
 a post step prints the server log (collapsed), stops HomeCloud and removes its Docker
 resources. Inputs, outputs and boto3/Terraform examples:
-[integrations/github-action/README.md](../integrations/github-action/README.md).
+[solinode/setup-homecloud](https://github.com/solinode/setup-homecloud#readme).
+
+The action is published from its own repository,
+[solinode/setup-homecloud](https://github.com/solinode/setup-homecloud) (`@v1` follows
+compatible updates; pin `@v1.0.0` or a SHA for a fixed version). That repository is the
+canonical home; [`integrations/github-action`](../integrations/github-action) is kept as a
+copy for this repository's own tests. The older
+`solinode/homecloud/integrations/github-action@main` reference still works.
 
 ## testcontainers-go
 
@@ -63,6 +70,14 @@ terminating the container also removes every container, network and volume HomeC
 created. See [integrations/testcontainers-go/README.md](../integrations/testcontainers-go/README.md).
 
 ## testcontainers-python
+
+```sh
+pip install testcontainers-homecloud
+```
+
+The package is available from PyPI after its first release; until then install it from
+the repository:
+`pip install "testcontainers-homecloud @ git+https://github.com/solinode/homecloud#subdirectory=integrations/testcontainers-python"`.
 
 ```python
 from testcontainers_homecloud import HomeCloudContainer
