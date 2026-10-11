@@ -425,6 +425,37 @@ function seedFunctions(): FnSpec[] {
       modified: 27 * DAY,
       versions: 0,
     },
+    // Rotation functions of the shop/prod/db-password and shop/prod/smtp-credentials secrets.
+    {
+      name: "shop-rotate-db-secret",
+      runtime: "python3.12",
+      handler: "rotate.handler",
+      description: "Rotates the shop-db master password (Secrets Manager rotation)",
+      memory_mb: 128,
+      timeout_seconds: 30,
+      environment: { SECRETS_MANAGER_ENDPOINT: `https://secretsmanager.${REGION}.amazonaws.com` },
+      role: roleArn("shop-rotation-role"),
+      subnet_id: SUBNET.privateA,
+      security_group_ids: [SG.web],
+      tags: { app: "shop", env: "prod" },
+      created: 300 * DAY,
+      modified: 90 * DAY,
+      versions: 0,
+    },
+    {
+      name: "shop-rotate-smtp-secret",
+      runtime: "python3.12",
+      handler: "rotate.handler",
+      description: "Rotates the SMTP relay credentials (Secrets Manager rotation)",
+      memory_mb: 128,
+      timeout_seconds: 3,
+      environment: { SECRETS_MANAGER_ENDPOINT: `https://secretsmanager.${REGION}.amazonaws.com` },
+      role: roleArn("shop-rotation-role"),
+      tags: { app: "shop", env: "prod" },
+      created: 150 * DAY,
+      modified: 150 * DAY,
+      versions: 0,
+    },
   ]
 }
 
@@ -559,8 +590,8 @@ function seed(): LambdaState {
     {
       id: uuid(),
       function_name: "shop-image-resizer",
-      queue_name: "shop-image-jobs",
-      event_source_arn: arn("sqs", "shop-image-jobs"),
+      queue_name: "shop-image-resize",
+      event_source_arn: arn("sqs", "shop-image-resize"),
       batch_size: 5,
       batching_window_seconds: 10,
       function_response_types: [],

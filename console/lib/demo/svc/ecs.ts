@@ -42,7 +42,7 @@ function td(family: string, revision: number, image: string, o: Partial<EcsTaskD
 function seedTaskDefs(): EcsTaskDefinition[] {
   const img = (n: string, t: string) => `${ECR_REGISTRY}/${n}:${t}`
   const workerEnv = { QUEUE_URL: `https://sqs.${REGION}.amazonaws.com/${ACCOUNT}/${NAMES.ordersQueue}`, LOG_LEVEL: "info", DB_HOST: "shop-db.c9demoexample.us-east-1.rds.amazonaws.com" }
-  const secrets = [{ name: "DB_PASSWORD", value_from: "shop/db/password" }]
+  const secrets = [{ name: "DB_PASSWORD", value_from: "shop/prod/db-password:password" }]
   return [
     td("shop-worker", 1, img("shop/worker", "v1.6.0"), { environment: workerEnv }, 110 * DAY, false),
     td("shop-worker", 2, img("shop/worker", "v1.7.1"), { environment: workerEnv }, 90 * DAY, false),
