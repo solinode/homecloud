@@ -43,7 +43,7 @@ jobs:
           HC_TEST_PYTHON: python3
       # Never fails the job; needs the CODECOV_TOKEN secret unless tokenless upload is enabled.
       - uses: codecov/codecov-action@v5
-        if: ${{ !cancelled() }}
+        if: success()
         with:
           files: cli/coverage.out
           token: ${{ secrets.CODECOV_TOKEN }}
