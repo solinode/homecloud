@@ -1253,10 +1253,21 @@ func (s *Service) PrivateIP(name string) (string, bool) {
 	return lb.PrivateIP, true
 }
 
-// Recover re-provisions load balancers whose provisioning was interrupted by a restart.
+// Recover re-provisions load balancers whose provisioning was interrupted by a
+// restart, and those whose container is gone (after `homecloud restore` onto a
+// host without the containers): a load balancer keeps no data of its own, so
+// a new container from its stored listeners, rules and address replaces it.
 func (s *Service) Recover() {
 	for _, lb := range store.List[LoadBalancer](s.env.Store, cLBs) {
-		if lb.State == "provisioning" {
+		gone := lb.State == "active" && (lb.ContainerID == "" || s.env.Docker.State(lb.ContainerID) == "missing")
+		if gone {
+			log.Printf("elb: %s: its container is gone; recreating it", lb.Name)
+			_, _ = store.Update(s.env.Store, cLBs, lb.Name, func(x *LoadBalancer) error {
+				x.State, x.StateReason = "provisioning", "recreating the load balancer container"
+				return nil
+			})
+		}
+		if lb.State == "provisioning" || gone {
 			go s.provision(lb)
 		}
 	}
