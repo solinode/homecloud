@@ -196,6 +196,7 @@ func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(2 * time.Second)
 	defer t.Stop()
 	for {
+		core.Beat("sqs", 2*time.Second)
 		select {
 		case <-ctx.Done():
 			s.persist()

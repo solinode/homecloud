@@ -69,6 +69,11 @@ type Config struct {
 	TLSCert       string `json:"tls_cert,omitempty"` // PEM files; empty = plain HTTP
 	TLSKey        string `json:"tls_key,omitempty"`
 	Region        string `json:"region"`
+	// MetricsAddr, when set, serves Prometheus metrics there without
+	// authentication (the API port's /metrics always requires IAM). It must be
+	// a loopback address unless MetricsAddrInsecure is set.
+	MetricsAddr         string `json:"metrics_addr,omitempty"`
+	MetricsAddrInsecure bool   `json:"metrics_addr_insecure,omitempty"`
 }
 
 func DefaultDataDir() string {
@@ -308,5 +313,6 @@ type Tags map[string]string
 func Recover(what string) {
 	if r := recover(); r != nil {
 		log.Printf("panic in %s: %v\n%s", what, r, debug.Stack())
+		ReportError(what, fmt.Sprintf("panic: %v", r))
 	}
 }

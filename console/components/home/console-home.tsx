@@ -246,6 +246,7 @@ export function ConsoleHome() {
             />
             <StatTile
               label="HomeCloud"
+              href="/system/"
               tone={health.error ? "danger" : "success"}
               value={<span className="font-mono text-[24px] tracking-[-0.02em]">{health.data?.version ?? "-"}</span>}
               caption={health.error ? "API unreachable" : health.data ? `up ${formatDuration(health.data.uptime_seconds)}` : " "}
