@@ -1,0 +1,52 @@
+name: npm
+# Publishes integrations/testcontainers-node to npm as testcontainers-homecloud, with
+# provenance, when a tag like testcontainers-node/v0.1.0 is pushed. The tag must match
+# package.json's version. Never runs on pull requests.
+#
+# Authentication, either:
+#   - npm trusted publishing (preferred): on npmjs.com, package settings > Trusted
+#     publishing > GitHub Actions: repository solinode/homecloud, workflow npm.yml,
+#     environment npm. No secret is needed; leave NPM_TOKEN unset.
+#   - or an NPM_TOKEN secret (a granular access token with publish rights to
+#     testcontainers-homecloud) in the "npm" environment. Needed for the very first
+#     publish if trusted publishing cannot be set up before the package exists.
+on:
+  push:
+    tags:
+      - "testcontainers-node/v*"
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: npm
+      url: https://www.npmjs.com/package/testcontainers-homecloud
+    permissions:
+      contents: read
+      id-token: write # provenance and trusted publishing
+    defaults:
+      run:
+        working-directory: integrations/testcontainers-node
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          # Node 24 ships npm 11, which supports trusted publishing.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Check the tag matches the package version
+        run: |
+          tag="${GITHUB_REF_NAME#testcontainers-node/v}"
+          version=$(node -p 'require("./package.json").version')
+          test "$tag" = "$version" || { echo "::error::tag $tag does not match package.json version $version"; exit 1; }
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

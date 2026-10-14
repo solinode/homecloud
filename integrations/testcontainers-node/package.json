@@ -1,0 +1,70 @@
+{
+  "name": "testcontainers-homecloud",
+  "version": "0.1.0",
+  "description": "Testcontainers module for HomeCloud, a self-hosted AWS-compatible cloud: run S3, SQS, DynamoDB, Lambda and more in your tests",
+  "keywords": [
+    "testcontainers",
+    "aws",
+    "s3",
+    "sqs",
+    "dynamodb",
+    "lambda",
+    "testing",
+    "homecloud"
+  ],
+  "homepage": "https://github.com/solinode/homecloud/blob/main/docs/integrations.md#testcontainers-node",
+  "bugs": "https://github.com/solinode/homecloud/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/solinode/homecloud.git",
+    "directory": "integrations/testcontainers-node"
+  },
+  "license": "AGPL-3.0-only",
+  "author": "solinode",
+  "type": "module",
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": {
+        "types": "./dist/index.d.ts",
+        "default": "./dist/index.js"
+      },
+      "require": {
+        "types": "./dist/index.d.cts",
+        "default": "./dist/index.cjs"
+      }
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "sideEffects": false,
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "testcontainers": "^12.2.1"
+  },
+  "devDependencies": {
+    "@aws-sdk/client-dynamodb": "^3.1151.0",
+    "@aws-sdk/client-lambda": "^3.1151.0",
+    "@aws-sdk/client-s3": "^3.1151.0",
+    "@aws-sdk/client-sqs": "^3.1151.0",
+    "@aws-sdk/client-sts": "^3.1151.0",
+    "@types/node": "^22.0.0",
+    "tsup": "^8.5.1",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.0"
+  }
+}
