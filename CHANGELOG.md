@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Prometheus metrics at `GET /metrics` on the API port: requests by API (native or AWS), service and operation (route patterns and AWS operation names, never IDs), errors by code, latency histograms, in-flight requests, authentication failures, managed containers by service and state, Docker reachability, MinIO/ECR/DNS/IMDS helper state, data directory and volume disk use, background loop last-run age, Lambda environments and cold/warm starts, process metrics and build info. It requires the IAM action `homecloud:GetMetrics` (an access key as a bearer token or HTTP basic auth, so Prometheus can scrape it); `--metrics-addr 127.0.0.1:9464` adds an unauthenticated listener, loopback-only unless `--metrics-addr-insecure`.
+- `GET /api/v1/system/status` (IAM action `homecloud:GetSystemStatus`) reports each subsystem's health, versions, uptime, Docker details, disk use and recent errors; the console shows it on a new System status page with a copyable Prometheus scrape config. `GET /api/v1/health` is unchanged.
+- [docs/monitoring.md](docs/monitoring.md): scrape configs, a least-privilege Prometheus user, a Grafana dashboard ([docs/grafana/homecloud.json](docs/grafana/homecloud.json)) and alert rules.
+
 ## 0.4.1 (2026-10-11)
 
 A redesigned console, a new website and easier ways to use HomeCloud in CI.

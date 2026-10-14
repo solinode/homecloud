@@ -117,6 +117,7 @@ func (s *Service) RunFirewall(ctx context.Context) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for n := 1; ; n++ {
+		core.Beat("firewall", 5*time.Second)
 		select {
 		case <-ctx.Done():
 			return

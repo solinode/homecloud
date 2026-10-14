@@ -4,7 +4,7 @@ import { useEffect, useState } from "react"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { useTheme } from "next-themes"
-import { BookOpen, ChevronsUpDown, KeyRound, LayoutGrid, LogOut, Menu, Monitor, Moon, Search, Sun } from "lucide-react"
+import { Activity, BookOpen, ChevronsUpDown, KeyRound, LayoutGrid, LogOut, Menu, Monitor, Moon, Search, Sun } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import {
@@ -222,6 +222,11 @@ function AccountMenu() {
             </Link>
           </DropdownMenuItem>
         )}
+        <DropdownMenuItem asChild>
+          <Link href="/system/">
+            <Activity /> System status
+          </Link>
+        </DropdownMenuItem>
         <DropdownMenuItem asChild>
           <a href={DOCS_URL} target="_blank" rel="noreferrer">
             <BookOpen /> Documentation

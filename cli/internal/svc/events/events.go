@@ -652,6 +652,7 @@ func (s *Service) testPattern(c *httpx.Ctx) (any, error) {
 // Run fires scheduled rules and schedules until ctx is done.
 func (s *Service) Run(ctx context.Context) {
 	for {
+		core.Beat("events", time.Minute)
 		now := time.Now()
 		// Tick at the top of each minute (plus a little), like EventBridge.
 		wait := now.Truncate(time.Minute).Add(time.Minute + 2*time.Second).Sub(now)

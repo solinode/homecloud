@@ -350,6 +350,7 @@ func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	for {
+		core.Beat("dynamodb", 30*time.Second)
 		select {
 		case <-ctx.Done():
 			return
