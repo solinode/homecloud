@@ -31,7 +31,12 @@ Invoke-WebRequest "$base/checksums.txt" -OutFile "$tmp\checksums.txt"
 # the release workflow). With cosign installed the signature is verified;
 # without it, only the SHA-256 checksum is.
 $v = ($version.TrimStart("v") -split "-")[0] -split "\."
-$signedRelease = ([int]$v[0] -gt 0) -or ([int]$v[1] -ge 5)
+# Unparseable versions count as unsigned, as in install.sh.
+$major = 0; $minor = 0
+$signedRelease = $false
+if ($v.Count -ge 2 -and [int]::TryParse($v[0], [ref]$major) -and [int]::TryParse($v[1], [ref]$minor)) {
+    $signedRelease = ($major -gt 0) -or ($minor -ge 5)
+}
 if (Get-Command cosign -ErrorAction SilentlyContinue) {
     $bundle = "$tmp\checksums.txt.sigstore.json"
     $haveBundle = $true
