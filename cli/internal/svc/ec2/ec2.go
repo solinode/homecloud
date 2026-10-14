@@ -235,9 +235,9 @@ func (s *Service) sync(i Instance) Instance {
 	}
 	st := s.env.Docker.State(i.ContainerID)
 	want := i.State
-	if st == "missing" && i.IsVM() {
-		// The disk outlives the container (a restored backup has volumes but no containers).
-		if ri, ok := s.vmRecoverContainer(i); ok {
+	if st == "missing" {
+		// The disks outlive the container (a restored backup has volumes but no containers).
+		if ri, ok := s.recoverMissing(i); ok {
 			return ri
 		}
 	}
@@ -1473,6 +1473,10 @@ func (s *Service) Recover() {
 				state = "running"
 			case "exited", "created":
 				state = "stopped"
+			case "missing":
+				if i.State == "stopping" {
+					state = "stopped" // sync recreates the container from its disks
+				}
 			}
 		}
 		if i.State == "shutting-down" {
