@@ -123,6 +123,9 @@ func runUpgrade(o upgradeOptions) error {
 	if err != nil {
 		return err
 	}
+	if err := checkWritable(filepath.Dir(exe)); err != nil {
+		return fmt.Errorf("cannot replace %s: %w (try again with sudo)", exe, err)
+	}
 	bin, err := downloadRelease(o.HTTP, rel.TagName, o.AllowUnsigned, o.Out)
 	if err != nil {
 		return err
@@ -206,6 +209,17 @@ func runRollback(o upgradeOptions) error {
 	_ = os.Remove(prev)
 	fmt.Fprintf(o.Out, "rolled %s back to %s; start the server again\n", exe, target)
 	return nil
+}
+
+// checkWritable reports whether files can be created in dir (where the new
+// binary and <exe>.previous go), before anything is downloaded or backed up.
+func checkWritable(dir string) error {
+	f, err := os.CreateTemp(dir, ".homecloud-upgrade-*")
+	if err != nil {
+		return err
+	}
+	f.Close()
+	return os.Remove(f.Name())
 }
 
 // hasServerData reports whether dir holds a server's data (not just CLI credentials).
