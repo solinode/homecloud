@@ -144,6 +144,7 @@ func (s *Service) acquire(ctx context.Context, cfg Function, lim int, wait time.
 			for _, e := range p.envs {
 				if !e.busy && !e.dead && e.version == cfg.version() && e.revision == cfg.RevisionID && !e.expiring(cfg) {
 					e.busy = true
+					warmStarts.Add(1)
 					s.mu.Unlock()
 					return e, nil
 				}
@@ -172,6 +173,7 @@ func (s *Service) acquire(ctx context.Context, cfg Function, lim int, wait time.
 			}
 			e.busy = true
 			p.envs = append(p.envs, e)
+			coldStarts.Add(1)
 			s.mu.Unlock()
 			if e.inVPC {
 				s.vpc.FirewallChanged() // peers allowing this function's groups learn its address now
@@ -692,6 +694,7 @@ func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	for {
+		core.Beat("lambda-reaper", 30*time.Second)
 		select {
 		case <-ctx.Done():
 			return

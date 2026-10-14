@@ -212,6 +212,7 @@ homecloud serve --addr 0.0.0.0:8080 --public-host homelab.tailnet.ts.net --tls-s
 - [Comparison](docs/comparison.md) with LocalStack, moto, MinIO, OpenStack and the AWS free tier
 - [Architecture](docs/architecture.md): how each service is built, where state lives, limits
 - [Install on a server](docs/install-server.md): VPS or home server, TLS, firewall, backups, upgrades
+- [Monitoring](docs/monitoring.md): Prometheus metrics, system status, Grafana dashboard, alert rules
 - [Native API reference](docs/api.md)
 - [Security audit, October 2026](docs/security-audit-2026-10.md) and the [security policy](SECURITY.md)
 - Designs: [multi-node clusters](docs/design/multi-node.md), [edge compute](docs/design/edge.md)

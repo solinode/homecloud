@@ -258,6 +258,7 @@ func (s *Service) Run(ctx context.Context) {
 	defer t.Stop()
 	saveEvery := 0
 	for {
+		core.Beat("cloudwatch", sampleInterval)
 		s.collect(ctx)
 		s.prune()
 		s.evaluateAlarms()

@@ -487,6 +487,7 @@ func (s *Service) Run(ctx context.Context) {
 	defer t.Stop()
 	due := map[string]time.Time{}
 	for {
+		core.Beat("elb", 5*time.Second)
 		select {
 		case <-ctx.Done():
 			return

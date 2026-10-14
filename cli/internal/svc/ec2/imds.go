@@ -111,12 +111,14 @@ func (s *Service) RunIMDS(ctx context.Context) {
 	t := time.NewTicker(30 * time.Second)
 	defer t.Stop()
 	for {
+		core.Beat("imds", 30*time.Second)
 		select {
 		case <-ctx.Done():
 			return
 		case <-t.C:
 			if err := s.ensureIMDS(ctx); err != nil {
 				log.Printf("ec2: instance metadata service: %v", err)
+				core.ReportError("imds", err.Error())
 			}
 			s.imds.prune()
 		}

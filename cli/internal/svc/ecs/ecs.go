@@ -486,6 +486,7 @@ func (e *ECS) Run(ctx context.Context) {
 	t := time.NewTicker(5 * time.Second)
 	defer t.Stop()
 	for {
+		core.Beat("ecs", 5*time.Second)
 		e.reconcile(ctx)
 		select {
 		case <-ctx.Done():

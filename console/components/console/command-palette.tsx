@@ -5,7 +5,7 @@ import { useRouter } from "next/navigation"
 import { useTheme } from "next-themes"
 import { Command as Cmdk } from "cmdk"
 import * as DialogPrimitive from "@radix-ui/react-dialog"
-import { BookOpen, Clock, CornerDownLeft, LogOut, Monitor, Moon, Plus, Search, Sun } from "lucide-react"
+import { Activity, BookOpen, Clock, CornerDownLeft, LogOut, Monitor, Moon, Plus, Search, Sun } from "lucide-react"
 
 import { ServiceIcon } from "@/components/console/service-icon"
 import { DEMO, logout } from "@/lib/api"
@@ -188,6 +188,9 @@ function CommandPalette({ open, onOpenChange }: { open: boolean; onOpenChange: (
                 </Cmdk.Item>
                 <Cmdk.Item value="theme system" onSelect={() => run(() => setTheme("system"))} className={itemCls}>
                   <Monitor className="text-muted-foreground size-4" /> Match system theme
+                </Cmdk.Item>
+                <Cmdk.Item value="system status health homecloud server metrics prometheus disk docker" onSelect={() => go("/system/")} className={itemCls}>
+                  <Activity className="text-muted-foreground size-4" /> System status
                 </Cmdk.Item>
                 <Cmdk.Item value="documentation docs help" onSelect={() => run(() => window.open(DOCS_URL, "_blank", "noopener"))} className={itemCls}>
                   <BookOpen className="text-muted-foreground size-4" /> Documentation

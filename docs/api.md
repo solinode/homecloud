@@ -146,6 +146,7 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/ec2/instances/{id}/image` | `ec2:CreateImage` |
 | GET | `/api/v1/ec2/instances/{id}/terminal` | `ec2-instance-connect:SendSSHPublicKey` |
 | GET | `/api/v1/ec2/instance-types` | `ec2:DescribeInstanceTypes` |
+| GET | `/api/v1/ec2/capabilities` | `ec2:DescribeInstanceTypes` |
 | GET | `/api/v1/ec2/images` | `ec2:DescribeImages` |
 | POST | `/api/v1/ec2/images` | `ec2:RegisterImage` |
 | GET | `/api/v1/ec2/images/{id}` | `ec2:DescribeImages` |
@@ -164,6 +165,11 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | GET | `/api/v1/efs/file-systems/{id}/access-points` | `elasticfilesystem:DescribeAccessPoints` |
 | POST | `/api/v1/efs/file-systems/{id}/access-points` | `elasticfilesystem:CreateAccessPoint` |
 | DELETE | `/api/v1/efs/file-systems/{id}/access-points/{ap}` | `elasticfilesystem:DeleteAccessPoint` |
+| GET | `/api/v1/ec2/addresses` | `ec2:DescribeAddresses` |
+| POST | `/api/v1/ec2/addresses` | `ec2:AllocateAddress` |
+| DELETE | `/api/v1/ec2/addresses/{id}` | `ec2:ReleaseAddress` |
+| POST | `/api/v1/ec2/addresses/{id}/associate` | `ec2:AssociateAddress` |
+| POST | `/api/v1/ec2/addresses/{id}/disassociate` | `ec2:DisassociateAddress` |
 
 ## EC2 Auto Scaling
 
@@ -332,6 +338,8 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | POST | `/api/v1/lambda/event-source-mappings` | `lambda:CreateEventSourceMapping` |
 | PATCH | `/api/v1/lambda/event-source-mappings/{id}` | `lambda:UpdateEventSourceMapping` |
 | DELETE | `/api/v1/lambda/event-source-mappings/{id}` | `lambda:DeleteEventSourceMapping` |
+| POST | `/api/v1/lambda/functions/{name}/permissions` | `lambda:AddPermission` |
+| DELETE | `/api/v1/lambda/functions/{name}/permissions/{sid}` | `lambda:RemovePermission` |
 | GET | `/api/v1/lambda/runtimes` | `lambda:ListRuntimes` |
 | GET | `/api/v1/lambda/account` | `lambda:GetAccountSettings` |
 | GET | `/api/v1/lambda/functions` | `lambda:ListFunctions` |
@@ -562,3 +570,11 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 | Method | Path | IAM action |
 |---|---|---|
 | GET | `/api/v1/cloudtrail/events` | `cloudtrail:LookupEvents` |
+
+## HomeCloud (backups, metrics, status)
+
+| Method | Path | IAM action |
+|---|---|---|
+| GET | `/metrics` | `homecloud:GetMetrics` |
+| GET | `/api/v1/system/status` | `homecloud:GetSystemStatus` |
+| GET | `/api/v1/system/backup` | `homecloud:CreateBackup` |
