@@ -166,10 +166,11 @@ func (s *Service) vmHostProbe() string {
 
 // vmHostBase is the directory holding the run directories of host-run guests.
 // Unix socket paths are short (104 bytes on macOS): a data directory with a
-// long path uses the temporary directory instead.
+// long path uses the temporary directory instead, as does one with a comma,
+// which would end a QEMU option holding a socket path.
 func (s *Service) vmHostBase() string {
 	base := filepath.Join(s.env.Cfg.DataDir, "vm")
-	if s.env.Cfg.DataDir == "" || len(base) > 64 {
+	if s.env.Cfg.DataDir == "" || len(base) > 64 || strings.Contains(base, ",") {
 		base = filepath.Join(os.TempDir(), fmt.Sprintf("homecloud-vm-%d", os.Getuid()))
 	}
 	return base
@@ -218,7 +219,9 @@ func (s *Service) vmHostScan() {
 	}
 	for _, c := range cs {
 		inst, err := store.Get[Instance](s.env.Store, cInstances, c.Labels[core.LabelResource])
-		if err != nil || inst.State == "terminated" {
+		// Only the instance's own container, and only while it runs on the host:
+		// a container left over from a rebuild must not get the guest's disks.
+		if err != nil || inst.State == "terminated" || !vmHostMode(inst) || c.ID != inst.ContainerID {
 			continue
 		}
 		if err := s.vmHostEnsure(inst, c.ID); err != nil {
@@ -235,10 +238,10 @@ func (s *Service) vmHostEnsure(inst Instance, cid string) error {
 	if t, ok := s.vm.spawned[cid]; ok && time.Since(t) < 5*time.Second {
 		return nil // just started: it may not hold its lock yet
 	}
-	if err := os.MkdirAll(dir, 0o700); err != nil {
+	if err := privateDir(filepath.Dir(dir)); err != nil {
 		return err
 	}
-	if err := os.Chmod(dir, 0o700); err != nil {
+	if err := privateDir(dir); err != nil {
 		return err
 	}
 	if vmHostRunning(dir) {
@@ -344,6 +347,18 @@ func (h *vmHost) Write(p []byte) (int, error) {
 
 func (h *vmHost) running() bool { return h.d.State(h.cfg.Container) == "running" }
 
+// containerGone reports whether the VM container has stopped or is gone. An
+// error asking Docker (it restarts, say) is not taken as the container gone:
+// that would kill a running guest.
+func (h *vmHost) containerGone() bool {
+	c, err := h.d.C.InspectContainer(h.cfg.Container)
+	if err != nil {
+		var nsc *docker.NoSuchContainer
+		return errors.As(err, &nsc)
+	}
+	return !c.State.Running
+}
+
 func (h *vmHost) run(ctx context.Context) error {
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -433,7 +448,7 @@ func (h *vmHost) run(ctx context.Context) error {
 			case <-exited:
 				return
 			case <-t.C:
-				if !h.running() {
+				if h.containerGone() {
 					h.logf("the VM container stopped: killing QEMU")
 					_ = cmd.Process.Kill()
 					return
@@ -491,6 +506,11 @@ func (h *vmHost) finish(ctx context.Context, status int, consoleDone <-chan stru
 	}
 }
 
+// vmHostConsoleMax bounds the serial console log on the host: what has been
+// copied to the container's log is cut away past it, or a guest printing
+// without end would fill the host's disk.
+const vmHostConsoleMax = 4 << 20
+
 // tail copies what QEMU logs of the serial console to the container's log
 // until QEMU has exited, then copies the rest.
 func (h *vmHost) tail(exited <-chan struct{}) {
@@ -519,6 +539,12 @@ func (h *vmHost) tail(exited <-chan struct{}) {
 				}
 				if err != nil || n == 0 {
 					break
+				}
+			}
+			// QEMU appends (logappend=on), so its next write lands at the start.
+			if off, err := f.Seek(0, io.SeekCurrent); err == nil && off > vmHostConsoleMax {
+				if os.Truncate(h.path(vm.HostConsoleLog), 0) == nil {
+					_, _ = f.Seek(0, io.SeekStart)
 				}
 			}
 		}
@@ -561,6 +587,9 @@ func (s *Service) vmHostCleanup(id string) {
 	}
 	for n := 0; n < 60 && vmHostRunning(dir); n++ {
 		time.Sleep(time.Second)
+	}
+	if !vmHostRunning(dir) {
+		killStaleQEMU(filepath.Join(dir, "qemu.pid")) // a runner that died left its QEMU
 	}
 	if err := os.RemoveAll(dir); err != nil {
 		log.Printf("ec2: %s: remove the guest's run directory: %v", id, err)

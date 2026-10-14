@@ -141,6 +141,12 @@ func (s *Service) planVM(in RunInput, img Image) (vmPlan, error) {
 	p.ami = img.VMDisk
 	p.root.SizeGB = p.diskGB
 	p.virtualization = s.vmAccel()
+	if p.virtualization == virtHVF {
+		// (hvf forced where it cannot work: fail here, not with a host runner per guest.)
+		if why := vmHostUnsupported(hostArch(s)); why != "" {
+			return p, core.Errf(http.StatusServiceUnavailable, "Unsupported", "virtual machine instances are set to run with Hypervisor.framework, but %s", why)
+		}
+	}
 	return p, nil
 }
 
