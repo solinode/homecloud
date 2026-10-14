@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+- IAM: `UpdateAccountPasswordPolicy`, `DeleteAccountPasswordPolicy` and a real `GetAccountPasswordPolicy` (the policy is stored and reported; console passwords are not yet checked against it), and `CreateAccountAlias`/`DeleteAccountAlias` with `ListAccountAliases` returning the alias ([#91](https://github.com/solinode/homecloud/issues/91), [#92](https://github.com/solinode/homecloud/issues/92)).
+- KMS: `ListRetirableGrants` lists the grants a principal can retire across all keys ([#93](https://github.com/solinode/homecloud/issues/93)).
+- EventBridge: `UpdateEventBus` changes a bus's description, dead-letter queue (checked for `sqs:SendMessage`) or KMS key, the default bus's included ([#94](https://github.com/solinode/homecloud/issues/94)).
+- CloudWatch Logs: saved Logs Insights queries (`PutQueryDefinition`, `DescribeQueryDefinitions`, `DeleteQueryDefinition`) validate `maxResults` and are covered by update, pagination and restart tests ([#95](https://github.com/solinode/homecloud/issues/95)).
+- DynamoDB: `UpdateContributorInsights` and `ListContributorInsights`; `DescribeContributorInsights` reports the stored setting of a table or GSI. No rules or metrics are produced ([#96](https://github.com/solinode/homecloud/issues/96)).
+
 ## 0.5.0 (2026-10-14)
 
 Trust and operations: signed releases, safe upgrades with rollback, backups that restore everything, Prometheus metrics and a status page, and Testcontainers for Java and Node.

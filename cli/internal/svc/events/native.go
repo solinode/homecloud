@@ -37,9 +37,7 @@ func (s *Service) nativeBusRoutes(r *httpx.Router) {
 }
 
 func (s *Service) listBuses(c *httpx.Ctx) (any, error) {
-	all := append([]Bus{{Name: "default", ARN: s.busARN("default")}}, store.List[Bus](s.env.Store, cBuses)...)
-	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
-	return all, nil
+	return s.allBuses(), nil
 }
 
 func (s *Service) createBusRoute(c *httpx.Ctx) (any, error) {

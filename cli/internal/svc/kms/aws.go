@@ -60,6 +60,7 @@ func (s *Service) RegisterAWS() {
 			"ListResourceTags":                    s.awsListResourceTags,
 			"CreateGrant":                         s.awsCreateGrant,
 			"ListGrants":                          s.awsListGrants,
+			"ListRetirableGrants":                 s.awsListRetirableGrants,
 			"RevokeGrant":                         s.awsRevokeGrant,
 			"RetireGrant":                         s.awsRetireGrant,
 			"GetParametersForImport":              s.awsGetParametersForImport,
@@ -936,6 +937,49 @@ func (s *Service) awsListGrants(q *awsapi.Req) (any, error) {
 	items := []any{}
 	for _, g := range list {
 		items = append(items, grantOut(k, g))
+	}
+	out["Grants"] = items
+	return out, nil
+}
+
+// awsListRetirableGrants lists the grants, on every key, that the given
+// principal may retire. AWS authorizes it on "*", not per key.
+func (s *Service) awsListRetirableGrants(q *awsapi.Req) (any, error) {
+	var in struct {
+		RetiringPrincipal, Marker string
+		Limit                     int
+	}
+	if err := q.Bind(&in); err != nil {
+		return nil, err
+	}
+	if in.RetiringPrincipal == "" {
+		return nil, awsapi.Errorf(http.StatusBadRequest, "ValidationException",
+			"1 validation error detected: Value null at 'retiringPrincipal' failed to satisfy constraint: Member must not be null")
+	}
+	if err := q.Authorize("kms:ListRetirableGrants", "*"); err != nil {
+		return nil, err
+	}
+	type keyGrant struct {
+		k Key
+		g Grant
+	}
+	keys := store.List[Key](s.env.Store, cKeys)
+	sort.SliceStable(keys, func(i, j int) bool { return keys[i].CreatedAt.Before(keys[j].CreatedAt) })
+	var gs []keyGrant
+	for _, k := range keys {
+		for _, g := range k.Grants {
+			if g.RetiringPrincipal == in.RetiringPrincipal {
+				gs = append(gs, keyGrant{k, g})
+			}
+		}
+	}
+	list, out, err := page(gs, in.Marker, in.Limit)
+	if err != nil {
+		return nil, err
+	}
+	items := []any{}
+	for _, kg := range list {
+		items = append(items, grantOut(kg.k, kg.g))
 	}
 	out["Grants"] = items
 	return out, nil

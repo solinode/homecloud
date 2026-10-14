@@ -41,6 +41,8 @@ func (s *Service) RegisterAWS() {
 		"TransactGetItems":                    s.awsTransactGet,
 		"DescribeKinesisStreamingDestination": s.awsDescribeKinesis,
 		"DescribeContributorInsights":         s.awsDescribeContributorInsights,
+		"UpdateContributorInsights":           s.awsUpdateContributorInsights,
+		"ListContributorInsights":             s.awsListContributorInsights,
 		"ExecuteStatement":                    s.awsExecuteStatement,
 		"BatchExecuteStatement":               s.awsBatchExecuteStatement,
 		"ExecuteTransaction":                  s.awsExecuteTransaction,
@@ -685,6 +687,7 @@ func (s *Service) removeIndex(t *Table, tx *bolt.Tx, name string) error {
 	if !found {
 		return errf("ResourceNotFoundException", "Requested resource not found: Index: %s not found", name)
 	}
+	delete(t.ContributorInsights, name)
 	// Drop attribute definitions no key uses any more.
 	cp := *t
 	cp.Attributes = nil
@@ -985,24 +988,6 @@ func (s *Service) awsDescribeKinesis(q *awsapi.Req) (any, error) {
 		return nil, err
 	}
 	return map[string]any{"TableName": in.TableName, "KinesisDataStreamDestinations": []any{}}, nil
-}
-
-func (s *Service) awsDescribeContributorInsights(q *awsapi.Req) (any, error) {
-	var in struct{ TableName, IndexName string }
-	if err := q.Bind(&in); err != nil {
-		return nil, err
-	}
-	if err := q.Authorize("dynamodb:DescribeContributorInsights", s.tableARN(in.TableName)); err != nil {
-		return nil, err
-	}
-	if _, err := s.getTable(in.TableName); err != nil {
-		return nil, err
-	}
-	res := map[string]any{"TableName": in.TableName, "ContributorInsightsStatus": "DISABLED"}
-	if in.IndexName != "" {
-		res["IndexName"] = in.IndexName
-	}
-	return res, nil
 }
 
 // ---- consumed capacity ----

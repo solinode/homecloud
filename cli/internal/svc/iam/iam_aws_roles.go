@@ -467,20 +467,6 @@ func (s *Service) awsGetAccountAuthorizationDetails(q *awsapi.Req) (any, error) 
 	return res, nil
 }
 
-func (s *Service) awsListAccountAliases(q *awsapi.Req) (any, error) {
-	if err := q.Authorize("iam:ListAccountAliases", "*"); err != nil {
-		return nil, err
-	}
-	return map[string]any{"AccountAliases": awsapi.Members{}, "IsTruncated": false}, nil
-}
-
-func (s *Service) awsGetAccountPasswordPolicy(q *awsapi.Req) (any, error) {
-	if err := q.Authorize("iam:GetAccountPasswordPolicy", "*"); err != nil {
-		return nil, err
-	}
-	return nil, noSuchEntity("The Password Policy with domain name %s cannot be found.", s.env.AccountID)
-}
-
 // contextParam reads ContextEntries (SimulatePrincipalPolicy/SimulateCustomPolicy).
 func contextParam(q *awsapi.Req) CondContext {
 	ctx := CondContext{}

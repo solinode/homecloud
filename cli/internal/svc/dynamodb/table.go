@@ -81,6 +81,9 @@ type Table struct {
 	// Warm is the table's warm throughput (recorded; DescribeTable reports
 	// AWS's defaults for new tables when it was never set).
 	Warm *WarmThroughput `json:"warm_throughput,omitempty"`
+	// ContributorInsights is the Contributor Insights setting of the table
+	// (key "") and of its global secondary indexes (key: index name).
+	ContributorInsights map[string]ContributorInsights `json:"contributor_insights,omitempty"`
 }
 
 // WarmThroughput is the read and write units per second a table is ready for.

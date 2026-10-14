@@ -8,6 +8,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"encoding/base64"
+	"net/http"
 	"strings"
 	"sync"
 	"testing"
@@ -187,6 +188,61 @@ func TestKMSKeyLifecycleCLI(t *testing.T) {
 	k.Maintain()
 	expectErr(t, h, "NotFoundException", "kms", "describe-key", "--key-id", id)
 	expectErr(t, h, "NotFoundException", "kms", "describe-key", "--key-id", "alias/b1")
+}
+
+func TestKMSListRetirableGrants(t *testing.T) {
+	h, _, _ := setup(t)
+	acct := h.Env.AccountID
+	retirer, other := "arn:aws:iam::"+acct+":role/r", "arn:aws:iam::"+acct+":role/other"
+	k1 := meta(t, h, "kms", "create-key")["Arn"].(string)
+	k2 := meta(t, h, "kms", "create-key")["Arn"].(string)
+	grant := func(key, retiring string) string {
+		return h.AWSJSON(t, "kms", "create-grant", "--key-id", key, "--grantee-principal", "arn:aws:iam::"+acct+":role/app",
+			"--retiring-principal", retiring, "--operations", "Decrypt")["GrantId"].(string)
+	}
+	g1, g2 := grant(k1, retirer), grant(k2, retirer)
+	grant(k2, other)
+
+	gs := h.AWSJSON(t, "kms", "list-retirable-grants", "--retiring-principal", retirer)["Grants"].([]any)
+	got := map[string]string{}
+	for _, g := range gs {
+		m := g.(map[string]any)
+		if m["RetiringPrincipal"] != retirer {
+			t.Fatalf("grant %v", m)
+		}
+		got[m["GrantId"].(string)] = m["KeyId"].(string)
+	}
+	if len(got) != 2 || got[g1] != k1 || got[g2] != k2 {
+		t.Fatalf("list-retirable-grants: %v", gs)
+	}
+
+	// Pagination.
+	p1 := h.AWSJSON(t, "kms", "list-retirable-grants", "--retiring-principal", retirer, "--limit", "1", "--no-paginate")
+	if p1["Truncated"] != true || p1["NextMarker"] == nil || len(p1["Grants"].([]any)) != 1 {
+		t.Fatalf("page 1: %v", p1)
+	}
+	p2 := h.AWSJSON(t, "kms", "list-retirable-grants", "--retiring-principal", retirer, "--limit", "1", "--no-paginate",
+		"--marker", p1["NextMarker"].(string))
+	if p2["Truncated"] == true || len(p2["Grants"].([]any)) != 1 ||
+		p2["Grants"].([]any)[0].(map[string]any)["GrantId"] == p1["Grants"].([]any)[0].(map[string]any)["GrantId"] {
+		t.Fatalf("page 2: %v", p2)
+	}
+	if gs := h.AWSJSON(t, "kms", "list-retirable-grants", "--retiring-principal", "arn:aws:iam::"+acct+":role/none")["Grants"].([]any); len(gs) != 0 {
+		t.Fatalf("unknown principal: %v", gs)
+	}
+
+	// The AWS CLI requires RetiringPrincipal itself, so send the request raw.
+	status, _, body := h.Signed(t, "kms", "POST", "/", http.Header{"X-Amz-Target": {"TrentService.ListRetirableGrants"},
+		"Content-Type": {"application/x-amz-json-1.1"}}, []byte(`{}`))
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "ValidationException") {
+		t.Fatalf("missing RetiringPrincipal: %d %s", status, body)
+	}
+
+	// Authorized as kms:ListRetirableGrants on "*".
+	akid, secret := h.User(t, "nokms")
+	if out, err := h.AWSAs(t, akid, secret, "", "kms", "list-retirable-grants", "--retiring-principal", retirer); err == nil || !strings.Contains(out, "AccessDeniedException") {
+		t.Fatalf("without permission: %v %s", err, out)
+	}
 }
 
 func TestKMSCryptoBoto3(t *testing.T) {

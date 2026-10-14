@@ -74,6 +74,7 @@ type Bus struct {
 	ARN           string    `json:"arn"`
 	Description   string    `json:"description,omitempty"`
 	DeadLetterARN string    `json:"dead_letter_arn,omitempty"`
+	KMSKeyID      string    `json:"kms_key_identifier,omitempty"` // stored and reported; events are not encrypted with it
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 	Tags          core.Tags `json:"tags,omitempty"`

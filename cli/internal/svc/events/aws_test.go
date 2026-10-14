@@ -209,6 +209,60 @@ func TestEventBridgePermissions(t *testing.T) {
 	}
 }
 
+func TestEventBridgeUpdateEventBus(t *testing.T) {
+	h, _, _ := newAWS(t)
+	acct := h.Env.AccountID
+	dlq := "arn:aws:sqs:us-east-1:" + acct + ":orders-dlq"
+	h.AWS(t, "events", "create-event-bus", "--name", "orders")
+
+	up := h.AWSJSON(t, "events", "update-event-bus", "--name", "orders", "--description", "Order events")
+	if up["Arn"] != "arn:aws:events:us-east-1:"+acct+":event-bus/orders" || up["Name"] != "orders" || up["Description"] != "Order events" {
+		t.Fatalf("update-event-bus: %v", up)
+	}
+	d := h.AWSJSON(t, "events", "describe-event-bus", "--name", "orders")
+	if d["Description"] != "Order events" || d["LastModifiedTime"] == nil {
+		t.Fatalf("describe-event-bus: %v", d)
+	}
+
+	// Set a dead-letter queue (the description is kept), then clear it.
+	up = h.AWSJSON(t, "events", "update-event-bus", "--name", "orders", "--dead-letter-config", `{"Arn":"`+dlq+`"}`)
+	if up["DeadLetterConfig"].(map[string]any)["Arn"] != dlq || up["Description"] != "Order events" {
+		t.Fatalf("set DLQ: %v", up)
+	}
+	if d := h.AWSJSON(t, "events", "describe-event-bus", "--name", "orders"); d["DeadLetterConfig"].(map[string]any)["Arn"] != dlq {
+		t.Fatalf("describe with DLQ: %v", d)
+	}
+	h.AWS(t, "events", "update-event-bus", "--name", "orders", "--dead-letter-config", `{}`, "--description", "")
+	if d := h.AWSJSON(t, "events", "describe-event-bus", "--name", "orders"); d["DeadLetterConfig"] != nil || d["Description"] != nil {
+		t.Fatalf("describe after clearing: %v", d)
+	}
+
+	// The default bus can be updated, and is still listed once.
+	h.AWS(t, "events", "update-event-bus", "--description", "main bus")
+	if d := h.AWSJSON(t, "events", "describe-event-bus"); d["Description"] != "main bus" || d["Name"] != "default" {
+		t.Fatalf("default bus: %v", d)
+	}
+	if l := h.AWSJSON(t, "events", "list-event-buses")["EventBuses"].([]any); len(l) != 2 || l[0].(map[string]any)["Description"] != "main bus" {
+		t.Fatalf("list-event-buses: %v", l)
+	}
+
+	if out, err := h.AWSErr(t, "events", "update-event-bus", "--name", "nope", "--description", "x"); err == nil || !strings.Contains(out, "ResourceNotFoundException") {
+		t.Fatalf("unknown bus: %v %s", err, out)
+	}
+
+	// A DLQ the caller cannot send to is refused.
+	h.Native(t, "POST", "/api/v1/iam/policies", map[string]any{"name": "events-only", "document": map[string]any{"Version": "2012-10-17",
+		"Statement": []any{map[string]any{"Effect": "Allow", "Action": "events:*", "Resource": "*"}}}})
+	akid, secret := h.User(t, "ev", "events-only")
+	out, err := h.AWSAs(t, akid, secret, "", "events", "update-event-bus", "--name", "orders", "--dead-letter-config", `{"Arn":"`+dlq+`"}`)
+	if err == nil || !strings.Contains(out, "AccessDenied") || !strings.Contains(out, "sqs:SendMessage") {
+		t.Fatalf("DLQ without sqs permission: %v %s", err, out)
+	}
+	if out, err := h.AWSAs(t, akid, secret, "", "events", "update-event-bus", "--name", "orders", "--description", "ok"); err != nil {
+		t.Fatalf("update as events user: %v %s", err, out)
+	}
+}
+
 func TestSchedulerCLI(t *testing.T) {
 	h, s, k := newAWS(t)
 	acct := h.Env.AccountID
