@@ -95,6 +95,9 @@ func (s *Service) awsDescribeQueryDefinitions(q *awsapi.Req) (any, error) {
 	if err := q.Authorize("logs:DescribeQueryDefinitions", "*"); err != nil {
 		return nil, err
 	}
+	if in.MaxResults < 0 || in.MaxResults > 1000 {
+		return nil, logsErr("InvalidParameterException", "maxResults must be 1-1000")
+	}
 	all := store.List[queryDef](s.env.Store, cQueryDefs)
 	slices.SortFunc(all, func(a, b queryDef) int { return strings.Compare(a.Name+a.ID, b.Name+b.ID) })
 	var out []map[string]any

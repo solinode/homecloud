@@ -5,10 +5,14 @@ package iam_test
 
 import (
 	"encoding/json"
+	"net/http"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
+	"github.com/homecloudhq/homecloud/cli/internal/store"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/iam"
 )
 
 func wantErr(t *testing.T, out string, err error, code string) {
@@ -513,4 +517,86 @@ func TestNativeAndAWSShareModel(t *testing.T) {
 	if roles := h.AWSJSON(t, "iam", "get-instance-profile", "--instance-profile-name", "ip")["InstanceProfile"].(map[string]any)["Roles"].([]any); len(roles) != 1 {
 		t.Fatalf("profile roles %v", roles)
 	}
+}
+
+// wantQueryErr sends a raw IAM Query request as root and expects an error code.
+func wantQueryErr(t *testing.T, h *awstest.Harness, form, code string) {
+	t.Helper()
+	status, _, body := h.Signed(t, "iam", "POST", "/", http.Header{"Content-Type": {"application/x-www-form-urlencoded"}}, []byte(form))
+	if status != http.StatusBadRequest || !strings.Contains(string(body), "<Code>"+code+"</Code>") {
+		t.Fatalf("%s: want %s, got %d %s", form, code, status, body)
+	}
+}
+
+func TestAWSAccountPasswordPolicyAndAlias(t *testing.T) {
+	h := awstest.New(t)
+	out, err := h.AWSErr(t, "iam", "get-account-password-policy")
+	wantErr(t, out, err, "NoSuchEntity")
+	out, err = h.AWSErr(t, "iam", "delete-account-password-policy")
+	wantErr(t, out, err, "NoSuchEntity")
+	// The AWS CLI checks ranges itself, so invalid values go out as raw Query requests.
+	for _, bad := range []string{"MinimumPasswordLength=3", "MinimumPasswordLength=129", "MaxPasswordAge=1096", "PasswordReusePrevention=25", "MaxPasswordAge=x"} {
+		wantQueryErr(t, h, "Action=UpdateAccountPasswordPolicy&Version=2010-05-08&"+bad, "ValidationError")
+	}
+
+	h.AWS(t, "iam", "update-account-password-policy", "--minimum-password-length", "12", "--require-symbols")
+	p := h.AWSJSON(t, "iam", "get-account-password-policy")["PasswordPolicy"].(map[string]any)
+	if p["MinimumPasswordLength"] != 12.0 || p["RequireSymbols"] != true || p["RequireNumbers"] != false ||
+		p["ExpirePasswords"] != false || p["AllowUsersToChangePassword"] != false || p["MaxPasswordAge"] != nil {
+		t.Fatalf("policy %v", p)
+	}
+	// Omitted parameters take their defaults again.
+	h.AWS(t, "iam", "update-account-password-policy", "--max-password-age", "90", "--password-reuse-prevention", "5",
+		"--hard-expiry", "--allow-users-to-change-password", "--require-numbers", "--require-uppercase-characters", "--require-lowercase-characters")
+	p = h.AWSJSON(t, "iam", "get-account-password-policy")["PasswordPolicy"].(map[string]any)
+	if p["MinimumPasswordLength"] != 8.0 || p["RequireSymbols"] != false || p["ExpirePasswords"] != true || p["MaxPasswordAge"] != 90.0 ||
+		p["PasswordReusePrevention"] != 5.0 || p["HardExpiry"] != true || p["AllowUsersToChangePassword"] != true ||
+		p["RequireNumbers"] != true || p["RequireUppercaseCharacters"] != true || p["RequireLowercaseCharacters"] != true {
+		t.Fatalf("policy %v", p)
+	}
+
+	// Account alias: one per account, a new one replaces it.
+	if a := h.AWSJSON(t, "iam", "list-account-aliases")["AccountAliases"].([]any); len(a) != 0 {
+		t.Fatalf("aliases %v", a)
+	}
+	for _, bad := range []string{"ab", "-lab", "lab-", "My-Lab", "my--lab", "my_lab", strings.Repeat("a", 64)} {
+		wantQueryErr(t, h, "Action=CreateAccountAlias&Version=2010-05-08&AccountAlias="+bad, "ValidationError")
+	}
+	h.AWS(t, "iam", "create-account-alias", "--account-alias", "old-lab")
+	h.AWS(t, "iam", "create-account-alias", "--account-alias", "my-lab")
+	if a := h.AWSJSON(t, "iam", "list-account-aliases")["AccountAliases"].([]any); len(a) != 1 || a[0] != "my-lab" {
+		t.Fatalf("aliases %v", a)
+	}
+	out, err = h.AWSErr(t, "iam", "delete-account-alias", "--account-alias", "old-lab")
+	wantErr(t, out, err, "NoSuchEntity")
+
+	// A user without the permissions is refused.
+	akid, secret := userKeys(t, h, "nobody", "")
+	out, err = h.AWSAs(t, akid, secret, "", "iam", "update-account-password-policy")
+	wantErr(t, out, err, "AccessDenied")
+	out, err = h.AWSAs(t, akid, secret, "", "iam", "create-account-alias", "--account-alias", "evil")
+	wantErr(t, out, err, "AccessDenied")
+
+	// Both survive a restart: a new service over the reopened state file sees them.
+	st, err := store.Open(filepath.Join(h.Env.Cfg.DataDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := *h.Env
+	env.Store = st
+	re := iam.New(&env)
+	if pp, err := re.GetPasswordPolicy(); err != nil || pp.MaxPasswordAge != 90 || pp.PasswordReusePrevention != 5 {
+		t.Fatalf("after restart: %+v %v", pp, err)
+	}
+	if a := re.AccountAlias(); a != "my-lab" {
+		t.Fatalf("alias after restart %q", a)
+	}
+
+	h.AWS(t, "iam", "delete-account-alias", "--account-alias", "my-lab")
+	if a := h.AWSJSON(t, "iam", "list-account-aliases")["AccountAliases"].([]any); len(a) != 0 {
+		t.Fatalf("aliases %v", a)
+	}
+	h.AWS(t, "iam", "delete-account-password-policy")
+	out, err = h.AWSErr(t, "iam", "get-account-password-policy")
+	wantErr(t, out, err, "NoSuchEntity")
 }

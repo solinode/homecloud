@@ -3,6 +3,7 @@ package events
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"regexp"
 	"sort"
@@ -43,6 +44,7 @@ func (s *Service) RegisterAWS() {
 			"DescribeEventBus":      s.awsDescribeEventBus,
 			"ListEventBuses":        s.awsListEventBuses,
 			"DeleteEventBus":        s.awsDeleteEventBus,
+			"UpdateEventBus":        s.awsUpdateEventBus,
 			"TestEventPattern":      s.awsTestEventPattern,
 			"TagResource":           s.awsTagResource,
 			"UntagResource":         s.awsUntagResource,
@@ -609,20 +611,36 @@ type awsBus struct {
 	Arn              string
 	Description      string                `json:",omitempty"`
 	DeadLetterConfig *struct{ Arn string } `json:",omitempty"`
+	KmsKeyIdentifier string                `json:",omitempty"`
 	CreationTime     *awsapi.Time          `json:",omitempty"`
 	LastModifiedTime *awsapi.Time          `json:",omitempty"`
 }
 
+// bus returns an event bus. The default bus always exists; it is stored only
+// once it has been updated (UpdateEventBus).
 func (s *Service) bus(name string) (Bus, bool) {
-	if name == "default" {
+	b, err := store.Get[Bus](s.env.Store, cBuses, name)
+	if err != nil && name == "default" {
 		return Bus{Name: "default", ARN: s.busARN("default")}, true
 	}
-	b, err := store.Get[Bus](s.env.Store, cBuses, name)
 	return b, err == nil
 }
 
+// allBuses lists every event bus, the default one included, by name.
+func (s *Service) allBuses() []Bus {
+	def, _ := s.bus("default")
+	all := []Bus{def}
+	for _, b := range store.List[Bus](s.env.Store, cBuses) {
+		if b.Name != "default" {
+			all = append(all, b)
+		}
+	}
+	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
+	return all
+}
+
 func toAWSBus(b Bus) awsBus {
-	out := awsBus{Name: b.Name, Arn: b.ARN, Description: b.Description, CreationTime: awsapi.T(b.CreatedAt), LastModifiedTime: awsapi.T(b.UpdatedAt)}
+	out := awsBus{Name: b.Name, Arn: b.ARN, Description: b.Description, KmsKeyIdentifier: b.KMSKeyID, CreationTime: awsapi.T(b.CreatedAt), LastModifiedTime: awsapi.T(b.UpdatedAt)}
 	if b.DeadLetterARN != "" {
 		out.DeadLetterConfig = &struct{ Arn string }{b.DeadLetterARN}
 	}
@@ -657,7 +675,7 @@ func (s *Service) createBus(q authorizer, in createBusIn) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	b := Bus{Name: in.Name, ARN: s.busARN(in.Name), Description: in.Description, CreatedAt: core.Now(), UpdatedAt: core.Now(), Tags: tags}
+	b := Bus{Name: in.Name, ARN: s.busARN(in.Name), Description: in.Description, KMSKeyID: in.KmsKeyIdentifier, CreatedAt: core.Now(), UpdatedAt: core.Now(), Tags: tags}
 	if in.DeadLetterConfig != nil {
 		if err := q.Check("sqs:SendMessage", in.DeadLetterConfig.Arn); err != nil {
 			return nil, err
@@ -708,8 +726,7 @@ func (s *Service) awsListEventBuses(q *awsapi.Req) (any, error) {
 	if err != nil {
 		return nil, err
 	}
-	all := append([]Bus{{Name: "default", ARN: s.busARN("default")}}, store.List[Bus](s.env.Store, cBuses)...)
-	sort.Slice(all, func(i, j int) bool { return all[i].Name < all[j].Name })
+	all := s.allBuses()
 	out := struct {
 		EventBuses []awsBus
 		NextToken  string `json:",omitempty"`
@@ -728,6 +745,79 @@ func (s *Service) awsListEventBuses(q *awsapi.Req) (any, error) {
 			break
 		}
 		out.EventBuses = append(out.EventBuses, toAWSBus(b))
+	}
+	return out, nil
+}
+
+type updateBusIn struct {
+	Name, KmsKeyIdentifier string
+	Description            *string
+	// DeadLetterConfig with an empty Arn removes the dead-letter queue.
+	DeadLetterConfig *struct{ Arn string }
+}
+
+func (s *Service) awsUpdateEventBus(q *awsapi.Req) (any, error) {
+	var in updateBusIn
+	if err := q.Bind(&in); err != nil {
+		return nil, err
+	}
+	return s.updateBus(q, in)
+}
+
+// updateBus changes a bus's description, dead-letter queue or KMS key; the
+// fields left out keep their values. The default bus can be updated too.
+func (s *Service) updateBus(q authorizer, in updateBusIn) (any, error) {
+	name := busName(in.Name)
+	if err := q.Authorize("events:UpdateEventBus", s.busARN(name)); err != nil {
+		return nil, err
+	}
+	if in.Description != nil && len(*in.Description) > 512 {
+		return nil, evErr("ValidationException", "Description must be at most 512 characters.")
+	}
+	b, ok := s.bus(name)
+	if !ok {
+		return nil, evErr("ResourceNotFoundException", "Event bus %s does not exist.", name)
+	}
+	if in.DeadLetterConfig != nil && in.DeadLetterConfig.Arn != "" && in.DeadLetterConfig.Arn != b.DeadLetterARN {
+		if err := q.Check("sqs:SendMessage", in.DeadLetterConfig.Arn); err != nil {
+			return nil, err
+		}
+	}
+	update := func(b *Bus) error {
+		if in.Description != nil {
+			b.Description = *in.Description
+		}
+		if in.DeadLetterConfig != nil {
+			b.DeadLetterARN = in.DeadLetterConfig.Arn
+		}
+		if in.KmsKeyIdentifier != "" {
+			b.KMSKeyID = in.KmsKeyIdentifier
+		}
+		b.UpdatedAt = core.Now()
+		return nil
+	}
+	var err error
+	if name == "default" && !store.Has(s.env.Store, cBuses, name) {
+		_ = update(&b)
+		err = store.Put(s.env.Store, cBuses, name, b)
+	} else {
+		b, err = store.Update(s.env.Store, cBuses, name, update)
+	}
+	if errors.Is(err, store.ErrNotFound) { // deleted meanwhile
+		return nil, evErr("ResourceNotFoundException", "Event bus %s does not exist.", name)
+	}
+	if err != nil {
+		return nil, err
+	}
+	out := map[string]any{"Arn": b.ARN, "Name": b.Name}
+	if b.Description != "" {
+		out["Description"] = b.Description
+	}
+	if b.DeadLetterARN != "" {
+		out["DeadLetterConfig"] = map[string]string{"Arn": b.DeadLetterARN}
+	}
+	if b.KMSKeyID != "" {
+		out["KmsKeyIdentifier"] = b.KMSKeyID
 	}
 	return out, nil
 }

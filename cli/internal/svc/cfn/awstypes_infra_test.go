@@ -112,6 +112,17 @@ func (e *infraEnv) deploy(t *testing.T, verb, name, tmpl string, params ...strin
 	e.AWS(t, args...)
 }
 
+// stackFrom parses describe-stacks output. The helpers below use it rather
+// than describing the stack again, which races with the stack's deletion.
+func stackFrom(t *testing.T, out string) map[string]any {
+	t.Helper()
+	var d struct{ Stacks []map[string]any }
+	if err := json.Unmarshal([]byte(out), &d); err != nil || len(d.Stacks) == 0 {
+		t.Fatalf("describe-stacks: %v: %s", err, out)
+	}
+	return d.Stacks[0]
+}
+
 // wait polls a stack for one of the statuses, with time for containers.
 func (e *infraEnv) wait(t *testing.T, name string, want ...string) map[string]any {
 	t.Helper()
@@ -120,7 +131,7 @@ func (e *infraEnv) wait(t *testing.T, name string, want ...string) map[string]an
 	for time.Now().Before(deadline) {
 		out, err := e.AWSErr(t, "cloudformation", "describe-stacks", "--stack-name", name)
 		if err == nil {
-			st := e.stack(t, name)
+			st := stackFrom(t, out)
 			last = str(st, "StackStatus")
 			for _, w := range want {
 				if last == w {
@@ -156,7 +167,7 @@ func (e *infraEnv) deleted(t *testing.T, name string) {
 		if err != nil && strings.Contains(out, "does not exist") {
 			return
 		}
-		if err == nil && str(e.stack(t, name), "StackStatus") == "DELETE_FAILED" {
+		if err == nil && str(stackFrom(t, out), "StackStatus") == "DELETE_FAILED" {
 			t.Fatalf("delete of %s failed: %v", name, e.eventLines(t, name))
 		}
 		time.Sleep(200 * time.Millisecond)

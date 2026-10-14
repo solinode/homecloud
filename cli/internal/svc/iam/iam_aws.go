@@ -63,7 +63,8 @@ func (s *Service) registerIAM() {
 		"TagInstanceProfile": s.awsTagInstanceProfile, "UntagInstanceProfile": s.awsUntagInstanceProfile, "ListInstanceProfileTags": s.awsListInstanceProfileTags,
 		// account
 		"GetAccountSummary": s.awsGetAccountSummary, "GetAccountAuthorizationDetails": s.awsGetAccountAuthorizationDetails,
-		"ListAccountAliases": s.awsListAccountAliases, "GetAccountPasswordPolicy": s.awsGetAccountPasswordPolicy,
+		"ListAccountAliases": s.awsListAccountAliases, "CreateAccountAlias": s.awsCreateAccountAlias, "DeleteAccountAlias": s.awsDeleteAccountAlias,
+		"GetAccountPasswordPolicy": s.awsGetAccountPasswordPolicy, "UpdateAccountPasswordPolicy": s.awsUpdateAccountPasswordPolicy, "DeleteAccountPasswordPolicy": s.awsDeleteAccountPasswordPolicy,
 		"SimulatePrincipalPolicy": s.awsSimulatePrincipalPolicy, "SimulateCustomPolicy": s.awsSimulateCustomPolicy,
 		"GetContextKeysForPrincipalPolicy": s.awsGetContextKeysForPrincipalPolicy, "GetContextKeysForCustomPolicy": s.awsGetContextKeysForCustomPolicy,
 		// credentials HomeCloud does not have: always empty, so tools that clean them up work

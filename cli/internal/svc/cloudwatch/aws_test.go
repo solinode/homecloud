@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -14,6 +15,7 @@ import (
 
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi"
 	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
+	"github.com/homecloudhq/homecloud/cli/internal/store"
 )
 
 func newAWS(t *testing.T) (*awstest.Harness, *Service) {
@@ -269,6 +271,33 @@ func TestLogsQueryDefinitions(t *testing.T) {
 	if again := h.AWSJSON(t, "logs", "put-query-definition", "--query-definition-id", id, "--name", "app/errors", "--query-string", "fields @message")["queryDefinitionId"]; again != id {
 		t.Fatalf("update returned %v", again)
 	}
+	defs = h.AWSJSON(t, "logs", "describe-query-definitions", "--query-definition-name-prefix", "app/")["queryDefinitions"].([]any)
+	if d := defs[0].(map[string]any); len(defs) != 1 || d["queryString"] != "fields @message" || d["logGroupNames"] != nil || d["lastModified"].(float64) <= 0 {
+		t.Fatalf("after update: %v", defs)
+	}
+	if o, err := h.AWSErr(t, "logs", "put-query-definition", "--query-definition-id", "00000000-0000-0000-0000-000000000000", "--name", "x", "--query-string", "fields @message"); err == nil || !strings.Contains(o, "ResourceNotFoundException") {
+		t.Fatalf("update unknown id: %v %s", err, o)
+	}
+
+	// Pagination.
+	p1 := h.AWSJSON(t, "logs", "describe-query-definitions", "--max-results", "1")
+	if len(p1["queryDefinitions"].([]any)) != 1 || p1["nextToken"] == nil {
+		t.Fatalf("page 1: %v", p1)
+	}
+	p2 := h.AWSJSON(t, "logs", "describe-query-definitions", "--max-results", "1", "--next-token", p1["nextToken"].(string))
+	if l := p2["queryDefinitions"].([]any); len(l) != 1 || l[0].(map[string]any)["name"] != "other" {
+		t.Fatalf("page 2: %v", p2)
+	}
+
+	// Definitions are stored, so they survive a restart.
+	st, err := store.Open(filepath.Join(h.Env.Cfg.DataDir, "state.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if defs := store.List[queryDef](st, cQueryDefs); len(defs) != 2 {
+		t.Fatalf("stored definitions: %v", defs)
+	}
+
 	if d := h.AWSJSON(t, "logs", "delete-query-definition", "--query-definition-id", id); d["success"] != true {
 		t.Fatalf("delete: %v", d)
 	}
