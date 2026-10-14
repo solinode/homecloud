@@ -216,7 +216,7 @@ func (s *Service) functionConfig(f Function) map[string]any {
 		"State": f.State, "LastUpdateStatus": f.LastUpdateStatus, "PackageType": f.PackageType,
 		"Architectures": f.Architectures, "EphemeralStorage": map[string]int{"Size": 512},
 		"SnapStart":     map[string]string{"ApplyOn": "None", "OptimizationStatus": "Off"},
-		"LoggingConfig": map[string]string{"LogFormat": "Text", "LogGroup": f.LogGroup},
+		"LoggingConfig": f.logging(),
 	}
 	if c["PackageType"] == "" {
 		c["PackageType"] = "Zip"
@@ -288,15 +288,16 @@ type awsConfigIn struct {
 	DeadLetterConfig *struct {
 		TargetArn string `json:"TargetArn"`
 	} `json:"DeadLetterConfig"`
-	Layers        *[]string    `json:"Layers"`
-	ImageConfig   *ImageConfig `json:"ImageConfig"`
-	Architectures []string     `json:"Architectures"`
-	RevisionId    string       `json:"RevisionId"`
+	Layers        *[]string      `json:"Layers"`
+	ImageConfig   *ImageConfig   `json:"ImageConfig"`
+	Architectures []string       `json:"Architectures"`
+	RevisionId    string         `json:"RevisionId"`
+	LoggingConfig *LoggingConfig `json:"LoggingConfig"`
 }
 
 func (a awsConfigIn) config() configInput {
 	in := configInput{Runtime: a.Runtime, Handler: a.Handler, Description: a.Description, MemoryMB: a.MemorySize,
-		TimeoutSec: a.Timeout, Role: a.Role, Layers: a.Layers, ImageConfig: a.ImageConfig, Architectures: a.Architectures}
+		TimeoutSec: a.Timeout, Role: a.Role, Layers: a.Layers, ImageConfig: a.ImageConfig, Architectures: a.Architectures, Logging: a.LoggingConfig}
 	if a.VpcConfig != nil {
 		sn := ""
 		if len(a.VpcConfig.SubnetIds) > 0 {

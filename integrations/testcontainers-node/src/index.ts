@@ -138,8 +138,7 @@ export class HomeCloudContainer extends GenericContainer {
       started = await super.start();
       const account = this.account() ?? (await readAccount(started));
       if (!account) throw new Error("homecloud: no account in the first-start log");
-      const host = started.getHost() === "localhost" ? "127.0.0.1" : started.getHost();
-      const endpoint = `http://${host}:${this.port}`;
+      const endpoint = `http://${endpointHost(started.getHost())}:${this.port}`;
       await waitHealthy(endpoint, 30_000);
       const credentials = await readCredentials(started);
       return new StartedHomeCloudContainer(started, endpoint, credentials, account);
@@ -172,7 +171,7 @@ export class StartedHomeCloudContainer extends AbstractStartedContainer {
     super(startedTestContainer);
   }
 
-  /** The API URL, e.g. http://127.0.0.1:18080: what AWS_ENDPOINT_URL should be. */
+  /** The API URL, e.g. http://localhost:18080: what AWS_ENDPOINT_URL should be. */
   getEndpoint(): string {
     return this.endpoint;
   }
@@ -272,6 +271,17 @@ export async function removeResources(account: string): Promise<void> {
   if (errors.length > 0) {
     throw new AggregateError(errors, `homecloud: removing resources of account ${account} failed`);
   }
+}
+
+/**
+ * The host name for the endpoint: a loopback Docker host is named `localhost`, as
+ * `homecloud aws-env` does. S3 Control (which the Terraform AWS provider calls for every
+ * bucket) puts the account ID in front of the endpoint's host, and `123456789012.127.0.0.1`
+ * does not resolve. HomeCloud listens on 127.0.0.1 only; Node.js 20+ tries 127.0.0.1 when
+ * ::1 refuses the connection.
+ */
+export function endpointHost(host: string): string {
+  return host === "localhost" || host === "127.0.0.1" || host === "::1" ? "localhost" : host;
 }
 
 /** Parses the `export NAME="value"` lines printed by `homecloud aws-env`. */

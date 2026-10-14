@@ -6,21 +6,15 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
 )
 
 // TestTerraform applies, re-plans and destroys S3 resources with Terraform or
-// OpenTofu and the hashicorp/aws provider. Opt-in (HC_TEST_TERRAFORM=1) since
+// OpenTofu and the hashicorp/aws provider. Opt-in (see awstest.Terraform) since
 // it downloads the provider; set TF_PLUGIN_CACHE_DIR to reuse it.
 func TestTerraform(t *testing.T) {
-	if os.Getenv("HC_TEST_TERRAFORM") == "" {
-		t.Skip("set HC_TEST_TERRAFORM=1 to run")
-	}
-	bin, err := exec.LookPath("terraform")
-	if err != nil {
-		if bin, err = exec.LookPath("tofu"); err != nil {
-			t.Skip("terraform/tofu not installed")
-		}
-	}
+	bin := awstest.Terraform(t)
 	h, _ := newHarness(t)
 	b := bucketName()
 	dir := t.TempDir()

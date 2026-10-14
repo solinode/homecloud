@@ -25,6 +25,13 @@ inputs:
     description: Seconds to wait for the API and every service in services-wait.
     required: false
     default: "180"
+  verify-signature:
+    description: >-
+      Verify the release's Sigstore signature (checksums.txt.sigstore.json, published from
+      v0.5.0 on) with cosign before trusting checksums.txt: "true" or "false". Releases
+      before v0.5.0 are unsigned and get the checksum check only.
+    required: false
+    default: "true"
 
 outputs:
   endpoint:

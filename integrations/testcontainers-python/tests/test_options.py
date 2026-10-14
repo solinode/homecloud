@@ -26,3 +26,14 @@ def test_command_and_socket():
     hc = make(port=19090, docker_socket="/run/user/1000/docker.sock")
     assert hc._command == ["serve", "--data-dir", "/data", "--addr", "127.0.0.1:19090"]
     assert hc.volumes["/run/user/1000/docker.sock"]["bind"] == "/var/run/docker.sock"
+
+
+def test_endpoint_names_loopback_localhost():
+    for host, want in [
+        ("localhost", "http://localhost:18080"),
+        ("127.0.0.1", "http://localhost:18080"),
+        ("docker.example", "http://docker.example:18080"),
+    ]:
+        hc = make()
+        with mock.patch.object(HomeCloudContainer, "get_container_host_ip", return_value=host):
+            assert hc.get_endpoint() == want

@@ -51,7 +51,7 @@ With the Testcontainers JUnit 5 extension, `@Testcontainers` plus
 | | |
 | --- | --- |
 | `new HomeCloudContainer()`, `new HomeCloudContainer(image)` | default image `ghcr.io/solinode/homecloud:latest` |
-| `getEndpoint()`, `getEndpointUri()` | `http://127.0.0.1:18080` |
+| `getEndpoint()`, `getEndpointUri()` | `http://localhost:18080` |
 | `getCredentials()`, `getAccessKey()`, `getSecretKey()`, `getRegion()` | root keys and region |
 | `getCredentialsProvider()` | an `AwsCredentialsProvider` |
 | `configure(builder)` | endpoint override, credentials and region on any SDK v2 client builder: `hc.configure(SnsClient.builder()).build()` |
@@ -76,6 +76,12 @@ host's loopback ports and they call it back through `host.docker.internal`. The 
 listens on `127.0.0.1:<port>` of the Docker host. This works on Linux (including GitHub
 Actions), OrbStack, and Docker Desktop with host networking turned on (Settings >
 Resources > Network).
+
+The endpoint names that address `localhost`, as `homecloud aws-env` does: S3 Control puts
+the account ID in front of the endpoint's host (`123456789012.localhost`), and the
+Terraform AWS provider calls it for every `aws_s3_bucket`; `123456789012.127.0.0.1` does
+not resolve. Clients that try `::1` first fall back to `127.0.0.1`. S3 clients should use
+path-style addressing (`getS3Client()` does), so bucket names need not resolve.
 
 Only one HomeCloud can run per Docker host: its helper containers have fixed names
 (`homecloud-s3`, ...) and host ports (9500, 9501, 5500, 8053). Do not run tests that

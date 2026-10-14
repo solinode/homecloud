@@ -494,7 +494,7 @@ func (s *Service) containerGroups() []LogGroup {
 	if s.env.Docker == nil {
 		return out
 	}
-	cs, err := s.env.Docker.ManagedContainers()
+	cs, err := s.env.Docker.OwnContainers()
 	if err != nil {
 		return out
 	}
@@ -515,7 +515,7 @@ func (s *Service) containerFor(group string) string {
 		return ""
 	}
 	svcName, res, _ := strings.Cut(rest, "/")
-	cs, err := s.env.Docker.ManagedContainers()
+	cs, err := s.env.Docker.OwnContainers()
 	if err != nil {
 		return ""
 	}

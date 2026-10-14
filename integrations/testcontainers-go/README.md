@@ -32,7 +32,7 @@ func TestUpload(t *testing.T) {
 | | |
 | --- | --- |
 | `Run(ctx, image, opts...)` | starts HomeCloud and waits for the API (and S3, by default) |
-| `hc.EndpointURL()` | `http://127.0.0.1:18080` |
+| `hc.EndpointURL()` | `http://localhost:18080` |
 | `hc.Endpoint(ctx, "http")` | same, through the `testcontainers.Container` interface |
 | `hc.Credentials()` | root `AccessKeyID`, `SecretAccessKey`, `Region` |
 | `hc.AWSConfig()` | `aws.Config` for any `NewFromConfig` |
@@ -54,6 +54,12 @@ host's loopback ports and they call it back through `host.docker.internal`. The 
 listens on `127.0.0.1:<port>` of the Docker host. This works on Linux (including GitHub
 Actions), OrbStack, and Docker Desktop with host networking turned on (Settings >
 Resources > Network).
+
+The endpoint names that address `localhost`, as `homecloud aws-env` does: S3 Control puts
+the account ID in front of the endpoint's host (`123456789012.localhost`), and the
+Terraform AWS provider calls it for every `aws_s3_bucket`; `123456789012.127.0.0.1` does
+not resolve. Clients that try `::1` first fall back to `127.0.0.1`. S3 clients should use
+path-style addressing (`UsePathStyle`), so bucket names need not resolve.
 
 Only one HomeCloud can run per Docker host: its helper containers have fixed names
 (`homecloud-s3`, ...) and host ports (9500, 9501, 5500, 8053). Do not run tests that

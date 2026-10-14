@@ -20,10 +20,12 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash/crc32"
 	"io"
 	"log"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -572,12 +574,22 @@ func (q *Req) fail(err error) {
 }
 
 func (q *Req) writeJSON(status int, v any) {
-	q.W.Header().Set("Content-Type", "application/x-amz-json-"+q.Svc.JSONVersion)
-	q.W.WriteHeader(status)
 	if v == nil {
 		v = struct{}{}
 	}
-	_ = json.NewEncoder(q.W).Encode(v)
+	q.writeJSONBody(status, "application/x-amz-json-"+q.Svc.JSONVersion, v)
+}
+
+// writeJSONBody writes an awsJson response with its X-Amz-Crc32 header: the
+// AWS SDK for Go v2 checks DynamoDB response bodies against it and, when the
+// header is missing, compares them with 0 and logs a warning on every call.
+func (q *Req) writeJSONBody(status int, contentType string, v any) {
+	var buf bytes.Buffer
+	_ = json.NewEncoder(&buf).Encode(v)
+	q.W.Header().Set("Content-Type", contentType)
+	q.W.Header().Set("X-Amz-Crc32", strconv.FormatUint(uint64(crc32.ChecksumIEEE(buf.Bytes())), 10))
+	q.W.WriteHeader(status)
+	_, _ = q.W.Write(buf.Bytes())
 }
 
 func (q *Req) writeJSONError(e *Error) {
@@ -593,13 +605,11 @@ func (q *Req) writeJSONError(e *Error) {
 	if q.Svc != nil {
 		ver = q.Svc.JSONVersion
 	}
-	q.W.Header().Set("Content-Type", "application/x-amz-json-"+ver)
-	q.W.WriteHeader(e.Status)
 	body := map[string]any{"__type": e.Code, "message": e.Message}
 	for k, v := range e.Fields {
 		body[k] = v
 	}
-	_ = json.NewEncoder(q.W).Encode(body)
+	q.writeJSONBody(e.Status, "application/x-amz-json-"+ver, body)
 }
 
 func (q *Req) writeRESTJSONError(e *Error) {

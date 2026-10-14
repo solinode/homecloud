@@ -20,4 +20,11 @@ class ParseAwsEnvTest {
         assertEquals("us-east-1", env.get("AWS_REGION"));
         assertEquals("http://127.0.0.1:18080", env.get("AWS_ENDPOINT_URL"));
     }
+
+    @Test
+    void namesALoopbackHostLocalhost() {
+        assertEquals("localhost", HomeCloudContainer.endpointHost("localhost"));
+        assertEquals("localhost", HomeCloudContainer.endpointHost("127.0.0.1"));
+        assertEquals("docker.example", HomeCloudContainer.endpointHost("docker.example"));
+    }
 }

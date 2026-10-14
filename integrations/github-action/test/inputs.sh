@@ -5,16 +5,16 @@ set -u
 setup="$(cd "$(dirname "$0")/.." && pwd)/setup.sh"
 fails=0
 
-# expect ok|fail PORT TIMEOUT SERVICES
+# expect ok|fail PORT TIMEOUT SERVICES [VERIFY_SIGNATURE]
 expect() {
   local want=$1 out got=ok
-  out=$(HC_VALIDATE_ONLY=1 HC_PORT="$2" HC_WAIT_TIMEOUT="$3" HC_SERVICES_WAIT="$4" \
+  out=$(HC_VALIDATE_ONLY=1 HC_PORT="$2" HC_WAIT_TIMEOUT="$3" HC_SERVICES_WAIT="$4" HC_VERIFY_SIGNATURE="${5-true}" \
     GITHUB_OUTPUT=/dev/null GITHUB_ENV=/dev/null GITHUB_STATE= RUNNER_TEMP="${TMPDIR:-/tmp}" bash "$setup" 2>&1) || got=fail
   if [ "$got" != "$want" ]; then
-    echo "FAIL: port='$2' timeout='$3' services='$4': want $want, got $got: $out"
+    echo "FAIL: port='$2' timeout='$3' services='$4' verify='${5-true}': want $want, got $got: $out"
     fails=$((fails + 1))
   else
-    echo "ok:   port='$2' timeout='$3' services='$4' -> $want"
+    echo "ok:   port='$2' timeout='$3' services='$4' verify='${5-true}' -> $want"
   fi
 }
 
@@ -30,5 +30,10 @@ expect fail http 180 ""
 expect fail 70000 180 ""
 expect fail 8080 180 "s33"
 expect fail 8080 180 "s3,nosuchservice"
+expect ok 8080 180 "" false
+expect ok 8080 180 "" FALSE
+expect ok 8080 180 "" ""                        # empty means the default (true)
+expect fail 8080 180 "" no
+expect fail 8080 180 "" 1
 
 [ "$fails" -eq 0 ] && echo "all input checks passed" || { echo "$fails input checks failed"; exit 1; }

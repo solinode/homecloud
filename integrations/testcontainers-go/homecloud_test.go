@@ -13,6 +13,7 @@ import (
 	ddbtypes "github.com/aws/aws-sdk-go-v2/service/dynamodb/types"
 	"github.com/aws/aws-sdk-go-v2/service/lambda"
 	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3control"
 	"github.com/aws/aws-sdk-go-v2/service/sqs"
 	"github.com/aws/aws-sdk-go-v2/service/sts"
 	"github.com/moby/moby/client"
@@ -75,6 +76,14 @@ func TestHomeCloud(t *testing.T) {
 	obj.Body.Close()
 	if string(b) != "hello" {
 		t.Errorf("s3 body %q", b)
+	}
+
+	// S3 Control puts the account ID in front of the endpoint host
+	// (<account>.localhost), which is why the endpoint is not 127.0.0.1.
+	if _, err := s3control.NewFromConfig(cfg).ListTagsForResource(ctx, &s3control.ListTagsForResourceInput{
+		AccountId: aws.String(hc.AccountID()), ResourceArn: aws.String("arn:aws:s3:::tc-go"),
+	}); err != nil {
+		t.Fatalf("s3control list tags (endpoint %s): %v", hc.EndpointURL(), err)
 	}
 
 	sq := sqs.NewFromConfig(cfg)

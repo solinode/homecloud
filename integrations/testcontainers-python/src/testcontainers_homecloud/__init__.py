@@ -122,10 +122,17 @@ class HomeCloudContainer(DockerContainer):
     # Connection details
 
     def get_endpoint(self) -> str:
-        """The API URL, e.g. http://127.0.0.1:18080 (what AWS_ENDPOINT_URL should be)."""
+        """The API URL, e.g. http://localhost:18080 (what AWS_ENDPOINT_URL should be).
+
+        A loopback Docker host is named ``localhost``, as ``homecloud aws-env``
+        does: S3 Control (which the Terraform AWS provider calls for every
+        bucket) puts the account ID in front of the endpoint's host, and
+        ``123456789012.127.0.0.1`` does not resolve. HomeCloud listens on
+        127.0.0.1 only; clients that try ::1 first fall back to it.
+        """
         host = self.get_container_host_ip()
-        if host == "localhost":
-            host = "127.0.0.1"
+        if host in ("localhost", "127.0.0.1", "::1"):
+            host = "localhost"
         return f"http://{host}:{self.port}"
 
     def get_credentials(self) -> Credentials:
