@@ -460,7 +460,7 @@ export function LaunchWizard() {
                   onSelect={() => chooseKind("vm")}
                   icon={Monitor}
                   title="Virtual machine"
-                  description="Has its own kernel and stronger isolation. Boots in about a minute; needs KVM on the host for full speed."
+                  description="Has its own kernel and stronger isolation. Boots in about a minute; needs KVM on Linux, or QEMU on an Apple Silicon Mac, for full speed."
                 />
               </OptionGroup>
               {isVM && caps.data?.vm === "emulated" && (
@@ -471,7 +471,11 @@ export function LaunchWizard() {
                     This host has no KVM (
                     <span className="font-mono text-xs">/dev/kvm</span>), so
                     virtual machines will be slow. Booting can take several
-                    minutes. Containers are not affected.
+                    minutes. Containers are not affected. On an Apple Silicon
+                    Mac, install QEMU (
+                    <span className="font-mono text-xs">brew install qemu</span>)
+                    and restart HomeCloud to run them at full speed with
+                    Hypervisor.framework.
                   </AlertDescription>
                 </Alert>
               )}

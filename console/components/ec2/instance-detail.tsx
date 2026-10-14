@@ -213,7 +213,11 @@ function VirtualizationValue({ inst }: { inst: Instance }) {
     <span className="inline-flex flex-wrap items-center gap-2">
       <InstanceKindBadge instance={inst} />
       <span className="text-muted-foreground text-xs">
-        {inst.virtualization === "kvm" ? "Own kernel, hardware accelerated (KVM)" : "Own kernel, CPU emulated (no /dev/kvm on the host, so it is slow)"}
+        {inst.virtualization === "kvm"
+          ? "Own kernel, hardware accelerated (KVM)"
+          : inst.virtualization === "hvf"
+            ? "Own kernel, hardware accelerated (QEMU on this Mac with Hypervisor.framework)"
+            : "Own kernel, CPU emulated (no /dev/kvm on the host, so it is slow)"}
       </span>
     </span>
   )

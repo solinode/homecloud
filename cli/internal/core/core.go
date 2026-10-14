@@ -74,6 +74,12 @@ type Config struct {
 	// a loopback address unless MetricsAddrInsecure is set.
 	MetricsAddr         string `json:"metrics_addr,omitempty"`
 	MetricsAddrInsecure bool   `json:"metrics_addr_insecure,omitempty"`
+	// VMAccel chooses how VM instances run: "auto" (the default: on an Apple
+	// Silicon Mac with QEMU installed, QEMU on the Mac with Hypervisor.framework;
+	// otherwise in the VM container with KVM when the Docker host has /dev/kvm,
+	// emulated if not), "hvf" (always on the Mac), "container" (always in the
+	// container, KVM when available), "kvm" or "tcg". HC_VM_ACCEL overrides it.
+	VMAccel string `json:"vm_accel,omitempty"`
 }
 
 func DefaultDataDir() string {

@@ -34,7 +34,9 @@ import (
 // it. The root disk is a qcow2 overlay on the cached base image, kept in the
 // instance's root volume (an EBS volume record at /dev/xvda, mounted at /vm).
 // The guest uses hardware acceleration when the Docker host has /dev/kvm and
-// is otherwise emulated.
+// is otherwise emulated, except on an Apple Silicon Mac with QEMU installed,
+// where QEMU runs on the Mac itself with Hypervisor.framework and the VM
+// container keeps the network, disks and console (vm_host.go).
 //
 // Stage 1 covers the instance lifecycle. Extra volumes, snapshots and images
 // of VM disks and backup are not available for VM instances yet. The browser
@@ -56,12 +58,19 @@ type vmState struct {
 	kvmOnce sync.Once
 	kvm     bool
 
+	accelOnce sync.Once
+	accel     string // vmAccel
+	qemu      string // QEMU binary for host-run guests, once probed
+	watchOnce sync.Once
+	spawnMu   sync.Mutex
+	spawned   map[string]time.Time // VM container -> when its host runner was started
+
 	fetchMu sync.Mutex // one download at a time
 }
 
 // vmPlan is what Launch works out once for every instance of a VM launch.
 type vmPlan struct {
-	virtualization string // kvm | emulated
+	virtualization string // hvf | kvm | emulated
 	user           string
 	diskGB         int
 	root           VolumeSpec
@@ -131,18 +140,21 @@ func (s *Service) planVM(in RunInput, img Image) (vmPlan, error) {
 	}
 	p.ami = img.VMDisk
 	p.root.SizeGB = p.diskGB
-	p.virtualization = "emulated"
-	if s.vmKVM() {
-		p.virtualization = "kvm"
+	p.virtualization = s.vmAccel()
+	if p.virtualization == virtHVF {
+		// (hvf forced where it cannot work: fail here, not with a host runner per guest.)
+		if why := vmHostUnsupported(hostArch(s)); why != "" {
+			return p, core.Errf(http.StatusServiceUnavailable, "Unsupported", "virtual machine instances are set to run with Hypervisor.framework, but %s", why)
+		}
 	}
 	return p, nil
 }
 
 // vmKVM reports whether the Docker host offers /dev/kvm. It is probed once by
-// creating a container with the device (HC_VM_ACCEL=kvm|tcg overrides).
+// creating a container with the device (HC_VM_ACCEL or vm_accel = kvm|tcg overrides).
 func (s *Service) vmKVM() bool {
 	s.vm.kvmOnce.Do(func() {
-		switch os.Getenv("HC_VM_ACCEL") {
+		switch s.vmAccelSetting() {
 		case "kvm":
 			s.vm.kvm = true
 			return
@@ -316,6 +328,16 @@ func (s *Service) vmRunSpec(inst Instance, network string) runtime.RunSpec {
 	if mach.KVM {
 		spec.Devices = []string{"/dev/kvm"}
 	}
+	if vmHostMode(inst) {
+		// QEMU runs on the host (vm_host.go): the container only prepares the
+		// disks and serves them and passt, and lives as long as the guest.
+		spec.Cmd = nil
+		spec.Env["HC_VM_HOST"] = "1"
+		spec.Labels[labelVMHost] = "1"
+		spec.NanoCPUs = int64(min(2, s.hostCPU) * 1e9)
+		spec.MemoryMB = 768
+		s.vmHostWatch()
+	}
 	if inst.VMAMI != "" {
 		spec.Env["HC_VM_AMI"] = "1"
 	}
@@ -459,6 +481,12 @@ func (s *Service) launchVM(inst Instance, network string) {
 	s.metadataRoute(ctx, cid, inst.VpcID)
 	s.vpc.ProtectNow(ctx, s.member(inst, cid))
 	err = s.vmWaitReady(inst, since)
+	if err != nil && vmHostMode(inst) {
+		// passt did not start, which a guest on the host cannot do without: run it in the container.
+		if why := s.vmPasstFailure(cid, since); why != "" {
+			err = fmt.Errorf("%w: %s", errPasstExited, why)
+		}
+	}
 	if errors.Is(err, errPasstExited) {
 		// passt died while the guest booted: boot it again in user-mode networking.
 		log.Printf("ec2: %s: %v; restarting the guest with user-mode networking", inst.ID, err)
@@ -505,8 +533,17 @@ var errPasstExited = errors.New("passt exited")
 // vmFallbackToUser records that passt does not work for an instance and
 // rebuilds its container with QEMU's user-mode networking (the guest boots
 // again; it sits behind NAT, and security group changes rebuild it).
+//
+// A guest run on the host (hvf) cannot use user-mode networking with the
+// instance's address: it moves into the VM container, emulated.
 func (s *Service) vmFallbackToUser(id string) error {
-	if _, err := store.Update(s.env.Store, cInstances, id, func(x *Instance) error { x.VMNetwork = "user"; return nil }); err != nil {
+	if _, err := store.Update(s.env.Store, cInstances, id, func(x *Instance) error {
+		x.VMNetwork = "user"
+		if x.Virtualization == virtHVF {
+			x.Virtualization = "emulated"
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 	return s.recreate(id)
@@ -637,7 +674,7 @@ func tail(s string, n int) string {
 // vmBootTimeout is how long a guest gets to finish booting before the instance
 // is reported running anyway (images without cloud-init never print the marker).
 func vmBootTimeout(inst Instance) time.Duration {
-	if inst.Virtualization == "kvm" {
+	if inst.Virtualization == "kvm" || inst.Virtualization == virtHVF {
 		return 10 * time.Minute
 	}
 	return 30 * time.Minute
@@ -683,7 +720,7 @@ func (s *Service) vmWaitReady(inst Instance, since time.Time) error {
 
 // vmShutdownTimeout is how long the guest gets to power off after the ACPI request.
 func vmShutdownTimeout(inst Instance) time.Duration {
-	if inst.Virtualization == "kvm" {
+	if inst.Virtualization == "kvm" || inst.Virtualization == virtHVF {
 		return 90 * time.Second
 	}
 	return 3 * time.Minute
@@ -697,7 +734,11 @@ func (s *Service) vmPowerOff(inst Instance) bool {
 		return true
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	if _, err := s.env.Docker.Exec(ctx, inst.ContainerID, []string{"/usr/local/bin/hc-vm-ctl", "system_powerdown"}, nil); err != nil {
+	if vmHostMode(inst) {
+		if err := s.vmQMP(ctx, inst, "system_powerdown"); err != nil {
+			log.Printf("ec2: power down %s: %v", inst.ID, err)
+		}
+	} else if _, err := s.env.Docker.Exec(ctx, inst.ContainerID, []string{"/usr/local/bin/hc-vm-ctl", "system_powerdown"}, nil); err != nil {
 		log.Printf("ec2: power down %s: %v", inst.ID, err)
 	}
 	cancel()

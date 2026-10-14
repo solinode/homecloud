@@ -17,6 +17,7 @@ import (
 	"github.com/homecloudhq/homecloud/cli/internal/core"
 	"github.com/homecloudhq/homecloud/cli/internal/httpx"
 	"github.com/homecloudhq/homecloud/cli/internal/server"
+	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2"
 	"github.com/spf13/cobra"
 )
 
@@ -47,6 +48,7 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 			}
 			server.Version = Version
 			server.Commit = Commit
+			ec2.VMHostCommand = vmHostCommand
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return server.Run(ctx, cfg, server.Options{ResetRootPassword: resetRoot, AllowNewerData: allowNewerData})
@@ -70,6 +72,7 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 	f.BoolVar(&allowNewerData, "allow-newer-data", false, "start even if the data directory was last used by a newer HomeCloud (risks corrupting it; prefer homecloud upgrade --rollback)")
 	f.StringVar(&cfg.MetricsAddr, "metrics-addr", cfg.MetricsAddr, "also serve Prometheus metrics WITHOUT authentication on this loopback address, e.g. 127.0.0.1:9464 (the API's /metrics always requires the IAM action homecloud:GetMetrics)")
 	f.BoolVar(&cfg.MetricsAddrInsecure, "metrics-addr-insecure", false, "allow a non-loopback --metrics-addr (its metrics need no credentials: protect it with a firewall)")
+	f.StringVar(&cfg.VMAccel, "vm-accel", "auto", "how VM instances run: auto, hvf (QEMU on this Mac with Hypervisor.framework), container (QEMU in Docker, KVM when available), kvm or tcg")
 	RootCmd.AddCommand(serveCmd)
 
 	var p client.Profile
@@ -219,6 +222,12 @@ func mergeConfig(cmd *cobra.Command, flags core.Config) (core.Config, error) {
 	set("tls-key", func() { cfg.TLSKey = flags.TLSKey })
 	set("metrics-addr", func() { cfg.MetricsAddr = flags.MetricsAddr })
 	set("metrics-addr-insecure", func() { cfg.MetricsAddrInsecure = flags.MetricsAddrInsecure })
+	set("vm-accel", func() { cfg.VMAccel = flags.VMAccel })
+	switch cfg.VMAccel {
+	case "", "auto", "hvf", "container", "kvm", "tcg":
+	default:
+		return cfg, fmt.Errorf("--vm-accel is auto, hvf, container, kvm or tcg, got %q", cfg.VMAccel)
+	}
 	if err := server.ValidateMetricsAddr(cfg.MetricsAddr, cfg.MetricsAddrInsecure); err != nil {
 		return cfg, err
 	}

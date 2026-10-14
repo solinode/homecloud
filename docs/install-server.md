@@ -548,7 +548,12 @@ container on the instance's VPC network. Container images need nothing of this.
 - **KVM.** With `/dev/kvm` on the Docker host, guests run hardware-accelerated; without it they are
   emulated (works, but boots take minutes). Prefer bare metal, a home server, or a VPS with nested
   virtualization; check with `ls -l /dev/kvm` (`sudo apt install cpu-checker && kvm-ok` tells whether the
-  CPU and firmware support it). Docker Desktop and OrbStack on macOS run guests emulated.
+  CPU and firmware support it). Docker Desktop and OrbStack on macOS have no `/dev/kvm`.
+- **macOS.** On an Apple Silicon Mac, install QEMU (`brew install qemu`) and HomeCloud runs guests on the
+  Mac itself with Hypervisor.framework (`virtualization: hvf`), at full speed, with the same networking,
+  disks and console; the VM container in Docker keeps the instance's address, firewall and volumes. Without
+  QEMU, guests are emulated in Docker (boots take minutes). `homecloud serve --vm-accel container` keeps them
+  in Docker; `--vm-accel hvf` insists on the Mac.
 - **Networking.** passt gives the guest the instance's private address. Where passt cannot sandbox
   itself, notably Ubuntu 24.04 hosts (`kernel.apparmor_restrict_unprivileged_userns=1`), guests fall back
   to QEMU user-mode networking: NAT, no private address of their own, only the ports the security groups

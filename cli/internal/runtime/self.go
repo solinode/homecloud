@@ -30,6 +30,9 @@ import (
 // /proc/self/mountinfo (/var/lib/docker/containers/<id>/hostname and friends).
 var containerIDPattern = regexp.MustCompile(`/containers/([0-9a-f]{64})/`)
 
+// InContainer reports whether this process runs in a container.
+func InContainer() bool { return inContainer() }
+
 // inContainer reports whether this process runs in a container.
 func inContainer() bool {
 	if os.Getenv("HOMECLOUD_IN_CONTAINER") == "1" {
