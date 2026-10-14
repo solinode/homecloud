@@ -25,6 +25,11 @@ port=$((10#$port))
 case "$timeout" in '' | *[!0-9]*) fail "wait-timeout must be a whole number of seconds, got '$timeout'" ;; esac
 timeout=$((10#$timeout))
 [ "$timeout" -ge 1 ] || fail "wait-timeout must be at least 1 second"
+case "$(echo "${HC_VERIFY_SIGNATURE:-true}" | tr '[:upper:]' '[:lower:]')" in
+  true) verify_sig=1 ;;
+  false) verify_sig= ;;
+  *) fail "verify-signature must be true or false, got '$HC_VERIFY_SIGNATURE'" ;;
+esac
 
 # Services that start containers in the background log a line when they are ready;
 # the others run inside the HomeCloud process and are ready with the API.
@@ -36,7 +41,7 @@ for svc in $(echo "${HC_SERVICES_WAIT:-}" | tr ',\n' '  ' | tr '[:upper:]' '[:lo
     *) case "$in_process" in *" $svc "*) ;; *) fail "services-wait: unknown service '$svc' (background: s3, ecr, route53; in-process:$in_process)" ;; esac ;;
   esac
 done
-[ "${HC_VALIDATE_ONLY:-}" = 1 ] && { echo "inputs OK: port=$port wait-timeout=$timeout waits=${waits[*]:-}"; exit 0; }
+[ "${HC_VALIDATE_ONLY:-}" = 1 ] && { echo "inputs OK: port=$port wait-timeout=$timeout waits=${waits[*]:-} verify-signature=${verify_sig:-0}"; exit 0; }
 
 command -v docker >/dev/null 2>&1 || fail "HomeCloud needs Docker on the runner (ubuntu-* runners have it)"
 docker info >/dev/null 2>&1 || fail "Docker is installed but not running"
@@ -49,24 +54,91 @@ case "$(uname -m)" in
 esac
 name="homecloud-$os-$arch"
 if [ "$version" = latest ]; then
-  base="https://github.com/$REPO/releases/latest/download"
-else
-  case "$version" in v*) ;; *) version="v$version" ;; esac
-  base="https://github.com/$REPO/releases/download/$version"
+  # Resolve "latest" to its tag: the signature names the tag it was made for, and
+  # every file then comes from the same release.
+  version=$(curl -fsSL --retry 3 -o /dev/null -w '%{url_effective}' "https://github.com/$REPO/releases/latest" | sed -n 's#.*/releases/tag/##p') || true
+  [ -n "$version" ] || fail "could not determine the latest HomeCloud release"
 fi
+case "$version" in v*) ;; *) version="v$version" ;; esac
+base="https://github.com/$REPO/releases/download/$version"
+
+sha256() {
+  if command -v sha256sum >/dev/null 2>&1; then
+    sha256sum "$1" | cut -d' ' -f1
+  else
+    shasum -a 256 "$1" | cut -d' ' -f1
+  fi
+}
+
+# signed_release VERSION: true for v0.5.0 and later, which are all signed.
+signed_release() {
+  local v=${1#v} major rest minor
+  v=${v%%-*}
+  major=${v%%.*}
+  rest=${v#*.}
+  minor=${rest%%.*}
+  case "$major$minor" in *[!0-9]* | "") return 1 ;; esac
+  [ "$major" -gt 0 ] || [ "$minor" -ge 5 ]
+}
+
+# cosign for the signature check: the runner's own (for example from
+# sigstore/cosign-installer), else this pinned release, checked against its SHA-256.
+COSIGN_VERSION=v3.1.3
+cosign_sha256() {
+  case "$1" in
+    linux-amd64) echo 4629c757b7618056f8ddd7e2625ae9fdd94c0372a65049520bc7d9df9efc7f71 ;;
+    linux-arm64) echo c5d324e091826b0d7a78eb16fef316450b4eb9aaec045611c08ba06f5e73220a ;;
+    darwin-amd64) echo 2347488e5d5b25336644024dfeca5601b190e91197a71a917bda44744aff106c ;;
+    darwin-arm64) echo 5cf948c2f4dfe59687bdd0b8523709067383e03982cc543475c8a7dc70e92a76 ;;
+  esac
+}
+find_cosign() {
+  if cosign=$(command -v cosign); then
+    return
+  fi
+  local dir="$tmp/homecloud-cosign" want got
+  want=$(cosign_sha256 "$os-$arch")
+  [ -n "$want" ] || fail "no pinned cosign for $os/$arch: install cosign first, or set verify-signature: false"
+  mkdir -p "$dir"
+  curl -fsSL --retry 3 "https://github.com/sigstore/cosign/releases/download/$COSIGN_VERSION/cosign-$os-$arch" -o "$dir/cosign" ||
+    fail "download of cosign $COSIGN_VERSION failed"
+  got=$(sha256 "$dir/cosign")
+  [ "$got" = "$want" ] || fail "checksum mismatch for cosign $COSIGN_VERSION (expected $want, got $got)"
+  chmod +x "$dir/cosign"
+  cosign="$dir/cosign"
+}
 
 echo "::group::Install HomeCloud ($version, $os/$arch)"
 dl="$tmp/homecloud-dl"
 rm -rf "$dl" && mkdir -p "$dl" "$bin_dir"
 curl -fsSL --retry 3 "$base/$name.tar.gz" -o "$dl/$name.tar.gz" || fail "download $base/$name.tar.gz failed"
 curl -fsSL --retry 3 "$base/checksums.txt" -o "$dl/checksums.txt" || fail "download $base/checksums.txt failed"
+
+# Releases from v0.5.0 on sign checksums.txt with Sigstore keyless signing in the
+# release workflow (checksums.txt.sigstore.json). Verify it when it exists, so the
+# checksum below is trusted; older releases are unsigned and get the checksum only.
+if [ -z "$verify_sig" ]; then
+  echo "verify-signature is false: checking the SHA-256 checksum only"
+elif curl -fsSL --retry 3 "$base/checksums.txt.sigstore.json" -o "$dl/checksums.txt.sigstore.json" 2>/dev/null; then
+  find_cosign
+  echo "verifying the release signature with $cosign"
+  identity="https://github.com/$REPO/.github/workflows/release.yml@refs/tags/$version"
+  if ! "$cosign" verify-blob "$dl/checksums.txt" --bundle "$dl/checksums.txt.sigstore.json" \
+    --certificate-identity "$identity" \
+    --certificate-oidc-issuer https://token.actions.githubusercontent.com >"$dl/cosign.log" 2>&1; then
+    cat "$dl/cosign.log"
+    fail "signature verification of checksums.txt failed for $version (expected signer $identity)"
+  fi
+  echo "signature OK (checksums.txt signed by $identity)"
+elif signed_release "$version"; then
+  fail "$version should be signed, but $base/checksums.txt.sigstore.json could not be downloaded (set verify-signature: false to skip the check)"
+else
+  echo "$version is not signed (releases before v0.5.0 were not): checking the SHA-256 checksum only"
+fi
+
 expected=$(awk -v f="$name.tar.gz" '$2 == f || $2 == "*" f {print $1}' "$dl/checksums.txt")
 [ -n "$expected" ] || fail "checksums.txt has no entry for $name.tar.gz"
-if command -v sha256sum >/dev/null 2>&1; then
-  actual=$(sha256sum "$dl/$name.tar.gz" | cut -d' ' -f1)
-else
-  actual=$(shasum -a 256 "$dl/$name.tar.gz" | cut -d' ' -f1)
-fi
+actual=$(sha256 "$dl/$name.tar.gz")
 [ "$expected" = "$actual" ] || fail "checksum mismatch for $name.tar.gz (expected $expected, got $actual)"
 echo "checksum OK ($actual)"
 tar -xzf "$dl/$name.tar.gz" -C "$dl"
@@ -75,6 +147,8 @@ rm -rf "$dl"
 [ -n "${GITHUB_PATH:-}" ] && echo "$bin_dir" >> "$GITHUB_PATH"
 "$bin_dir/homecloud" version
 echo "::endgroup::"
+# Tests of the download and verification stop here (test.yml).
+[ "${HC_INSTALL_ONLY:-}" = 1 ] && exit 0
 
 echo "Starting homecloud serve on 127.0.0.1:$port (data: $data_dir, log: $log)"
 mkdir -p "$data_dir"
