@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- After `homecloud restore` onto a host without the containers, RDS and ElastiCache instances are recreated from their restored data volumes at start (same engine, version, class, endpoint, address, password, groups) instead of showing `failed`; stopped ones stay stopped. Load balancers whose container is gone are re-provisioned, and EC2 container instances come back stopped with their volumes instead of being terminated (which deleted their volumes) (#106).
+
 ## 0.4.1 (2026-10-11)
 
 A redesigned console, a new website and easier ways to use HomeCloud in CI.
