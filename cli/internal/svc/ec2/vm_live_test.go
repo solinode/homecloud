@@ -272,7 +272,7 @@ func TestVMInstanceLifecycle(t *testing.T) {
 	})
 	i := f.vmWaitState(t, id, "running")
 	t.Logf("%s is running (%s, guest %s) after boot", id, i.Virtualization, ip)
-	if i.Virtualization != "kvm" && i.Virtualization != "emulated" || i.VMUser != vmTestUser {
+	if i.Virtualization != "kvm" && i.Virtualization != "emulated" && i.Virtualization != "hvf" || i.VMUser != vmTestUser {
 		t.Fatalf("instance reports virtualization %q, user %q", i.Virtualization, i.VMUser)
 	}
 	// The guest has the instance's private address with passt, or sits behind NAT in the

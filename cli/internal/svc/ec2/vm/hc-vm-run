@@ -8,8 +8,9 @@
 #
 # Environment: HC_VM_BASE (file in /images), HC_VM_DISK_GB, HC_VM_ARCH
 # (aarch64|x86_64), HC_VM_DNS (the resolver address the guest is given),
-# HC_VM_NET=user and HC_VM_HOSTFWD (user-mode networking, see below).
-# The arguments are the QEMU command line.
+# HC_VM_NET=user and HC_VM_HOSTFWD (user-mode networking, see below),
+# HC_VM_HOST=1 (QEMU runs on the Docker host's host, see host.go in the vm package).
+# The arguments are the QEMU command line (none in host mode).
 set -eu
 
 disk=/vm/disk.qcow2
@@ -76,7 +77,7 @@ fi
 # namespace (127.0.0.11), so names resolve as they do for container instances.
 dns=""
 if [ -n "${HC_VM_DNS:-}" ]; then dns="-D $HC_VM_DNS --dns-forward $HC_VM_DNS --dns-host 127.0.0.11"; fi
-rm -f /run/passt.dead /tmp/passt.sock /run/qmp.sock /run/serial.sock /run/qga.sock
+rm -f /run/passt.dead /tmp/passt.sock /run/qmp.sock /run/serial.sock /run/qga.sock /run/nbd.sock /run/hc-vm-host.ready /run/hc-vm-host.exit
 if [ "${HC_VM_NET:-}" != "user" ]; then
   # -d logs each flow: it is what tells why passt exited. The log is appended
   # to /run/passt.log and cut back to its last MiB when it passes 4 MiB.
@@ -121,6 +122,11 @@ if [ "${HC_VM_NET:-}" != "user" ]; then
     HC_VM_NET=user
   fi
 fi
+if [ -n "${HC_VM_HOST:-}" ] && [ "${HC_VM_NET:-}" = "user" ]; then
+  # QEMU on the host has no way into this network namespace but passt.
+  echo "[homecloud] passt did not start, and a guest run on the host needs it" >&2
+  exit 1
+fi
 if [ "${HC_VM_NET:-}" = "user" ]; then
   # QEMU's user-mode networking: the guest sits behind NAT at 10.0.2.15 and
   # only the ports HC_VM_HOSTFWD lists (",hostfwd=tcp::22-:22,...", the ports
@@ -133,6 +139,38 @@ if [ "${HC_VM_NET:-}" = "user" ]; then
     esac
     set -- "$@" "$a"
   done
+fi
+
+if [ -n "${HC_VM_HOST:-}" ]; then
+  # Host mode: QEMU runs on the host and reaches the disks through
+  # qemu-storage-daemon's NBD server and the network through passt's socket
+  # (both over docker exec, see host.go). This container lives as long as QEMU:
+  # the host runner writes its exit status to /run/hc-vm-host.exit.
+  # (Options apply in order: the NBD server comes before its exports.)
+  set -- \
+    --nbd-server addr.type=unix,addr.path=/run/nbd.sock \
+    --blockdev driver=file,node-name=root-file,filename=/vm/disk.qcow2 \
+    --blockdev driver=qcow2,node-name=root,file=root-file \
+    --blockdev driver=file,node-name=seed,filename=/vm/seed.iso,read-only=on \
+    --export type=nbd,id=x-root,node-name=root,name=root,writable=on \
+    --export type=nbd,id=x-seed,node-name=seed,name=seed
+  if [ "$HC_VM_ARCH" = "aarch64" ]; then
+    set -- "$@" \
+      --blockdev driver=file,node-name=fw-vars,filename=/vm/efivars.fd \
+      --export type=nbd,id=x-fw-vars,node-name=fw-vars,name=fw-vars,writable=on
+  fi
+  for d in ${HC_VM_DISKS:-}; do
+    id=${d%%:*}
+    set -- "$@" \
+      --blockdev "driver=file,node-name=d-$id,filename=/disks/$id/disk.img" \
+      --export "type=nbd,id=x-$id,node-name=d-$id,name=$id,writable=on"
+  done
+  qemu-storage-daemon "$@" &
+  n=0
+  while [ ! -S /run/nbd.sock ] && [ $n -lt 100 ]; do n=$((n+1)); sleep 0.1; done
+  [ -S /run/nbd.sock ] || { echo "[homecloud] qemu-storage-daemon did not start" >&2; exit 1; }
+  touch /run/hc-vm-host.ready
+  set -- /bin/sh -c 'while [ ! -f /run/hc-vm-host.exit ]; do sleep 0.2; done; exit "$(cat /run/hc-vm-host.exit)"'
 fi
 
 echo "[homecloud] starting the virtual machine"

@@ -133,7 +133,7 @@ Run `homecloud aws-env` to get the environment variables. For Terraform, point t
 
 | Service | AWS equivalent | Status | Notes |
 | --- | --- | --- | --- |
-| Compute | EC2, EBS, AMIs | AWS API | Instances are **containers**; `ami-ubuntu-24-04-vm` and `ami-debian-12-vm` boot real **virtual machines** (QEMU, KVM when the host has `/dev/kvm`, emulated otherwise) on the same VPC networking, with extra volumes, snapshots, images, run-command and a serial console. Key pairs, user data, volumes, snapshots, launch templates, Elastic IPs (records only), IMDSv1/v2, browser shell |
+| Compute | EC2, EBS, AMIs | AWS API | Instances are **containers**; `ami-ubuntu-24-04-vm` and `ami-debian-12-vm` boot real **virtual machines** (QEMU, KVM when the host has `/dev/kvm`, Hypervisor.framework on Apple Silicon Macs with QEMU installed, emulated otherwise) on the same VPC networking, with extra volumes, snapshots, images, run-command and a serial console. Key pairs, user data, volumes, snapshots, launch templates, Elastic IPs (records only), IMDSv1/v2, browser shell |
 | Auto Scaling | EC2 Auto Scaling | AWS API | Target tracking on CPU; scheduled actions and lifecycle hooks are not implemented |
 | Networking | VPC, security groups | AWS API | Security groups enforced inside the VPC; network ACLs recorded, not enforced; no peering; IPv4 only |
 | Load balancing | ELB v2 | AWS API | Application load balancers (HTTP/HTTPS, path/host rules). No network load balancers |
@@ -229,7 +229,7 @@ Releases are signed (from v0.5.0): the release workflow signs `checksums.txt` an
 
 - **Shipped in [0.4.0](https://github.com/solinode/homecloud/releases/tag/v0.4.0):** VM-backed EC2 instances (QEMU, KVM when available), the container image `ghcr.io/solinode/homecloud`, a GitHub Action and testcontainers modules for Go and Python, a nightly Terraform modules compatibility suite ([17 of 17 pass](docs/compatibility.md)), and fixes from two security audits ([platform](docs/security-audit-2026-10.md), [VM instances](docs/security-audit-vm-2026-10.md)).
 - **Shipped in [0.5.0](https://github.com/solinode/homecloud/releases/tag/v0.5.0):** signed releases (Sigstore) with SBOMs and build provenance, verified by the installer and `homecloud upgrade`; automatic backups before upgrades and `homecloud upgrade --rollback`; restores that bring back databases, caches, load balancers and instances on a new machine; Prometheus metrics and a system status page ([docs/monitoring.md](docs/monitoring.md)); Testcontainers modules for Java and Node.
-- **Next:** closing the AWS API gaps users hit most, verified CDK and Pulumi support, native VM acceleration on macOS, passt networking for VMs on Ubuntu 24.04 hosts ([#90](https://github.com/solinode/homecloud/issues/90)), and multiple accounts with SSO for teams and classrooms.
+- **Next:** closing the AWS API gaps users hit most, verified CDK and Pulumi support, passt networking for VMs on Ubuntu 24.04 hosts ([#90](https://github.com/solinode/homecloud/issues/90)), and multiple accounts with SSO for teams and classrooms.
 - **Planned:** multi-node clusters ([#55](https://github.com/solinode/homecloud/issues/55), [design](docs/design/multi-node.md)), edge compute and hardware integrations ([#56](https://github.com/solinode/homecloud/issues/56), [design](docs/design/edge.md)).
 
 See the [open issues](https://github.com/solinode/homecloud/issues) for everything planned.

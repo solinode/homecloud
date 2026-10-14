@@ -73,19 +73,20 @@ export function PublicPorts({ instance, empty = "-", compact }: { instance: Inst
   )
 }
 
-export const isVMInstance = (i: Pick<Instance, "virtualization">) => i.virtualization === "kvm" || i.virtualization === "emulated"
+export const isVMInstance = (i: Pick<Instance, "virtualization">) => !!i.virtualization
 
 export const isVMImage = (im: Pick<Image, "virtualization" | "vm_base" | "name">) => im.virtualization === "vm" || !!im.vm_base
 
-/** "Container", "VM · KVM" or "VM · emulated". */
+/** "Container", "VM · KVM", "VM · HVF" or "VM · emulated". */
 export function instanceKind(i: Pick<Instance, "virtualization">) {
   if (!isVMInstance(i)) return "Container"
+  if (i.virtualization === "hvf") return "VM · HVF"
   return i.virtualization === "kvm" ? "VM · KVM" : "VM · emulated"
 }
 
-/** Type badge for an instance: Container / VM · KVM / VM · emulated (slow). */
+/** Type badge for an instance: Container / VM · KVM / VM · HVF / VM · emulated (slow). */
 export function InstanceKindBadge({ instance }: { instance: Pick<Instance, "virtualization"> }) {
-  const accent = !isVMInstance(instance) ? "info" : instance.virtualization === "kvm" ? "violet" : "warning"
+  const accent = !isVMInstance(instance) ? "info" : instance.virtualization === "kvm" || instance.virtualization === "hvf" ? "violet" : "warning"
   return (
     <Tag accent={accent} title={instance.virtualization === "emulated" ? "No /dev/kvm on the host: the CPU is emulated, so this VM is slow" : undefined}>
       {instanceKind(instance)}

@@ -66,7 +66,8 @@ func readLine(br *bufio.Reader, max int) ([]byte, error) {
 
 // qgaCall sends one command to the guest agent and returns its reply. ctx
 // bounds the whole call, including waiting for the agent and for other callers.
-func (s *Service) qgaCall(ctx context.Context, cid string, req []byte) (vm.QGAReply, error) {
+func (s *Service) qgaCall(ctx context.Context, inst Instance, req []byte) (vm.QGAReply, error) {
+	cid := inst.ContainerID
 	slot := qgaSlot(cid)
 	select {
 	case slot <- struct{}{}:
@@ -76,20 +77,35 @@ func (s *Service) qgaCall(ctx context.Context, cid string, req []byte) (vm.QGARe
 	}
 	ectx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	ex, err := s.env.Docker.C.CreateExec(docker.CreateExecOptions{
-		Container: cid, Cmd: vm.QGAAttachCommand(), AttachStdin: true, AttachStdout: true, AttachStderr: true, Context: ectx,
-	})
-	if err != nil {
-		return vm.QGAReply{}, err
-	}
 	inR, inW := io.Pipe()
 	outR, outW := io.Pipe()
 	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		defer outW.Close()
-		_ = s.env.Docker.C.StartExec(ex.ID, docker.StartExecOptions{InputStream: inR, OutputStream: outW, ErrorStream: io.Discard, Context: ectx})
-	}()
+	if vmHostMode(inst) {
+		// QEMU runs on the host: its agent socket is in the guest's run directory.
+		c, err := s.vmHostDial(ectx, inst, vm.HostQGASocket)
+		if err != nil {
+			return vm.QGAReply{}, errGuestAgent
+		}
+		go func() { <-ectx.Done(); c.Close() }()
+		go func() { _, _ = io.Copy(c, inR) }()
+		go func() {
+			defer close(done)
+			defer outW.Close()
+			_, _ = io.Copy(outW, c)
+		}()
+	} else {
+		ex, err := s.env.Docker.C.CreateExec(docker.CreateExecOptions{
+			Container: cid, Cmd: vm.QGAAttachCommand(), AttachStdin: true, AttachStdout: true, AttachStderr: true, Context: ectx,
+		})
+		if err != nil {
+			return vm.QGAReply{}, err
+		}
+		go func() {
+			defer close(done)
+			defer outW.Close()
+			_ = s.env.Docker.C.StartExec(ex.ID, docker.StartExecOptions{InputStream: inR, OutputStream: outW, ErrorStream: io.Discard, Context: ectx})
+		}()
+	}
 	defer func() {
 		inW.Close()
 		cancel()
@@ -176,7 +192,7 @@ func (s *Service) guestExec(ctx context.Context, inst Instance, command string, 
 	call := func(req []byte) (vm.QGAReply, error) {
 		cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
 		defer cancel()
-		return s.qgaCall(cctx, inst.ContainerID, req)
+		return s.qgaCall(cctx, inst, req)
 	}
 	r, err := call(vm.QGAExecRequest(path, args))
 	if err != nil {

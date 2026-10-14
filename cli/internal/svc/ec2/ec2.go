@@ -9,6 +9,7 @@ import (
 	"log"
 	"net/http"
 	"net/netip"
+	goruntime "runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -1024,6 +1025,9 @@ func (s *Service) instanceGone(i Instance) {
 	if s.imds != nil {
 		s.imds.forget(i.ID)
 	}
+	if i.IsVM() && goruntime.GOOS == "darwin" {
+		go s.vmHostCleanup(i.ID)
+	}
 }
 
 func (s *Service) modify(c *httpx.Ctx) (any, error) {
@@ -1460,6 +1464,9 @@ func (s *Service) dns(vpcID string) []string {
 
 // Recover settles instances whose launch or state change was interrupted by a restart.
 func (s *Service) Recover() {
+	if goruntime.GOOS == "darwin" && s.env.Docker != nil {
+		s.vmHostWatch() // guests on this Mac whose containers kept running
+	}
 	for _, i := range store.List[Instance](s.env.Store, cInstances) {
 		switch i.State {
 		case "pending", "stopping", "shutting-down":

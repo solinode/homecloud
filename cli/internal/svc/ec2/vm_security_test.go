@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/homecloudhq/homecloud/cli/internal/svc/ec2/vm"
@@ -51,7 +52,7 @@ func TestVMFlattenHasNoNetwork(t *testing.T) {
 // The VM container: no extra capabilities, the image cache and AMI read-only,
 // the console log bounded, and Docker's seccomp profile widened only by passt's four calls.
 func TestVMContainerConfinement(t *testing.T) {
-	archOnce.Do(func() { arch = "x86_64" }) // no Docker here
+	fakeHostArch(t, "x86_64") // no Docker here
 	env := svctest.Env(t)
 	s := New(env, vpc.New(env))
 	inst := Instance{ID: "i-vmsec", State: "running", Virtualization: "kvm", VMBase: "ubuntu-24.04", VMAMI: "hc-ami-x",
@@ -90,6 +91,40 @@ func TestVMContainerConfinement(t *testing.T) {
 	}
 	if strings.Contains(spec.Cmd[0], "qemu") && !strings.Contains(strings.Join(spec.Cmd, " "), "-sandbox "+vm.QEMUSandbox) {
 		t.Errorf("QEMU runs without its own sandbox: %v", spec.Cmd)
+	}
+}
+
+// fakeHostArch pins hostArch for a test without Docker, and forgets it after,
+// so that later tests in the binary ask the real Docker host.
+func fakeHostArch(t *testing.T, a string) {
+	archOnce = sync.Once{}
+	archOnce.Do(func() { arch = a })
+	t.Cleanup(func() { archOnce, arch = sync.Once{}, "" })
+}
+
+// A guest run on the Mac (hvf): the VM container runs no QEMU and needs no
+// device; its entrypoint serves the disks and passt to the host runner.
+func TestVMContainerHostMode(t *testing.T) {
+	fakeHostArch(t, "arm64") // no Docker here
+	env := svctest.Env(t)
+	s := New(env, vpc.New(env))
+	inst := Instance{ID: "i-vmhvf", State: "running", Virtualization: virtHVF, VMBase: "ubuntu-24.04",
+		VCPUs: 2, MemoryMB: 2048, PrivateIP: "10.0.0.6", PrivateDNS: "ip-10-0-0-6.internal", VMDiskGB: 8,
+		Volumes: []VolumeAttachment{{VolumeID: "vol-root", MountPath: vm.DiskDir, Device: "/dev/xvda"}}}
+	spec := s.vmRunSpec(inst, "net")
+	if len(spec.Cmd) != 0 || len(spec.Devices) != 0 || len(spec.CapAdd) != 0 {
+		t.Errorf("host-mode VM container: cmd %v, devices %v, caps %v", spec.Cmd, spec.Devices, spec.CapAdd)
+	}
+	if spec.Env["HC_VM_HOST"] != "1" || spec.Labels[labelVMHost] != "1" {
+		t.Errorf("host mode not marked: env %v, labels %v", spec.Env, spec.Labels)
+	}
+	if spec.MemoryMB >= inst.MemoryMB {
+		t.Errorf("the container is sized for the guest (%d MiB), which runs on the host", spec.MemoryMB)
+	}
+	// Fallback: without passt the guest moves into the container, emulated.
+	inst.Virtualization, inst.VMNetwork = "emulated", "user"
+	if spec := s.vmRunSpec(inst, "net"); spec.Env["HC_VM_HOST"] != "" || len(spec.Cmd) == 0 {
+		t.Errorf("emulated guest in host mode: %v", spec.Env)
 	}
 }
 
