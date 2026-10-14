@@ -39,13 +39,15 @@ func SelfSignedCert(dataDir, publicHost string) (string, string, error) {
 		ExtKeyUsage:           []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
 		BasicConstraintsValid: true,
 		IsCA:                  true,
-		DNSNames:              []string{"localhost"},
-		IPAddresses:           []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+		// S3 Control (which the Terraform and Pulumi AWS providers call for bucket
+		// tags) puts the account ID in front of the host: 123456789012.localhost.
+		DNSNames:    []string{"localhost", "*.localhost"},
+		IPAddresses: []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
 	}
 	if ip := net.ParseIP(publicHost); ip != nil {
 		tmpl.IPAddresses = append(tmpl.IPAddresses, ip)
 	} else if publicHost != "" && publicHost != "localhost" {
-		tmpl.DNSNames = append(tmpl.DNSNames, publicHost)
+		tmpl.DNSNames = append(tmpl.DNSNames, publicHost, "*."+publicHost)
 	}
 	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
 	if err != nil {

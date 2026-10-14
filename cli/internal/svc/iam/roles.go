@@ -132,7 +132,8 @@ func (s *Service) roleContext(r Role, t tempCred) CondContext {
 	c := CondContext{
 		"aws:userid": {r.ID + ":" + t.SessionName}, "aws:principalarn": {r.ARN},
 		"aws:principalaccount": {s.env.AccountID}, "aws:principaltype": {"AssumedRole"},
-		"aws:tokenissuetime": {t.Expires.Add(-time.Hour).UTC().Format(time.RFC3339)},
+		"aws:resourceaccount": {s.env.AccountID}, // every resource is in the server's one account
+		"aws:tokenissuetime":  {t.Expires.Add(-time.Hour).UTC().Format(time.RFC3339)},
 	}
 	if t.Issued != nil {
 		c["aws:tokenissuetime"] = []string{t.Issued.UTC().Format(time.RFC3339)}

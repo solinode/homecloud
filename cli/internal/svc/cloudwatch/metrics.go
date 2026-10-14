@@ -287,7 +287,7 @@ func (s *Service) collect(ctx context.Context) {
 	if s.env.Docker == nil {
 		return
 	}
-	cs, err := s.env.Docker.ManagedContainers()
+	cs, err := s.env.Docker.OwnContainers()
 	if err != nil {
 		log.Printf("cloudwatch: list containers: %v", err)
 		return

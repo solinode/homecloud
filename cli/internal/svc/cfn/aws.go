@@ -876,7 +876,17 @@ func (s *Service) awsExecuteChangeSet(q *awsapi.Req) (any, error) {
 }
 
 func (s *Service) awsDeleteChangeSet(q *awsapi.Req) (any, error) {
+	ref := q.Param("ChangeSetName")
 	cs, err := s.csAuth(q, "cloudformation:DeleteChangeSet")
+	var ce *core.Error
+	if err != nil && errors.As(err, &ce) && ce.Code == "ChangeSetNotFound" && ref != "" && !strings.HasPrefix(ref, "arn:") {
+		// As in AWS, deleting a change set by name succeeds when the stack
+		// exists but the change set does not: cdk diff and cdk deploy
+		// clear their change set name this way before creating it.
+		if _, serr := s.authStack(q, "cloudformation:DeleteChangeSet", "StackName"); serr == nil {
+			return nil, nil
+		}
+	}
 	if err != nil {
 		return nil, err
 	}

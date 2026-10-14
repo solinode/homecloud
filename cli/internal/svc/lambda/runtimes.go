@@ -77,9 +77,9 @@ func provided(tag, label string) Runtime {
 }
 
 var runtimes = []Runtime{
-	py("3.13"), py("3.12"), py("3.11"), py("3.10"), py("3.9"),
-	node("22"), node("20"), node("18"),
-	java("21"), java("17"),
+	py("3.14"), py("3.13"), py("3.12"), py("3.11"), py("3.10"), py("3.9"),
+	node("24"), node("22"), node("20"), node("18"),
+	java("25"), java("21"), java("17"),
 	{Name: "ruby3.3", Label: "Ruby 3.3", Image: baseImages + "ruby:3.3", DefaultHandler: "lambda_function.lambda_handler",
 		DefaultFile: "lambda_function.rb", Template: rubyTemplate, dotted: true},
 	{Name: "dotnet8", Label: ".NET 8", Image: baseImages + "dotnet:8", DefaultHandler: "Function::Function.Handler::FunctionHandler"},

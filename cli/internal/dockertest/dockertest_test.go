@@ -1,6 +1,7 @@
 package dockertest
 
 import (
+	"context"
 	"os/exec"
 	"testing"
 	"time"
@@ -106,5 +107,39 @@ func TestRemoveOnlyMatchingAccount(t *testing.T) {
 	}
 	if !volumeExists(d, b) {
 		t.Error("Remove deleted another test account's volume")
+	}
+}
+
+// OwnContainers leaves out containers of other installations and of other
+// tests on the same Docker host (log groups, metrics and the Lambda reaper use it).
+func TestOwnContainers(t *testing.T) {
+	d := Start(t)
+	other := NewAccount()
+	t.Cleanup(func() { Remove(d, other, t.Logf) })
+	if err := d.EnsureImage(context.Background(), "alpine:3.20"); err != nil {
+		t.Skip("cannot pull alpine: ", err)
+	}
+	mk := func(name string, labels map[string]string) string {
+		t.Helper()
+		c, err := d.C.CreateContainer(docker.CreateContainerOptions{Name: name, Config: &docker.Config{Image: "alpine:3.20", Labels: labels}})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return c.ID
+	}
+	suffix := core.RandHex(4)
+	mine := mk("hctest-own-"+suffix, runtime.Labels("lambda", "fn", nil))
+	theirs := mk("hctest-theirs-"+suffix, map[string]string{core.LabelManaged: "true", core.LabelService: "lambda",
+		core.LabelResource: "fn", core.LabelAccount: other})
+	cs, err := d.OwnContainers()
+	if err != nil {
+		t.Fatal(err)
+	}
+	seen := map[string]bool{}
+	for _, c := range cs {
+		seen[c.ID] = true
+	}
+	if !seen[mine] || seen[theirs] {
+		t.Fatalf("OwnContainers: mine %v, other account's %v", seen[mine], seen[theirs])
 	}
 }

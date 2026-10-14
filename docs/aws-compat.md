@@ -2,9 +2,10 @@
 
 HomeCloud speaks the AWS wire protocols, so the AWS CLI, the AWS SDKs and tools built on them
 work against it. The test suite drives the real AWS CLI, boto3 and Terraform; CloudFormation
-(including CDK-synthesized templates) is covered too. Other SDKs and Pulumi use the same
-protocols but are not tested yet. Point them at your HomeCloud endpoint and use a HomeCloud
-access key:
+(including CDK-synthesized templates) is covered too. The JavaScript v3, Go v2 and Java v2 SDKs
+([below](#sdks)), [`cdk bootstrap` and `cdk deploy`](../examples/cdk/basic/README.md) and
+[Pulumi](../examples/pulumi/basic/README.md) have been run against it by hand. Point them at your
+HomeCloud endpoint and use a HomeCloud access key:
 
 ```bash
 export AWS_ENDPOINT_URL=http://localhost:8080   # your HomeCloud API address
@@ -24,6 +25,67 @@ Temporary credentials work as in AWS: create an IAM role whose trust policy allo
 (or a service such as `lambda.amazonaws.com`), then `aws sts assume-role`. Functions, tasks and
 instances with a role receive credentials and `AWS_ENDPOINT_URL` in their environment, so SDK
 calls from inside them reach HomeCloud.
+
+## SDKs
+
+Every SDK below reads `AWS_ENDPOINT_URL`, the keys and `AWS_REGION` from the environment, so after
+`eval "$(homecloud aws-env)"` the default client configuration already reaches HomeCloud. The one
+setting each needs on top is **path-style S3 addressing**, because HomeCloud serves buckets by path.
+The snippets set the endpoint explicitly to show where it goes. Runnable programs that create a
+bucket, a queue and a table, round-trip an object, a message and an item, call
+`sts get-caller-identity` and clean up are in [`examples/sdk`](../examples/sdk); each was run
+against HomeCloud over HTTP and over HTTPS (`--tls-self-signed`).
+
+**JavaScript v3** (`@aws-sdk/client-*` 3.1151.0, Node.js 24), [`examples/sdk/javascript`](../examples/sdk/javascript/index.mjs):
+
+```js
+import { S3Client } from "@aws-sdk/client-s3";
+import { SQSClient } from "@aws-sdk/client-sqs";
+
+const config = {
+  endpoint: process.env.AWS_ENDPOINT_URL,      // http://localhost:8080
+  region: "us-east-1",
+  credentials: { accessKeyId: process.env.AWS_ACCESS_KEY_ID, secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY },
+};
+const s3 = new S3Client({ ...config, forcePathStyle: true });
+const sqs = new SQSClient(config);              // DynamoDB, STS, ... the same way
+```
+
+With HTTPS and a self-signed certificate, Node.js does not read `AWS_CA_BUNDLE`; export
+`NODE_EXTRA_CA_CERTS="$AWS_CA_BUNDLE"`.
+
+**Go v2** (`github.com/aws/aws-sdk-go-v2` 1.47.3, `service/s3` 1.114.3), [`examples/sdk/go`](../examples/sdk/go/main.go):
+
+```go
+cfg, err := config.LoadDefaultConfig(ctx, config.WithRegion("us-east-1"))
+cfg.BaseEndpoint = aws.String(os.Getenv("AWS_ENDPOINT_URL")) // optional: AWS_ENDPOINT_URL is read anyway
+
+s3c := s3.NewFromConfig(cfg, func(o *s3.Options) { o.UsePathStyle = true })
+q := sqs.NewFromConfig(cfg)                                    // DynamoDB, STS, ... the same way
+```
+
+`AWS_CA_BUNDLE` is honored for HTTPS.
+
+**Java v2** (`software.amazon.awssdk` 2.55.16, Java 17), [`examples/sdk/java`](../examples/sdk/java/src/main/java/Example.java):
+
+```java
+URI endpoint = URI.create(System.getenv("AWS_ENDPOINT_URL"));
+var creds = StaticCredentialsProvider.create(AwsBasicCredentials.create(
+        System.getenv("AWS_ACCESS_KEY_ID"), System.getenv("AWS_SECRET_ACCESS_KEY")));
+
+S3Client s3 = S3Client.builder().endpointOverride(endpoint).region(Region.US_EAST_1)
+        .credentialsProvider(creds).forcePathStyle(true).build();
+SqsClient sqs = SqsClient.builder().endpointOverride(endpoint).region(Region.US_EAST_1)
+        .credentialsProvider(creds).build();      // DynamoDB, STS, ... the same way
+```
+
+For HTTPS with a self-signed certificate, import it into a trust store
+(`keytool -importcert -file "$AWS_CA_BUNDLE" -keystore homecloud.p12 -storepass changeit -noprompt`) and
+run with `-Djavax.net.ssl.trustStore=homecloud.p12 -Djavax.net.ssl.trustStorePassword=changeit`.
+
+Nothing failed in these runs once HomeCloud sent the `X-Amz-Crc32` header on JSON responses: the Go SDK
+checks DynamoDB response bodies against it and logged `response did not match expected checksum` on
+every DynamoDB call without it.
 
 ## Policies and authorization
 
@@ -84,7 +146,7 @@ that is not itself a trusted proxy is the source address, and `X-Forwarded-Proto
 | STS | sts | awsQuery | GetCallerIdentity, AssumeRole, GetSessionToken |
 | IAM | iam | awsQuery | Users, groups, roles, managed policies (with versions, `arn:aws:iam::aws:policy/...`), inline policies, access keys, instance profiles, permissions boundaries, conditions, simulation |
 | S3 | s3 | restXml | Objects, multipart, presigned URLs (SigV4 and SigV2), chunked/trailer uploads, versioning, lifecycle, bucket policies with condition keys, tagging, website; path and virtual-host addressing |
-| Lambda | lambda | restJson1 | Functions (zip, S3, container image), invoke (sync/async/tail), versions, aliases, layers, permissions, concurrency, destinations, event source mappings (SQS, DynamoDB streams), function URLs |
+| Lambda | lambda | restJson1 | Functions (zip, S3, container image), invoke (sync/async/tail), versions, aliases, layers, permissions, concurrency, destinations, event source mappings (SQS, DynamoDB streams), function URLs, `LoggingConfig` (custom log group; `JSON` format makes the runtime log application lines as JSON; the START, END and REPORT lines stay text) |
 | DynamoDB | dynamodb | awsJson 1.0 | Tables, GSIs/LSIs, all item ops with expressions, batch, transactions, PartiQL, TTL, streams |
 | SQS | sqs | awsJson 1.0 + awsQuery | Standard and FIFO queues, DLQs and redrive, batch ops, long polling, queue policies |
 | SNS | sns | awsQuery | Topics (incl. FIFO), subscriptions (sqs, lambda, http/s, email), filter policies, topic policies, signed messages |
@@ -236,6 +298,19 @@ clean against a fresh install; the README shows how to check each piece.
 
 [Terraform compatibility](compatibility.md) runs popular community modules (`terraform-aws-modules`) the
 same way, nightly, and publishes which ones pass.
+
+## CDK and Pulumi
+
+[`examples/cdk/basic`](../examples/cdk/basic/README.md) runs the stock CDK CLI end to end: `cdk bootstrap`
+(the default modern bootstrap template, unchanged), `cdk deploy`, `cdk diff` and `cdk destroy` of a stack
+with an SQS queue feeding a Lambda function that writes to a DynamoDB table. HomeCloud must be served over
+HTTPS (`homecloud serve --tls-self-signed` is enough) because the bootstrap staging bucket's policy denies
+requests without TLS; constructs that need CloudFormation custom resources (`autoDeleteObjects`,
+`BucketDeployment`, `logRetention`) do not deploy yet.
+
+[`examples/pulumi/basic`](../examples/pulumi/basic/README.md) deploys S3, SQS, DynamoDB, IAM and a
+queue-triggered Lambda function with `@pulumi/aws` and a local state backend; `pulumi up`, `preview`,
+`refresh` and `destroy` run clean over HTTP and HTTPS.
 
 ## Adding operations (for contributors)
 

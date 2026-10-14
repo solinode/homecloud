@@ -451,6 +451,22 @@ func (d *Docker) ManagedContainers() ([]docker.APIContainers, error) {
 	return d.C.ListContainers(docker.ListContainersOptions{All: true, Filters: map[string][]string{"label": {core.LabelManaged + "=true"}}})
 }
 
+// OwnContainers lists the managed containers of this installation (see Mine),
+// leaving out those of another account or a running test on the same host.
+func (d *Docker) OwnContainers() ([]docker.APIContainers, error) {
+	cs, err := d.ManagedContainers()
+	if err != nil {
+		return nil, err
+	}
+	out := cs[:0]
+	for _, c := range cs {
+		if Mine(c.Labels) {
+			out = append(out, c)
+		}
+	}
+	return out, nil
+}
+
 // ---- stats ----
 
 type Usage struct {
