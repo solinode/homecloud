@@ -80,7 +80,7 @@ func excluded(rel string) bool {
 	base := filepath.Base(rel)
 	switch {
 	case rel == "server.log", strings.HasSuffix(base, ".tmp"), strings.HasSuffix(base, ".migrate"),
-		strings.HasPrefix(rel, "backup-legacy-region"), strings.HasPrefix(rel, "backups"):
+		strings.HasPrefix(rel, "backup-legacy-region"), strings.HasPrefix(rel, "backups"), strings.HasPrefix(rel, UpgradeBackupsDir):
 		return true
 	}
 	return false

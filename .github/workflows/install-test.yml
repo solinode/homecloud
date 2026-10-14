@@ -71,11 +71,18 @@ jobs:
             echo "waiting for ${HOMECLOUD_VERSION} to be published ($i/60)"; sleep 30
           done
           echo "::error::release ${HOMECLOUD_VERSION} was not published within 30 minutes"; exit 1
+      # With cosign on PATH, install.sh also verifies the release signature
+      # (v0.5.0 and later); the other jobs cover the checksum-only path.
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+        if: matrix.name == 'ubuntu'
       - name: Install with scripts/install.sh
         shell: bash
         run: |
-          sh scripts/install.sh
+          sh scripts/install.sh | tee install.log
           command -v homecloud
+          if command -v cosign >/dev/null && [ "${HOMECLOUD_VERSION#v0.[0-4].}" = "$HOMECLOUD_VERSION" ] && [ -n "$HOMECLOUD_VERSION" ]; then
+            grep -q "Verified the release signature" install.log
+          fi
       - name: homecloud version
         run: homecloud version
       - name: Start HomeCloud

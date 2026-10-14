@@ -1,25 +1,70 @@
 name: Release
+# Publishes a release for every v* tag: binaries, SBOMs, checksums.txt and its
+# Sigstore signature, build provenance, and the container image (signed, with
+# an SBOM attestation and provenance). Tags with a suffix (v0.5.0-rc1) make a
+# pre-release, which is how to rehearse this workflow. See SECURITY.md for how
+# to verify what it publishes.
 on:
   push:
     tags: ["v*"]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # create the GitHub release
+      id-token: write # Sigstore keyless signing and attestations (GitHub OIDC)
+      attestations: write # build provenance
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
         with:
           fetch-depth: 0
-      - uses: actions/setup-go@v5
+          persist-credentials: false
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
           go-version-file: cli/go.mod
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: 22
       - run: make release VERSION=${GITHUB_REF_NAME#v}
+      - uses: anchore/sbom-action/download-syft@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        id: syft
+        with:
+          syft-version: v1.54.1
+      - name: SBOMs and checksums
+        env:
+          SYFT: ${{ steps.syft.outputs.cmd }}
+        run: |
+          cd dist
+          # One SPDX SBOM per archive, from the Go build info in its binary.
+          for a in homecloud-*.tar.gz homecloud-*.zip; do
+            n=${a%.tar.gz}; n=${n%.zip}
+            mkdir -p "$RUNNER_TEMP/sbom/$n"
+            case "$a" in
+              *.zip) unzip -q "$a" -d "$RUNNER_TEMP/sbom/$n" ;;
+              *) tar -xzf "$a" -C "$RUNNER_TEMP/sbom/$n" ;;
+            esac
+            "$SYFT" scan "dir:$RUNNER_TEMP/sbom/$n" --source-name "$n" --source-version "${GITHUB_REF_NAME#v}" -o "spdx-json=$n.spdx.json"
+          done
+          # checksums.txt lists the archives and SBOMs, so its signature covers them all.
+          sha256sum homecloud-*.tar.gz homecloud-*.zip homecloud-*.spdx.json > checksums.txt
+          cat checksums.txt
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign checksums.txt
+        run: |
+          cosign sign-blob --yes --bundle dist/checksums.txt.sigstore.json dist/checksums.txt
+          # Check it the way users and "homecloud upgrade" will.
+          cosign verify-blob dist/checksums.txt --bundle dist/checksums.txt.sigstore.json \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-path: |
+            dist/*.tar.gz
+            dist/*.zip
       - name: Publish GitHub release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -39,19 +84,25 @@ jobs:
     permissions:
       contents: read
       packages: write
+      id-token: write # Sigstore keyless signing and attestations (GitHub OIDC)
+      attestations: write # build provenance
+    env:
+      IMAGE: ghcr.io/solinode/homecloud
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3.7.0
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3.12.0
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3.7.0
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5.10.0
         with:
-          images: ghcr.io/solinode/homecloud
+          images: ${{ env.IMAGE }}
           # v0.4.0 -> 0.4.0 and latest; v0.4.0-rc1 -> 0.4.0-rc1 only.
           tags: |
             type=semver,pattern={{version}}
@@ -64,7 +115,8 @@ jobs:
         run: |
           echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
           echo "commit=$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
-      - uses: docker/build-push-action@v6
+      - id: build
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6.19.2
         with:
           context: .
           platforms: linux/amd64,linux/arm64
@@ -76,3 +128,30 @@ jobs:
             COMMIT=${{ steps.v.outputs.commit }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+      - uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Sign the image
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: cosign sign --yes "$IMAGE@$DIGEST"
+      - name: Image SBOM
+        uses: anchore/sbom-action@66cbf4bc1f1c0d2edc94016e65bc221b6bb0ad6c # v0.24.3
+        with:
+          image: ${{ env.IMAGE }}@${{ steps.build.outputs.digest }}
+          syft-version: v1.54.1
+          format: spdx-json
+          output-file: image.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+      - name: Attach the SBOM attestation
+        env:
+          DIGEST: ${{ steps.build.outputs.digest }}
+        run: |
+          cosign attest --yes --type spdxjson --predicate image.spdx.json "$IMAGE@$DIGEST"
+          cosign verify "$IMAGE@$DIGEST" \
+            --certificate-identity "https://github.com/${GITHUB_REPOSITORY}/.github/workflows/release.yml@${GITHUB_REF}" \
+            --certificate-oidc-issuer https://token.actions.githubusercontent.com > /dev/null
+      - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-name: ${{ env.IMAGE }}
+          subject-digest: ${{ steps.build.outputs.digest }}
+          push-to-registry: true

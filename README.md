@@ -223,6 +223,8 @@ homecloud serve --addr 0.0.0.0:8080 --public-host homelab.tailnet.ts.net --tls-s
 
 HomeCloud needs the Docker socket, which is root-equivalent on the host: treat HomeCloud administrators as host administrators. The API binds to `127.0.0.1` by default. Findings and fixes from the audits are in [docs/security-audit-2026-10.md](docs/security-audit-2026-10.md) and [docs/security-audit-vm-2026-10.md](docs/security-audit-vm-2026-10.md). Report vulnerabilities privately as described in [SECURITY.md](SECURITY.md).
 
+Releases are signed (from v0.5.0): the release workflow signs `checksums.txt` and the container image with Sigstore keyless signing, and publishes SPDX SBOMs and GitHub build provenance. `homecloud upgrade` verifies the signature before installing anything, the install scripts do when `cosign` is installed, and [SECURITY.md](SECURITY.md#verifying-releases) has the `cosign` and `gh attestation verify` commands to check a release yourself.
+
 ## Roadmap
 
 - **Shipped in [0.4.0](https://github.com/solinode/homecloud/releases/tag/v0.4.0):** VM-backed EC2 instances (QEMU, KVM when available), the container image `ghcr.io/solinode/homecloud`, a GitHub Action and testcontainers modules for Go and Python, a nightly Terraform modules compatibility suite ([17 of 17 pass](docs/compatibility.md)), and fixes from two security audits ([platform](docs/security-audit-2026-10.md), [VM instances](docs/security-audit-vm-2026-10.md)).
