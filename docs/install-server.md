@@ -199,7 +199,8 @@ first start: created account 123456789012
 Copy the password now, or set one you prefer (see [Security notes](#13-security-notes)). The CLI
 credentials (an access key for the `root` user) are written to `~/.homecloud/credentials` (mode 0600).
 When the server listens on a wildcard address such as `0.0.0.0:8080`, the file records `127.0.0.1` (or
-the `--public-url`) as the endpoint. The data directory defaults to `~/.homecloud`; override it with
+the `--public-url`) as the endpoint (`homecloud aws-env` gives AWS tools a loopback address as
+`localhost`, see [below](#9-use-it-from-your-laptop-the-aws-cli-and-terraform)). The data directory defaults to `~/.homecloud`; override it with
 `--data-dir` or the `HOMECLOUD_DATA_DIR` environment variable.
 
 By default the API and console listen on `127.0.0.1:8080` only, so nothing is reachable from outside
