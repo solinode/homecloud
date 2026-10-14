@@ -2,6 +2,7 @@ package iam
 
 import (
 	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 )
@@ -86,6 +87,28 @@ func TestValidate(t *testing.T) {
 	mustDoc(t, `{"Version":"2012-10-17","Statement":{"Effect":"Allow","Action":"s3:*","Resource":"*"}}`)
 }
 
+// Name limits follow AWS: users and roles 64 characters, policies, groups and
+// instance profiles 128. cdk bootstrap creates a 72-character inline policy name.
+func TestValidNameLimits(t *testing.T) {
+	cdk := "cdk-hnb659fds-file-publishing-role-default-policy-123456789012-us-east-1"
+	if err := validName("policy", cdk); err != nil {
+		t.Errorf("policy %s: %v", cdk, err)
+	}
+	if validName("policy", strings.Repeat("p", 129)) == nil {
+		t.Error("129-character policy name accepted")
+	}
+	for _, k := range []string{"group", "instance profile"} {
+		if err := validName(k, strings.Repeat("g", 128)); err != nil {
+			t.Errorf("%s: %v", k, err)
+		}
+	}
+	for _, k := range []string{"user", "role"} {
+		if validName(k, strings.Repeat("u", 65)) == nil {
+			t.Errorf("65-character %s name accepted", k)
+		}
+	}
+}
+
 func TestReadOnlyExcludesSecrets(t *testing.T) {
 	bp, ok := builtin("ReadOnlyAccess")
 	if !ok {
@@ -117,6 +140,12 @@ func TestBuiltinsValid(t *testing.T) {
 		if seen[old] {
 			t.Errorf("legacy name %s is also a built-in", old)
 		}
+	}
+	// cdk bootstrap attaches this one to its deployment action role.
+	cf, ok := builtin("AWSCloudFormationReadOnlyAccess")
+	if !ok || evaluate([]PolicyDocument{cf.Doc}, "cloudformation:DescribeStacks", "*", nil) != allow ||
+		evaluate([]PolicyDocument{cf.Doc}, "cloudformation:CreateStack", "*", nil) != implicitDeny {
+		t.Error("AWSCloudFormationReadOnlyAccess missing or wrong")
 	}
 	pu, _ := builtin("PowerUserAccess")
 	if evaluate([]PolicyDocument{pu.Doc}, "iam:CreateUser", "*", nil) != implicitDeny ||

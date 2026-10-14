@@ -14,6 +14,7 @@ package lambda
 import (
 	"archive/zip"
 	"bytes"
+	"cmp"
 	"context"
 	"crypto/sha256"
 	"encoding/base64"
@@ -79,6 +80,58 @@ type ImageConfig struct {
 	WorkingDirectory string   `json:"WorkingDirectory,omitempty"`
 }
 
+// LoggingConfig is where a function's logs go and in which format, as in
+// AWS's LoggingConfig. An empty LogGroup means /aws/lambda/<name>.
+type LoggingConfig struct {
+	LogFormat           string `json:"LogFormat,omitempty"` // Text (default) | JSON
+	LogGroup            string `json:"LogGroup,omitempty"`
+	ApplicationLogLevel string `json:"ApplicationLogLevel,omitempty"` // JSON format only
+	SystemLogLevel      string `json:"SystemLogLevel,omitempty"`      // JSON format only
+}
+
+var (
+	logGroupRe = regexp.MustCompile(`^[.\-_/#A-Za-z0-9]{1,512}$`)
+	appLevels  = map[string]bool{"TRACE": true, "DEBUG": true, "INFO": true, "WARN": true, "ERROR": true, "FATAL": true}
+	sysLevels  = map[string]bool{"DEBUG": true, "INFO": true, "WARN": true}
+)
+
+// applyLogging validates a logging configuration and applies it to f.
+func applyLogging(f *Function, l LoggingConfig) error {
+	switch l.LogFormat {
+	case "":
+		l.LogFormat = "Text"
+	case "Text", "JSON":
+	default:
+		return core.BadRequest("LogFormat must be Text or JSON")
+	}
+	if l.LogFormat == "Text" && (l.ApplicationLogLevel != "" || l.SystemLogLevel != "") {
+		return core.BadRequest("ApplicationLogLevel and SystemLogLevel require LogFormat JSON")
+	}
+	if l.ApplicationLogLevel != "" && !appLevels[l.ApplicationLogLevel] {
+		return core.BadRequest("ApplicationLogLevel must be TRACE, DEBUG, INFO, WARN, ERROR or FATAL")
+	}
+	if l.SystemLogLevel != "" && !sysLevels[l.SystemLogLevel] {
+		return core.BadRequest("SystemLogLevel must be DEBUG, INFO or WARN")
+	}
+	if l.LogFormat == "JSON" {
+		l.ApplicationLogLevel = cmp.Or(l.ApplicationLogLevel, "INFO")
+		l.SystemLogLevel = cmp.Or(l.SystemLogLevel, "INFO")
+	}
+	if l.LogGroup == "" {
+		l.LogGroup = "/aws/lambda/" + f.Name
+	} else if !logGroupRe.MatchString(l.LogGroup) {
+		return core.BadRequest("LogGroup %q must be 1-512 letters, digits or ._-/#", l.LogGroup)
+	}
+	f.LogGroup, f.LogFormat, f.AppLogLevel, f.SysLogLevel = l.LogGroup, l.LogFormat, l.ApplicationLogLevel, l.SystemLogLevel
+	return nil
+}
+
+// logging is f's LoggingConfig as AWS reports it.
+func (f Function) logging() LoggingConfig {
+	return LoggingConfig{LogFormat: cmp.Or(f.LogFormat, "Text"), LogGroup: f.LogGroup,
+		ApplicationLogLevel: f.AppLogLevel, SystemLogLevel: f.SysLogLevel}
+}
+
 // Function is a function's $LATEST configuration, or (in cVersions) an
 // immutable published version of it.
 type Function struct {
@@ -99,6 +152,9 @@ type Function struct {
 	LastUpdateStatusReason string                       `json:"last_update_status_reason,omitempty"`
 	URL                    FunctionURL                  `json:"function_url"`
 	LogGroup               string                       `json:"log_group"`
+	LogFormat              string                       `json:"log_format,omitempty"` // "" = Text
+	AppLogLevel            string                       `json:"application_log_level,omitempty"`
+	SysLogLevel            string                       `json:"system_log_level,omitempty"`
 	SubnetID               string                       `json:"subnet_id,omitempty"`
 	SecurityGroupIDs       []string                     `json:"security_group_ids,omitempty"`
 	Role                   string                       `json:"role,omitempty"`         // execution role ARN
@@ -436,6 +492,7 @@ type configInput struct {
 	Architectures    []string          `json:"architectures"`
 	ImageConfig      *ImageConfig      `json:"image_config"`
 	DeadLetterTarget *string           `json:"dead_letter_target"`
+	Logging          *LoggingConfig    `json:"logging_config"`
 }
 
 // applyConfig validates and applies the parts of a configuration change that
@@ -511,6 +568,11 @@ func applyConfig(f *Function, in configInput) error {
 			return core.BadRequest("ImageConfig is only supported for functions with package type Image")
 		}
 		f.ImageConfig = in.ImageConfig
+	}
+	if in.Logging != nil {
+		if err := applyLogging(f, *in.Logging); err != nil {
+			return err
+		}
 	}
 	if in.Layers != nil {
 		if f.isImage() && len(*in.Layers) > 0 {

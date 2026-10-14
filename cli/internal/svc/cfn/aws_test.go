@@ -523,6 +523,12 @@ Outputs:
 	if o, err := e.AWSErr(t, "cloudformation", "describe-change-set", "--stack-name", "dep", "--change-set-name", "preview"); err == nil || !strings.Contains(o, "ChangeSetNotFound") {
 		t.Fatalf("deleted change set: %v %s", err, o)
 	}
+	// Deleting a missing change set by name succeeds while the stack exists (cdk diff relies on it),
+	// and fails for a missing stack.
+	e.AWS(t, "cloudformation", "delete-change-set", "--stack-name", "dep", "--change-set-name", "preview")
+	if o, err := e.AWSErr(t, "cloudformation", "delete-change-set", "--stack-name", "nostack", "--change-set-name", "preview"); err == nil {
+		t.Fatalf("delete change set of a missing stack: %s", o)
+	}
 	// An identical template makes a FAILED change set that cannot be executed.
 	e.AWS(t, "cloudformation", "create-change-set", "--stack-name", "dep", "--change-set-name", "same", "--template-body", "file://"+tf, "--parameters", "ParameterKey=Retention,ParameterValue=120")
 	d = e.AWSJSON(t, "cloudformation", "describe-change-set", "--stack-name", "dep", "--change-set-name", "same")

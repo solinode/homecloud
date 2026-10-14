@@ -450,7 +450,7 @@ func init() {
 
 	// ---- Lambda ----
 	configure("AWS::Lambda::Function", "FunctionName", []string{"Code", "Runtime", "Handler", "Description", "Timeout", "MemorySize", "Environment", "Role",
-		"Layers", "Architectures", "Tags", "VpcConfig", "DeadLetterConfig", "ImageConfig", "ReservedConcurrentExecutions"},
+		"Layers", "Architectures", "Tags", "VpcConfig", "DeadLetterConfig", "ImageConfig", "ReservedConcurrentExecutions", "LoggingConfig"},
 		func(x *xctx, r *Resource, old, in map[string]any) (map[string]any, error) {
 			np, err := translate(x, "AWS::Lambda::Function", r, in)
 			if err != nil {
@@ -472,10 +472,10 @@ func init() {
 				}
 			}
 			if differs(old, in, "Runtime", "Handler", "Description", "Timeout", "MemorySize", "Environment", "Role", "Layers", "Architectures", "Tags", "VpcConfig",
-				"DeadLetterConfig", "ImageConfig") {
+				"DeadLetterConfig", "ImageConfig", "LoggingConfig") {
 				cfg := map[string]any{}
 				for _, k := range []string{"runtime", "handler", "description", "timeout_seconds", "memory_mb", "environment", "role", "layers", "architectures", "tags",
-					"subnet_id", "security_group_ids", "dead_letter_target", "image_config"} {
+					"subnet_id", "security_group_ids", "dead_letter_target", "image_config", "logging_config"} {
 					if v, ok := np[k]; ok {
 						cfg[k] = v
 					}
@@ -483,7 +483,8 @@ func init() {
 				// what the template dropped goes back to the default
 				for k, reset := range map[string]map[string]any{"Description": {"description": ""}, "Timeout": {"timeout_seconds": 3}, "MemorySize": {"memory_mb": 128},
 					"Environment": {"environment": map[string]string{}}, "Layers": {"layers": []string{}}, "Tags": {"tags": core.Tags{}},
-					"VpcConfig": {"subnet_id": "", "security_group_ids": []string{}}, "DeadLetterConfig": {"dead_letter_target": ""}} {
+					"VpcConfig": {"subnet_id": "", "security_group_ids": []string{}}, "DeadLetterConfig": {"dead_letter_target": ""},
+					"LoggingConfig": {"logging_config": map[string]any{}}} {
 					if has(old, k) && !has(in, k) {
 						for rk, rv := range reset {
 							cfg[rk] = rv

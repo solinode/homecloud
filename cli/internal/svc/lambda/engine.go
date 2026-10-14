@@ -511,6 +511,10 @@ func (s *Service) startEnv(ctx context.Context, f Function, slot int) (*execEnv,
 	if s.env.ContainerAPI != "" {
 		env["AWS_ENDPOINT_URL"] = s.env.ContainerAPI
 	}
+	if f.LogFormat == "JSON" {
+		// The AWS base images' runtimes read these to log structured JSON.
+		env["AWS_LAMBDA_LOG_FORMAT"], env["AWS_LAMBDA_LOG_LEVEL"] = "JSON", f.AppLogLevel
+	}
 	for k, v := range f.Environment {
 		env[k] = v
 	}
@@ -674,7 +678,7 @@ func (s *Service) post(ctx context.Context, e *execEnv, reqID, clientCtx string,
 func (s *Service) Run(ctx context.Context) {
 	if s.env.Docker != nil {
 		// Environments from a previous server run are stale.
-		if cs, err := s.env.Docker.ManagedContainers(); err == nil {
+		if cs, err := s.env.Docker.OwnContainers(); err == nil {
 			for _, c := range cs {
 				if c.Labels["homecloud.service"] == "lambda" {
 					_ = s.env.Docker.Remove(c.ID)
