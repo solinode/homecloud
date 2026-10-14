@@ -303,7 +303,7 @@ function seedFunctions(): FnSpec[] {
       memory_mb: 512,
       timeout_seconds: 30,
       environment: { DB_HOST: "shop-db.c9demoexample.us-east-1.rds.amazonaws.com", PROVIDER_KEY: "demo-not-a-real-secret", ORDERS_QUEUE_URL: `https://sqs.${REGION}.amazonaws.com/${ACCOUNT}/${NAMES.ordersQueue}`, LOG_LEVEL: "INFO" },
-      role: roleArn("shop-payments-role"),
+      role: roleArn("shop-payments-lambda-role"),
       layers: [`${layerArn("shop-deps")}:3`],
       subnet_id: SUBNET.privateA,
       security_group_ids: [SG.web],

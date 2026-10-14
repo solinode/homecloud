@@ -25,7 +25,7 @@ const S = (): SfnState => getState().sfn as SfnState
 const machineArn = (name: string) => arn("states", `stateMachine:${name}`)
 const execArn = (machine: string, name: string) => arn("states", `execution:${machine}:${name}`)
 const lambdaArn = (fn: string) => arn("lambda", `function:${fn}`)
-const SFN_ROLE = arn("iam", "role/shop-sfn-role", { region: null })
+const SFN_ROLE = arn("iam", "role/shop-fulfillment-sfn-role", { region: null })
 const NAME_RE = /^[A-Za-z0-9_-]{1,80}$/
 
 // ---- definitions ----

@@ -90,7 +90,7 @@ const SUBNET_INFO: Record<string, { vpc: string; az: string }> = {
 
 const hostPort = (id: string, port: number) => 30000 + ((hashStr(`${id}:${port}`) + port) % 12000)
 const dnsOf = (ip: string) => `ip-${ip.replace(/\./g, "-")}.internal`
-const PROFILE = arn("iam", "instance-profile/shop-web-role", { region: null })
+const PROFILE = arn("iam", "instance-profile/shop-web-profile", { region: null })
 
 interface InstSpec {
   id: string
