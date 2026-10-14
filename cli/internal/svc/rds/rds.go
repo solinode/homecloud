@@ -110,9 +110,14 @@ type Service struct {
 	snapMu  sync.Mutex
 }
 
-// Recover settles instances whose operation was interrupted by a restart.
+// Recover settles instances whose operation was interrupted by a restart, and
+// recreates the containers of instances whose container is gone but whose data
+// volume is there (after `homecloud restore` onto a new host).
 func (s *Service) Recover() {
 	for _, i := range store.List[Instance](s.env.Store, cInstances) {
+		if s.recoverContainer(i) {
+			continue
+		}
 		switch i.Status {
 		case "creating", "restoring", "starting", "rebooting", "backing-up", "modifying", "stopping", "deleting":
 		default:
@@ -224,7 +229,7 @@ func (s *Service) sync(i Instance) Instance {
 	if want != i.Status {
 		reason := ""
 		if want == "failed" {
-			reason = "the database container disappeared"
+			reason = reasonGone
 		}
 		s.setStatus(i.ID, want, reason)
 		i.Status, i.StatusReason = want, reason
@@ -463,35 +468,7 @@ func (s *Service) boot(i Instance, e Engine, in createInput, network string, sna
 		fail(err)
 		return
 	}
-	spec := runtime.RunSpec{
-		Name:     svc.ContainerName(serviceLabel(e.Kind), i.ID),
-		Image:    e.image(i.EngineVersion),
-		Labels:   runtime.Labels(serviceLabel(e.Kind), i.ID, map[string]string{"homecloud.engine": e.Name}),
-		NanoCPUs: int64(min(i.VCPUs, s.hostCPU) * 1e9),
-		MemoryMB: i.MemoryMB,
-		Network:  network,
-		IP:       i.Endpoint.PrivateIP,
-		Aliases:  []string{i.Endpoint.Address, i.ID},
-		Restart:  "unless-stopped",
-	}
-	if e.DataDir != "" {
-		spec.Mounts = []runtime.Mount{{Volume: vol, Target: e.DataDir}}
-	}
-	if e.env != nil {
-		spec.Env = e.env(in.MasterUsername, in.MasterPassword, in.DBName)
-	}
-	if e.cmd != nil {
-		spec.Cmd = e.cmd(in.MasterPassword)
-	}
-	if e.Name == "memcached" {
-		spec.Cmd = []string{"memcached", "-m", fmt.Sprint(i.MemoryMB * 3 / 4)}
-	}
-	if i.ReplicationGroup != "" {
-		spec.Aliases = append(spec.Aliases, primaryHost(i.ReplicationGroup), readerHost(i.ReplicationGroup))
-	}
-	if i.PubliclyAccessible {
-		spec.Ports = []runtime.Port{{ContainerPort: e.DefaultPort, HostPort: in.Port}}
-	}
+	spec := s.runSpec(i, e, network, in.MasterPassword, in.Port)
 	restoreCache := snap != nil && e.Kind == "cache"
 	final := spec
 	if restoreCache {
@@ -567,6 +544,42 @@ func (s *Service) boot(i Instance, e Engine, in createInput, network string, sna
 		x.Endpoint.ConnectHint = connectHint(*x)
 		return nil
 	})
+}
+
+// runSpec is the container of an instance: engine image, limits, network
+// address and aliases, data volume and (when publicly accessible) the host
+// port to publish (0 = any).
+func (s *Service) runSpec(i Instance, e Engine, network, pass string, hostPort int) runtime.RunSpec {
+	spec := runtime.RunSpec{
+		Name:     svc.ContainerName(serviceLabel(e.Kind), i.ID),
+		Image:    e.image(i.EngineVersion),
+		Labels:   runtime.Labels(serviceLabel(e.Kind), i.ID, map[string]string{"homecloud.engine": e.Name}),
+		NanoCPUs: int64(min(i.VCPUs, s.hostCPU) * 1e9),
+		MemoryMB: i.MemoryMB,
+		Network:  network,
+		IP:       i.Endpoint.PrivateIP,
+		Aliases:  []string{i.Endpoint.Address, i.ID},
+		Restart:  "unless-stopped",
+	}
+	if e.DataDir != "" {
+		spec.Mounts = []runtime.Mount{{Volume: volumeName(i.ID), Target: e.DataDir}}
+	}
+	if e.env != nil {
+		spec.Env = e.env(i.MasterUsername, pass, i.DBName)
+	}
+	if e.cmd != nil {
+		spec.Cmd = e.cmd(pass)
+	}
+	if e.Name == "memcached" {
+		spec.Cmd = []string{"memcached", "-m", fmt.Sprint(i.MemoryMB * 3 / 4)}
+	}
+	if i.ReplicationGroup != "" {
+		spec.Aliases = append(spec.Aliases, primaryHost(i.ReplicationGroup), readerHost(i.ReplicationGroup))
+	}
+	if i.PubliclyAccessible {
+		spec.Ports = []runtime.Port{{ContainerPort: e.DefaultPort, HostPort: hostPort}}
+	}
+	return spec
 }
 
 // enableAOF turns on append-only persistence in a cache that was booted from an

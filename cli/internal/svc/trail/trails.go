@@ -235,6 +235,7 @@ func (s *Service) Run(ctx context.Context) {
 	tk := time.NewTicker(time.Minute)
 	defer tk.Stop()
 	for {
+		core.Beat("cloudtrail", time.Minute)
 		select {
 		case <-ctx.Done():
 			return

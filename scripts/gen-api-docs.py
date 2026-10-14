@@ -3,13 +3,14 @@
 import glob
 import re
 
-ORDER = ["iam", "cognito", "ec2", "autoscaling", "vpc", "route53", "elb", "acm", "s3", "ecr", "ecs", "rds", "lambda", "sqs", "sns", "dynamodb", "events", "sfn", "cfn", "secrets", "kms", "ssm", "cloudwatch", "trail"]
+ORDER = ["iam", "cognito", "ec2", "autoscaling", "vpc", "route53", "elb", "acm", "s3", "ecr", "ecs", "rds", "lambda", "sqs", "sns", "dynamodb", "events", "sfn", "cfn", "secrets", "kms", "ssm", "cloudwatch", "trail", "system"]
 NAMES = {
     "iam": "IAM & authentication", "ec2": "EC2 (compute, volumes, EFS file systems)", "elb": "Elastic Load Balancing",
     "ecr": "ECR (container registry)", "ecs": "ECS (container services)", "kms": "KMS (encryption keys)", "ssm": "Systems Manager Parameter Store", "sfn": "Step Functions", "cognito": "Cognito (user pools)", "autoscaling": "EC2 Auto Scaling", "acm": "Certificate Manager", "route53": "Route 53 (DNS)", "cfn": "CloudFormation (stacks)", "vpc": "VPC (networking)", "s3": "S3 (object storage)",
     "rds": "RDS / ElastiCache / DocumentDB (databases)", "lambda": "Lambda & API Gateway (serverless)", "sqs": "SQS (queues)",
     "sns": "SNS (pub/sub)", "dynamodb": "DynamoDB (key-value)", "events": "EventBridge (events & schedules)",
     "secrets": "Secrets Manager", "cloudwatch": "CloudWatch (metrics, logs, alarms)", "trail": "CloudTrail (audit log)",
+    "system": "HomeCloud (backups, metrics, status)",
 }
 HEADER = """# HomeCloud API reference
 
@@ -29,10 +30,13 @@ Public routes (no authentication): `POST /api/v1/auth/login`, `GET /api/v1/healt
 out = [HEADER]
 for svc in ORDER:
     rows = []
-    for f in sorted(glob.glob(f"cli/internal/svc/{svc}/*.go")):
+    files = glob.glob(f"cli/internal/svc/{svc}/*.go")
+    if svc == "system":
+        files = glob.glob("cli/internal/system/*.go") + glob.glob("cli/internal/server/*.go")
+    for f in sorted(files):
         if f.endswith("_test.go"):
             continue
-        for m in re.finditer(r'r\.Handle\("([A-Z]*) ?([^"]+)", "([^"]*)"', open(f).read()):
+        for m in re.finditer(r'\brt?\.Handle\("([A-Z]*) ?([^"]+)", "([^"]*)"', open(f).read()):
             method, path, action = m.groups()
             rows.append((method or "ANY", path, action or "(public)"))
     if rows:

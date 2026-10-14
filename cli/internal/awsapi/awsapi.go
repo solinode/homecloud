@@ -155,6 +155,7 @@ type Req struct {
 	action, resource string
 	status           int
 	info             *CallInfo
+	authFailed       bool
 }
 
 // CallInfo is what the audit trail learns about an AWS API call beyond the
@@ -332,6 +333,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			log.Printf("aws: panic serving %s %s: %v", r.Method, r.URL.Path, v)
 			q.fail(Errorf(http.StatusInternalServerError, "InternalFailure", "internal error"))
 		}
+		q.observe()
 		if h.Audit != nil && q.P != nil {
 			action := q.action
 			if action == "" && q.Svc != nil && q.Op != "" {
@@ -353,7 +355,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if IsSigned(r) {
 		var err error
 		if sig, err = ParseSignature(r); err != nil {
-			q.fail(err)
+			q.authFail(err)
 			return
 		}
 		q.Region = sig.Region
@@ -377,7 +379,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		q.Svc = lookupUnsigned(r)
 	}
 	if q.Svc == nil {
-		q.fail(Errorf(http.StatusForbidden, "MissingAuthenticationToken", "request is not signed"))
+		q.authFail(Errorf(http.StatusForbidden, "MissingAuthenticationToken", "request is not signed"))
 		return
 	}
 	switch {
@@ -417,17 +419,17 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	if sig != nil {
 		payloadHash = sig.PayloadHash
 		if err := sig.checkTime(now); err != nil {
-			q.fail(err)
+			q.authFail(err)
 			return
 		}
 		var err error
 		if secret, principal, err = h.Creds.SigningSecret(sig.AccessKeyID, sig.SessionToken); err != nil {
-			q.fail(err)
+			q.authFail(err)
 			return
 		}
 		if payloadHash != "" && !strings.HasPrefix(payloadHash, "STREAMING-") || sig.Presigned {
 			if err := sig.Verify(r, secret, payloadHash, now); err != nil {
-				q.fail(err)
+				q.authFail(err)
 				return
 			}
 			verified = true
@@ -487,7 +489,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p := principal
 		if !verified {
 			if err := sig.Verify(r, secret, payloadHash, now); err != nil {
-				q.fail(err)
+				q.authFail(err)
 				return
 			}
 		}
@@ -495,7 +497,7 @@ func (h *Handler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		p.AddRequestContext(r)
 		p.Context["aws:requestedregion"] = []string{sig.Region}
 	} else if !public {
-		q.fail(Errorf(http.StatusForbidden, "MissingAuthenticationToken", "request is not signed"))
+		q.authFail(Errorf(http.StatusForbidden, "MissingAuthenticationToken", "request is not signed"))
 		return
 	}
 
@@ -537,6 +539,12 @@ func (q *Req) isQuery() bool {
 
 // Fail writes err in the request's protocol.
 func (q *Req) Fail(err error) { q.fail(err) }
+
+// authFail fails a request whose caller could not be authenticated.
+func (q *Req) authFail(err error) {
+	q.authFailed = true
+	q.fail(err)
+}
 
 func (q *Req) fail(err error) {
 	e := toError(q.Svc, err)

@@ -553,6 +553,10 @@ container on the instance's VPC network. Container images need nothing of this.
   decrypts, so grant that action (and `homecloud:*`) only to administrators, and encrypt backups before
   they leave the machine.
 - Keep the host patched (`unattended-upgrades` on Ubuntu and Debian) and upgrade HomeCloud regularly.
+- **Monitor it.** `/metrics` serves Prometheus metrics to an IAM user allowed `homecloud:GetMetrics`
+  (never anonymously on the API port), and the console's **System status** page shows Docker, helper,
+  background loop and disk state. See [Monitoring](monitoring.md) for a least-privilege `prometheus`
+  user, scrape configs, a Grafana dashboard and alert rules.
 
 ## 14. Troubleshooting
 
