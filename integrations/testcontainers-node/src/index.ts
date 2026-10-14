@@ -69,6 +69,7 @@ export class HomeCloudContainer extends GenericContainer {
   private timeoutMs = 180_000;
   private containerId?: string;
   private log = "";
+  private userLogConsumer?: (stream: Readable) => unknown;
 
   /** @param image any image whose entrypoint runs the `homecloud` binary (default {@link DEFAULT_IMAGE}). */
   constructor(image: string = DEFAULT_IMAGE) {
@@ -107,25 +108,30 @@ export class HomeCloudContainer extends GenericContainer {
   }
 
   override async start(): Promise<StartedHomeCloudContainer> {
+    // Each start is a new HomeCloud with its own account: forget the previous run's.
+    this.log = "";
+    this.containerId = undefined;
     const strategies = [Wait.forLogMessage("listening on")];
     for (const s of this.services) {
       const line = READY_LINES[s];
       if (line) strategies.push(Wait.forLogMessage(line));
     }
-    const userConsumer = this.logConsumer;
+    const userConsumer = this.userLogConsumer;
+    // Drop the socket bind of an earlier start, so starting again does not mount it twice.
+    this.hostConfig.Binds = (this.hostConfig.Binds ?? []).filter((b) => !b.includes(":/var/run/docker.sock"));
     this.withNetworkMode("host")
       .withBindMounts([{ source: this.dockerSocket, target: "/var/run/docker.sock", mode: "rw" }])
       .withEnvironment({ HOMECLOUD_DATA_DIR: DATA_DIR })
       .withCommand(["serve", "--data-dir", DATA_DIR, "--addr", `127.0.0.1:${this.port}`])
       .withWaitStrategy(Wait.forAll(strategies))
-      .withStartupTimeout(this.timeoutMs)
-      .withLogConsumer((stream: Readable) => {
-        // Kept so the account is known as early as possible: a failed start is cleaned up too.
-        stream.on("data", (chunk: Buffer | string) => {
-          if (!ACCOUNT_RE.test(this.log)) this.log += chunk.toString();
-        });
-        userConsumer?.(stream);
+      .withStartupTimeout(this.timeoutMs);
+    super.withLogConsumer((stream: Readable) => {
+      // Kept so the account is known as early as possible: a failed start is cleaned up too.
+      stream.on("data", (chunk: Buffer | string) => {
+        if (!ACCOUNT_RE.test(this.log)) this.log += chunk.toString();
       });
+      userConsumer?.(stream);
+    });
 
     let started: StartedTestContainer | undefined;
     try {
@@ -143,6 +149,11 @@ export class HomeCloudContainer extends GenericContainer {
       if (account) await removeResources(account).catch(() => undefined);
       throw err;
     }
+  }
+
+  override withLogConsumer(logConsumer: (stream: Readable) => unknown): this {
+    this.userLogConsumer = logConsumer;
+    return this;
   }
 
   private account(): string | undefined {
@@ -212,7 +223,18 @@ export class StartedHomeCloudContainer extends AbstractStartedContainer {
   /** Stops HomeCloud and removes every container, network and volume it created. */
   override async stop(options?: Partial<StopOptions>): Promise<StoppedTestContainer> {
     // HomeCloud stops first, so it does not recreate what is being removed.
-    const stopped = await super.stop({ remove: true, removeVolumes: true, ...options });
+    let stopped: StoppedTestContainer;
+    try {
+      stopped = await super.stop({ remove: true, removeVolumes: true, ...options });
+    } catch (err) {
+      // Clean up the helpers even if HomeCloud itself could not be stopped (e.g. already removed).
+      try {
+        await removeResources(this.accountId);
+      } catch (cleanupErr) {
+        throw new AggregateError([err, cleanupErr], "homecloud: stop and clean-up failed");
+      }
+      throw err;
+    }
     await removeResources(this.accountId);
     return stopped;
   }

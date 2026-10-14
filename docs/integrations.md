@@ -146,9 +146,12 @@ import { S3Client, CreateBucketCommand } from "@aws-sdk/client-s3";
 import { HomeCloudContainer } from "testcontainers-homecloud";
 
 const hc = await new HomeCloudContainer().start();       // or new HomeCloudContainer("homecloud:test")
-const s3 = new S3Client(hc.getS3ClientConfig());          // endpoint, root keys, region, path-style
-await s3.send(new CreateBucketCommand({ Bucket: "test" }));
-await hc.stop();
+try {
+  const s3 = new S3Client(hc.getS3ClientConfig());        // endpoint, root keys, region, path-style
+  await s3.send(new CreateBucketCommand({ Bucket: "test" }));
+} finally {
+  await hc.stop();                                        // or in afterAll
+}
 ```
 
 `hc.getEndpoint()`, `hc.getCredentials()`, `hc.getRegion()` and `hc.getAwsEnv()` give the

@@ -27,6 +27,7 @@ import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sts.StsClient;
 
 /** Runs against HOMECLOUD_IMAGE (a local build, e.g. homecloud:test) or the official image. */
+@org.junit.jupiter.api.TestMethodOrder(org.junit.jupiter.api.MethodOrderer.OrderAnnotation.class)
 class HomeCloudContainerTest {
 
     static final String IMAGE = System.getenv().getOrDefault("HOMECLOUD_IMAGE", HomeCloudContainer.DEFAULT_IMAGE);
@@ -48,12 +49,31 @@ class HomeCloudContainerTest {
         String account = hc.getAccountId();
         hc.stop();
         assertNotNull(account);
+        assertNoLeftovers(account);
+    }
+
+    static void assertNoLeftovers(String account) {
         DockerClient docker = DockerClientFactory.lazyClient();
         List<String> label = Collections.singletonList(HomeCloudContainer.ACCOUNT_LABEL + "=" + account);
         assertEquals(0, docker.listContainersCmd().withShowAll(true).withLabelFilter(label).exec().size(), "containers left");
         assertEquals(0, docker.listNetworksCmd().withFilter("label", label).exec().size(), "networks left");
         List<?> volumes = docker.listVolumesCmd().withFilter("label", label).exec().getVolumes();
         assertTrue(volumes == null || volumes.isEmpty(), "volumes left");
+    }
+
+    /** Runs last: stops the shared container and starts it again as a new HomeCloud. */
+    @Test
+    @org.junit.jupiter.api.Order(Integer.MAX_VALUE)
+    void restartGetsANewAccount() {
+        String first = hc.getAccountId();
+        hc.stop();
+        assertNoLeftovers(first);
+        hc.start();
+        assertNotNull(hc.getAccountId());
+        assertFalse(first.equals(hc.getAccountId()), "second start kept the first account");
+        try (S3Client s3 = hc.getS3Client()) {
+            s3.createBucket(b -> b.bucket("tc-java-restart"));
+        }
     }
 
     @Test

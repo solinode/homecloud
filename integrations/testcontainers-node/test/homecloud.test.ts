@@ -17,22 +17,38 @@ describe("parseAwsEnv", () => {
   });
 });
 
+async function expectNoLeftovers(account: string): Promise<void> {
+  const docker = (await getContainerRuntimeClient()).container.dockerode;
+  const filters = JSON.stringify({ label: [`homecloud.account=${account}`] });
+  expect(await docker.listContainers({ all: true, filters })).toHaveLength(0);
+  expect(await docker.listNetworks({ filters })).toHaveLength(0);
+  expect((await docker.listVolumes({ filters })).Volumes ?? []).toHaveLength(0);
+}
+
 describe("HomeCloudContainer", () => {
+  const container = new HomeCloudContainer(IMAGE);
   let hc: StartedHomeCloudContainer;
 
   beforeAll(async () => {
-    hc = await new HomeCloudContainer(IMAGE).start();
+    hc = await container.start();
   });
 
   afterAll(async () => {
     if (!hc) return;
     const account = hc.getAccountId();
     await hc.stop();
-    const docker = (await getContainerRuntimeClient()).container.dockerode;
-    const filters = JSON.stringify({ label: [`homecloud.account=${account}`] });
-    expect(await docker.listContainers({ all: true, filters })).toHaveLength(0);
-    expect(await docker.listNetworks({ filters })).toHaveLength(0);
-    expect((await docker.listVolumes({ filters })).Volumes ?? []).toHaveLength(0);
+    await expectNoLeftovers(account);
+  });
+
+  // Stops HomeCloud and starts the same container definition again; later tests use the new one.
+  it("starts again as a new HomeCloud", async () => {
+    const first = hc.getAccountId();
+    await hc.stop();
+    await expectNoLeftovers(first);
+    hc = await container.start();
+    expect(hc.getAccountId()).not.toBe(first);
+    const s3 = new S3Client(hc.getS3ClientConfig());
+    await s3.send(new CreateBucketCommand({ Bucket: "tc-node-restart" }));
   });
 
   it("exposes connection details", async () => {

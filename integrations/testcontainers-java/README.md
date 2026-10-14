@@ -14,6 +14,7 @@ test and talk to it with the AWS SDK for Java v2.
 <dependency>
   <groupId>software.amazon.awssdk</groupId>
   <artifactId>s3</artifactId>
+  <version>2.55.16</version>  <!-- or manage it with the software.amazon.awssdk:bom -->
   <scope>test</scope>
 </dependency>
 ```

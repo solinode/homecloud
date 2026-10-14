@@ -170,6 +170,8 @@ public class HomeCloudContainer extends GenericContainer<HomeCloudContainer> {
         withNetworkMode("host");
         // Host networking: nothing to publish, and the generic port checks do not apply.
         setExposedPorts(Collections.emptyList());
+        // configure() runs on every start: replace the socket bind of an earlier one.
+        getBinds().removeIf(b -> "/var/run/docker.sock".equals(b.getVolume().getPath()));
         getBinds().add(Bind.parse(dockerSocket + ":/var/run/docker.sock"));
         withEnv("HOMECLOUD_DATA_DIR", DATA_DIR);
         withCommand("serve", "--data-dir", DATA_DIR, "--addr", "127.0.0.1:" + port);
@@ -185,12 +187,20 @@ public class HomeCloudContainer extends GenericContainer<HomeCloudContainer> {
         waitingFor(all);
     }
 
-    private static LogMessageWaitStrategy logLine(String text) {
-        return new LogMessageWaitStrategy().withRegEx(".*" + Pattern.quote(text) + ".*\\s*");
+    private LogMessageWaitStrategy logLine(String text) {
+        // Each child gets the full timeout too: WITH_MAXIMUM_OUTER_TIMEOUT does not set it.
+        return (LogMessageWaitStrategy) new LogMessageWaitStrategy()
+                .withRegEx(".*" + Pattern.quote(text) + ".*\\s*")
+                .withStartupTimeout(startupTimeout);
     }
 
     @Override
     public void start() {
+        if (getContainerId() == null) {
+            // A new run (also after stop()): forget the previous run's account and keys.
+            accountId = null;
+            credentials = null;
+        }
         try {
             super.start();
         } catch (RuntimeException e) {
