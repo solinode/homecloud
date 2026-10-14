@@ -135,6 +135,7 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 	rt.Mux.HandleFunc(pattern, func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
 		c := &Ctx{W: w, R: r, Account: rt.Account}
+		obs := claim(r, pattern, action)
 		sw := &statusWriter{ResponseWriter: w, status: 200}
 		c.W = sw
 		if o.maxBody > 0 {
@@ -149,6 +150,7 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 			if !ok {
 				var err error
 				if p, err = rt.Auth.Authenticate(r); err != nil {
+					obs.authFailed(err)
 					WriteError(sw, err)
 					return
 				}
@@ -156,6 +158,7 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 			c.P = p
 			// Identity calls (sts:*) are always allowed, as in AWS.
 			if !o.deferred && !strings.HasPrefix(action, "sts:") && !p.Permits(action, resource, Access{}) {
+				obs.failed("AccessDenied")
 				WriteError(sw, core.Errf(http.StatusForbidden, "AccessDenied", "%s is not authorized to perform %s on %s", p.ARN, action, resource))
 				rt.audit(p, action, resource, r, sw.status, time.Since(start))
 				return
@@ -163,6 +166,7 @@ func (rt *Router) Handle(pattern, action string, h Handler, opts ...Opt) {
 		}
 		out, err := h(c)
 		if err != nil {
+			obs.failed(ErrorCode(err))
 			WriteError(sw, err)
 		} else if out != nil && !c.written {
 			WriteJSON(sw, http.StatusOK, out)
@@ -274,6 +278,7 @@ func WriteError(w http.ResponseWriter, err error) {
 		ce = core.Errf(http.StatusNotFound, "ResourceNotFound", "resource not found")
 	default:
 		log.Printf("internal error: %v", err)
+		core.ReportError("api", err.Error())
 		ce = core.Errf(http.StatusInternalServerError, "InternalError", "%s", core.InternalErrorMessage)
 	}
 	WriteJSON(w, ce.Status, map[string]any{"error": ce})

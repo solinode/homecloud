@@ -8,6 +8,8 @@ on:
       - "pages/**"
       - "LICENSE"
       - ".well-known/**"
+      - "integrations/testcontainers-java/**"
+      - "integrations/testcontainers-node/**"
   pull_request:
     paths-ignore:
       - "**.md"
@@ -15,6 +17,8 @@ on:
       - "pages/**"
       - "LICENSE"
       - ".well-known/**"
+      - "integrations/testcontainers-java/**"
+      - "integrations/testcontainers-node/**"
 
 # A new push to a pull request (or branch) cancels the run it supersedes.
 concurrency:

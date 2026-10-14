@@ -10,6 +10,8 @@ credentials it creates on first start. This page covers the ready-made integrati
 | [GitHub Action](#github-actions) | [`solinode/setup-homecloud`](https://github.com/solinode/setup-homecloud): install, start, export `AWS_*` |
 | [testcontainers-go](#testcontainers-go) | `integrations/testcontainers-go`: start HomeCloud from a Go test |
 | [testcontainers-python](#testcontainers-python) | `pip install testcontainers-homecloud`: start HomeCloud from pytest |
+| [testcontainers-java](#testcontainers-java) | `io.github.solinode:testcontainers-homecloud`: start HomeCloud from a JUnit test |
+| [testcontainers-node](#testcontainers-node) | `npm install testcontainers-homecloud`: start HomeCloud from a Node.js test |
 | [Plain binary or Docker](#plain-binary-or-docker) | anything else |
 
 Everything HomeCloud runs (MinIO for S3, Lambda runtimes, databases) is a container on
@@ -94,9 +96,71 @@ def test_upload(homecloud):
 
 See [integrations/testcontainers-python/README.md](../integrations/testcontainers-python/README.md).
 
+## testcontainers-java
+
+```xml
+<dependency>
+  <groupId>io.github.solinode</groupId>
+  <artifactId>testcontainers-homecloud</artifactId>
+  <version>0.1.0</version>
+  <scope>test</scope>
+</dependency>
+```
+
+The artifact is on Maven Central after its first release; until then, `mvn install` in
+`integrations/testcontainers-java` and depend on `0.1.0-SNAPSHOT`. Add the AWS SDK v2
+service artifacts your tests use (`software.amazon.awssdk:s3`, `sqs`, ...).
+
+```java
+import io.github.solinode.homecloud.testcontainers.HomeCloudContainer;
+
+static HomeCloudContainer hc = new HomeCloudContainer();   // or new HomeCloudContainer("homecloud:test")
+
+@BeforeAll static void start() { hc.start(); }
+@AfterAll static void stop() { hc.stop(); }
+
+@Test void upload() {
+    try (S3Client s3 = hc.getS3Client()) {                  // path-style, root keys, region
+        s3.createBucket(b -> b.bucket("test"));
+    }
+    SnsClient sns = hc.configure(SnsClient.builder()).build(); // any other SDK v2 client
+}
+```
+
+`getEndpoint()`, `getCredentials()`, `getAccessKey()`, `getSecretKey()`, `getRegion()`,
+`getCredentialsProvider()` and `getAwsEnv()` give the connection details;
+`getS3Client()`, `getSqsClient()`, `getDynamoDbClient()` and `getLambdaClient()` return
+ready clients. See [integrations/testcontainers-java/README.md](../integrations/testcontainers-java/README.md).
+
+## testcontainers-node
+
+```sh
+npm install --save-dev testcontainers-homecloud
+```
+
+The package is on npm after its first release; until then, `npm ci && npm run build &&
+npm pack` in `integrations/testcontainers-node` and install the `.tgz`.
+
+```ts
+import { S3Client, CreateBucketCommand } from "@aws-sdk/client-s3";
+import { HomeCloudContainer } from "testcontainers-homecloud";
+
+const hc = await new HomeCloudContainer().start();       // or new HomeCloudContainer("homecloud:test")
+try {
+  const s3 = new S3Client(hc.getS3ClientConfig());        // endpoint, root keys, region, path-style
+  await s3.send(new CreateBucketCommand({ Bucket: "test" }));
+} finally {
+  await hc.stop();                                        // or in afterAll
+}
+```
+
+`hc.getEndpoint()`, `hc.getCredentials()`, `hc.getRegion()` and `hc.getAwsEnv()` give the
+connection details; `hc.getClientConfig()` fits any AWS SDK v3 client. ESM and CommonJS,
+with types. See [integrations/testcontainers-node/README.md](../integrations/testcontainers-node/README.md).
+
 ### How the testcontainers modules run HomeCloud
 
-Both modules start the image (default `ghcr.io/solinode/homecloud:latest`, configurable)
+All four modules start the image (default `ghcr.io/solinode/homecloud:latest`, configurable)
 with the Docker socket mounted and **host networking**, and the API on
 `127.0.0.1:18080` of the Docker host (configurable; not 8080, which is often taken).
 HomeCloud then reaches the containers it starts on the host's loopback ports, and they
@@ -112,7 +176,11 @@ Until the official image is published, build one from a checkout:
 docker build -f integrations/testdata/Dockerfile -t homecloud:test cli
 HOMECLOUD_IMAGE=homecloud:test go test ./...      # in integrations/testcontainers-go
 HOMECLOUD_IMAGE=homecloud:test pytest             # in integrations/testcontainers-python
+HOMECLOUD_IMAGE=homecloud:test mvn verify         # in integrations/testcontainers-java
+HOMECLOUD_IMAGE=homecloud:test npm test           # in integrations/testcontainers-node
 ```
+
+The full image (`docker build -t homecloud:test .` from the repository root) works too.
 
 ## Plain binary or Docker
 
@@ -137,7 +205,7 @@ docker run -d --name homecloud --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
   homecloud:test serve --data-dir /data --addr 127.0.0.1:18080
 until curl -fs http://127.0.0.1:18080/api/v1/health; do sleep 1; done
-docker exec homecloud homecloud aws-env      # credentials; the endpoint is http://127.0.0.1:18080
+docker exec homecloud homecloud aws-env      # credentials; the endpoint is http://localhost:18080
 ```
 
 To clean up afterwards, remove the HomeCloud container with its data volume (`-v`), then
@@ -156,5 +224,12 @@ docker volume rm $(docker volume ls -q --filter label=homecloud.account=ACCOUNT)
 - AWS CLI v2, boto3 1.28+, aws-sdk-go-v2, the JavaScript SDK v3 and the Terraform AWS
   provider 5.x read `AWS_ENDPOINT_URL`.
 - Use path-style S3 addressing (`UsePathStyle`, `addressing_style: path`,
-  `s3_use_path_style = true`) when the endpoint is an IP address or `localhost`.
+  `s3_use_path_style = true`): HomeCloud serves buckets by path, so bucket names need not
+  resolve as host names.
+- Name a local server `localhost`, not `127.0.0.1`, as `homecloud aws-env` and the GitHub
+  Action do. S3 Control puts the account ID in front of the endpoint's host
+  (`http://123456789012.localhost:8080/...`), and the Terraform AWS provider calls it for
+  every `aws_s3_bucket` (6.x reads bucket tags that way), as do `aws s3control` and boto3's
+  `s3control` client; `123456789012.127.0.0.1` does not resolve. A remote server needs a
+  host name for the same reason.
 - The region is `us-east-1` unless the server was started with another one.

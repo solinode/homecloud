@@ -46,6 +46,7 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 				return fmt.Errorf("--tls-cert and --tls-key must be used together")
 			}
 			server.Version = Version
+			server.Commit = Commit
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
 			return server.Run(ctx, cfg, server.Options{ResetRootPassword: resetRoot, AllowNewerData: allowNewerData})
@@ -67,6 +68,8 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 	f.StringVar(&cfg.TLSKey, "tls-key", "", "PEM private key for --tls-cert")
 	f.BoolVar(&selfSigned, "tls-self-signed", false, "serve HTTPS with a generated self-signed certificate")
 	f.BoolVar(&allowNewerData, "allow-newer-data", false, "start even if the data directory was last used by a newer HomeCloud (risks corrupting it; prefer homecloud upgrade --rollback)")
+	f.StringVar(&cfg.MetricsAddr, "metrics-addr", cfg.MetricsAddr, "also serve Prometheus metrics WITHOUT authentication on this loopback address, e.g. 127.0.0.1:9464 (the API's /metrics always requires the IAM action homecloud:GetMetrics)")
+	f.BoolVar(&cfg.MetricsAddrInsecure, "metrics-addr-insecure", false, "allow a non-loopback --metrics-addr (its metrics need no credentials: protect it with a firewall)")
 	RootCmd.AddCommand(serveCmd)
 
 	var p client.Profile
@@ -168,7 +171,7 @@ credentials, so AWS tools work against HomeCloud:
 			if region == "" || region == core.LegacyRegion {
 				region = core.DefaultRegion
 			}
-			vars := [][2]string{{"AWS_ENDPOINT_URL", p.Endpoint}, {"AWS_ACCESS_KEY_ID", p.AccessKeyID},
+			vars := [][2]string{{"AWS_ENDPOINT_URL", client.AWSEndpoint(p.Endpoint)}, {"AWS_ACCESS_KEY_ID", p.AccessKeyID},
 				{"AWS_SECRET_ACCESS_KEY", p.SecretAccessKey}, {"AWS_REGION", region}}
 			if p.CAFile != "" {
 				vars = append(vars, [2]string{"AWS_CA_BUNDLE", p.CAFile})
@@ -214,6 +217,11 @@ func mergeConfig(cmd *cobra.Command, flags core.Config) (core.Config, error) {
 	set("dns-bind", func() { cfg.DNSBind = flags.DNSBind })
 	set("tls-cert", func() { cfg.TLSCert = flags.TLSCert })
 	set("tls-key", func() { cfg.TLSKey = flags.TLSKey })
+	set("metrics-addr", func() { cfg.MetricsAddr = flags.MetricsAddr })
+	set("metrics-addr-insecure", func() { cfg.MetricsAddrInsecure = flags.MetricsAddrInsecure })
+	if err := server.ValidateMetricsAddr(cfg.MetricsAddr, cfg.MetricsAddrInsecure); err != nil {
+		return cfg, err
+	}
 	if err := core.ValidatePublicURL(cfg.PublicURL); err != nil {
 		return cfg, err
 	}

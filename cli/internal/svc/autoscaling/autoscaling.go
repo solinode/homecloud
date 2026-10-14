@@ -162,6 +162,7 @@ func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 	for {
+		core.Beat("autoscaling", 10*time.Second)
 		select {
 		case <-ctx.Done():
 			return

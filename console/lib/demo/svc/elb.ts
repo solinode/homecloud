@@ -3,6 +3,7 @@ import { DAY, arn, ago, hashStr, hex, stableId } from "../util"
 import { INSTANCE, NAMES, SUBNET, VPC_SHOP } from "../ids"
 import { allocIp, defaultSubnet, vpcState } from "./vpc"
 import { instanceHooks } from "./ec2"
+import { serviceTask } from "./ecs"
 import type { ElbListener, ElbRule, ElbTarget, Instance, LoadBalancer, TargetGroup } from "@/lib/types"
 
 // Elastic Load Balancing: load balancers, listeners, rules, target groups and
@@ -42,9 +43,11 @@ function seed(): ElbState {
     tgs: [
       tg(NAMES.tgWeb, 80, "/healthz", 90 * DAY, [t(INSTANCE.web1, 80, "10.0.11.21"), t(INSTANCE.web2, 80, "10.0.12.34")], VPC_SHOP, { healthy_threshold: 3 }),
       tg(TG_API, 8080, "/health", 60 * DAY, [
-        t(stableId("", "task-a", 32), 8080, "10.0.11.87"),
-        t(stableId("", "task-b", 32), 8080, "10.0.12.91"),
-        t(stableId("", "task-c", 32), 8080, "10.0.12.94", "unhealthy", "Health checks failed with these codes: [503]"),
+        // shop-api's three running ECS tasks
+        ...[0, 1, 2].map((i) => {
+          const task = serviceTask("shop-api", i)
+          return i === 2 ? t(task.id, 8080, task.ip, "unhealthy", "Health checks failed with these codes: [503]") : t(task.id, 8080, task.ip)
+        }),
       ]),
     ],
     lbs: [

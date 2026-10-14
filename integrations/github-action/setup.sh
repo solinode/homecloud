@@ -97,9 +97,12 @@ mask_password() {
   return 0
 }
 
-endpoint="http://127.0.0.1:$port"
+# The server listens on 127.0.0.1; AWS tools get it as localhost, like `homecloud aws-env`
+# prints it: S3 Control (which the Terraform AWS provider calls for every bucket) puts the
+# account ID in front of the host, and only a host name resolves that way.
+endpoint="http://localhost:$port"
 deadline=$((SECONDS + timeout))
-until curl -fsS --connect-timeout 2 --max-time 5 "$endpoint/api/v1/health" >/dev/null 2>&1; do
+until curl -fsS --connect-timeout 2 --max-time 5 "http://127.0.0.1:$port/api/v1/health" >/dev/null 2>&1; do
   mask_password
   kill -0 "$pid" 2>/dev/null || fail "homecloud serve exited before it became healthy (the post step prints its log)"
   [ "$SECONDS" -lt "$deadline" ] || fail "HomeCloud was not healthy after ${timeout}s"

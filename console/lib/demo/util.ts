@@ -38,11 +38,32 @@ export function hashStr(s: string): number {
   return h >>> 0
 }
 
+// The demo's source of randomness. It is Math.random at runtime, so resources
+// created in a session get fresh ids, and a seeded PRNG while the fixtures are
+// built (see seeded), so every fixture id, name and ARN comes out the same on
+// every page load and a deep link to a detail page survives a reload or a
+// visit from a fresh browser.
+let source: () => number = Math.random
+
+/** random is Math.random, except inside seeded() where it is deterministic. Use it instead of Math.random. */
+export const random = () => source()
+
+/** seeded runs fn with random() (and so hex/uid/uuid) drawing from a PRNG seeded with `seed`. */
+export function seeded<T>(seed: string, fn: () => T): T {
+  const prev = source
+  source = rng(seed)
+  try {
+    return fn()
+  } finally {
+    source = prev
+  }
+}
+
 const HEX = "0123456789abcdef"
 /** hex returns n random lowercase hex chars (for ids created at runtime). */
 export function hex(n: number): string {
   let s = ""
-  for (let i = 0; i < n; i++) s += HEX[Math.floor(Math.random() * 16)]
+  for (let i = 0; i < n; i++) s += HEX[Math.floor(random() * 16)]
   return s
 }
 /** uid("i-", 17) -> "i-0a1b2c..." (AWS-style resource id). */

@@ -359,6 +359,8 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		return fmt.Errorf("internal error: routes without a resource ARN: %v", httpx.Unscoped)
 	}
 	started := time.Now()
+	op := newOps(cfg, dk, lambdaSvc, account, started)
+	op.Routes(rt)
 	mux.HandleFunc("GET /api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		httpx.WriteJSON(w, 200, map[string]any{"status": "ok", "version": Version, "region": cfg.Region, "uptime_seconds": int(time.Since(started).Seconds())})
 	})
@@ -385,6 +387,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	go dnsSvc.Run(ctx)
 	go ec2Svc.RunIMDS(ctx)
 	go vpcSvc.RunFirewall(ctx)
+	go op.runDisk(ctx)
 	go func() {
 		if err := ecrSvc.Start(ctx); err != nil {
 			logf("ecr: %v", err)
@@ -403,6 +406,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 		t := time.NewTicker(time.Hour)
 		defer t.Stop()
 		for {
+			core.Beat("maintenance", time.Hour)
 			trailSvc.Prune()
 			secSvc.PurgeExpired()
 			iamSvc.PurgeExpired()
@@ -421,6 +425,11 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 			s3Svc.ServePresigned(w, r)
 			return
 		}
+		if r.URL.Path == metricsPath && !awsapi.IsSigned(r) {
+			// Prometheus scrapes with basic auth; a bucket named "metrics" must not claim it.
+			native.ServeHTTP(w, basicToBearer(r))
+			return
+		}
 		// AWS SDK/CLI requests (SigV4-signed, or X-Amz-Target) take the AWS protocols.
 		if awsapi.Match(r) && !strings.HasPrefix(r.Header.Get("Authorization"), "Bearer ") {
 			awsHandler.ServeHTTP(w, r)
@@ -432,13 +441,18 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if err != nil {
 		return err
 	}
-	var handler http.Handler = trust.Wrap(root)
+	var handler http.Handler = op.instrument(trust.Wrap(root))
 	srv := &http.Server{Addr: cfg.APIAddr, Handler: handler, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 256 << 10}
 	if workloadLn != nil {
 		// Workloads are never proxies: their listeners ignore forwarding headers.
-		defer serveWorkloads(workloadLn, root, logf)()
+		defer serveWorkloads(workloadLn, op.instrument(root), logf)()
 		logf("workloads reach the API over plain HTTP at %s (not reachable from outside this machine)", env.ContainerAPI)
 	}
+	_, stopMetrics, err := op.serveMetricsAddr(logf)
+	if err != nil {
+		return err
+	}
+	defer stopMetrics()
 	errc := make(chan error, 1)
 	go func() {
 		if cfg.TLSCert != "" {
@@ -452,7 +466,7 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if goruntime.GOOS == "linux" && dk.Self() == "" {
 		if host, _, _ := net.SplitHostPort(cfg.APIAddr); host == "127.0.0.1" || host == "localhost" {
 			if gw := dk.BridgeGateway(); gw != "" {
-				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: root, ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 256 << 10}
+				extra := &http.Server{Addr: net.JoinHostPort(gw, apiPort), Handler: op.instrument(root), ReadHeaderTimeout: 10 * time.Second, IdleTimeout: 2 * time.Minute, MaxHeaderBytes: 256 << 10}
 				go func() {
 					var err error
 					if cfg.TLSCert != "" {

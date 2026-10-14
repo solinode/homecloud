@@ -214,6 +214,7 @@ func (s *Service) Run(ctx context.Context) {
 		}
 		if attempt%10 == 0 {
 			log.Printf("route53: %v (retrying)", err)
+			core.ReportError("route53", err.Error())
 		}
 		select {
 		case <-ctx.Done():
@@ -224,6 +225,7 @@ func (s *Service) Run(ctx context.Context) {
 	t := time.NewTicker(10 * time.Second)
 	defer t.Stop()
 	for {
+		core.Beat("route53", 10*time.Second)
 		s.sync(ctx)
 		select {
 		case <-ctx.Done():

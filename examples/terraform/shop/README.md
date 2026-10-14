@@ -28,8 +28,10 @@ terraform init
 terraform apply -auto-approve                     # about four minutes, most of it the database and load balancer
 ```
 
-`endpoint` defaults to `http://localhost:8080`. Use a host name such as `localhost`, not an IP address: the
-S3 client puts the account and bucket name in the host name.
+`endpoint` defaults to `http://localhost:8080`; `homecloud aws-env` prints the right value for your server
+(`localhost` for a local one). Use a host name, not an IP address: S3 Control, which newer AWS providers
+call for every bucket (6.x reads bucket tags that way), puts the account ID in front of the host
+(`123456789012.localhost` resolves, `123456789012.127.0.0.1` does not).
 
 ### Provider settings, and why
 

@@ -205,7 +205,8 @@ first start: created account 123456789012
 Copy the password now, or set one you prefer (see [Security notes](#13-security-notes)). The CLI
 credentials (an access key for the `root` user) are written to `~/.homecloud/credentials` (mode 0600).
 When the server listens on a wildcard address such as `0.0.0.0:8080`, the file records `127.0.0.1` (or
-the `--public-url`) as the endpoint. The data directory defaults to `~/.homecloud`; override it with
+the `--public-url`) as the endpoint (`homecloud aws-env` gives AWS tools a loopback address as
+`localhost`, see [below](#9-use-it-from-your-laptop-the-aws-cli-and-terraform)). The data directory defaults to `~/.homecloud`; override it with
 `--data-dir` or the `HOMECLOUD_DATA_DIR` environment variable.
 
 By default the API and console listen on `127.0.0.1:8080` only, so nothing is reachable from outside
@@ -446,8 +447,10 @@ aws sts get-caller-identity
 ```
 
 **Terraform and OpenTofu** use the standard `hashicorp/aws` provider with its `endpoints {}` block
-pointing at HomeCloud; the credentials come from the same environment variables. Use a host name, not an
-IP address, in the endpoint. See [`examples/terraform/shop`](../examples/terraform/shop/README.md) and
+pointing at HomeCloud (or just `AWS_ENDPOINT_URL`); the credentials come from the same environment
+variables. Use a host name, not an IP address, in the endpoint (`localhost` for a local server, as
+`homecloud aws-env` prints it): S3 Control, which the provider calls for every bucket, puts the account ID
+in front of the host. See [`examples/terraform/shop`](../examples/terraform/shop/README.md) and
 [aws-compat.md](aws-compat.md) for the supported services.
 
 ## 10. Backups and restore
@@ -593,6 +596,10 @@ container on the instance's VPC network. Container images need nothing of this.
   decrypts, so grant that action (and `homecloud:*`) only to administrators, and encrypt backups before
   they leave the machine.
 - Keep the host patched (`unattended-upgrades` on Ubuntu and Debian) and upgrade HomeCloud regularly.
+- **Monitor it.** `/metrics` serves Prometheus metrics to an IAM user allowed `homecloud:GetMetrics`
+  (never anonymously on the API port), and the console's **System status** page shows Docker, helper,
+  background loop and disk state. See [Monitoring](monitoring.md) for a least-privilege `prometheus`
+  user, scrape configs, a Grafana dashboard and alert rules.
 
 ## 14. Troubleshooting
 

@@ -415,13 +415,21 @@ func (s *Service) createPool(c *httpx.Ctx) (any, error) {
 	return s.poolView(p), nil
 }
 
-// checkPolicy validates and normalizes a password policy.
+// Bounds of a password policy's minimum length, as AWS enforces them on
+// PasswordPolicyType.MinimumLength.
+const (
+	minPasswordLength = 6
+	maxPasswordLength = 99
+)
+
+// checkPolicy validates and normalizes a password policy. A zero minimum length
+// means "unset" on the native API and takes the default of 8.
 func checkPolicy(pp *PasswordPolicy) error {
 	if pp.MinLength == 0 {
 		pp.MinLength = 8
 	}
-	if pp.MinLength < 6 || pp.MinLength > 99 {
-		return core.BadRequest("password_policy.min_length must be 6-99")
+	if pp.MinLength < minPasswordLength || pp.MinLength > maxPasswordLength {
+		return core.BadRequest("password_policy.min_length must be %d-%d", minPasswordLength, maxPasswordLength)
 	}
 	return nil
 }

@@ -431,6 +431,7 @@ func (s *Service) PollQueues(ctx context.Context) {
 			continue
 		case <-t.C:
 		}
+		core.Beat("lambda-pollers", time.Second)
 		for _, m := range store.List[Mapping](s.env.Store, cMappings) {
 			if !m.Enabled || inflight[m.ID] {
 				continue

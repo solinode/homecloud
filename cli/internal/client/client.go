@@ -11,6 +11,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
@@ -81,6 +82,29 @@ func Load() (Profile, error) {
 		return p, errors.New("no credentials: start the server with `homecloud serve` (it writes " + CredentialsFile() + ") or run `homecloud configure`")
 	}
 	return p, nil
+}
+
+// AWSEndpoint is the endpoint to give AWS tools (AWS_ENDPOINT_URL): the API
+// endpoint with a loopback IP address replaced by "localhost". Path-style S3
+// works with either, but S3 Control puts the account ID in front of the host
+// (http://123456789012.localhost:8080/v20180820/...), and the Terraform AWS
+// provider calls it for every aws_s3_bucket (6.x reads bucket tags that way),
+// as do `aws s3control` and boto3's s3control client. 123456789012.127.0.0.1
+// does not resolve; *.localhost resolves to loopback.
+func AWSEndpoint(endpoint string) string {
+	u, err := url.Parse(endpoint)
+	if err != nil || u.Host == "" {
+		return endpoint
+	}
+	if h := u.Hostname(); h != "127.0.0.1" && h != "::1" {
+		return endpoint
+	}
+	if port := u.Port(); port != "" {
+		u.Host = net.JoinHostPort("localhost", port)
+	} else {
+		u.Host = "localhost"
+	}
+	return u.String()
 }
 
 func Save(p Profile) error {

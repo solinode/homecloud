@@ -18,6 +18,26 @@ export const BASE_PATH = process.env.NEXT_PUBLIC_BASE_PATH ?? ""
 
 export const DEMO = process.env.NEXT_PUBLIC_DEMO === "1"
 
+/**
+ * awsEndpoint is the AWS_ENDPOINT_URL to suggest for this server, as
+ * `homecloud aws-env` prints it: the API's origin, with a loopback IP address
+ * replaced by "localhost". S3 Control (which the Terraform AWS provider calls
+ * for every bucket) puts the account ID in front of the host, and
+ * 123456789012.127.0.0.1 does not resolve while 123456789012.localhost does.
+ */
+export function awsEndpoint(): string {
+  if (DEMO) return "http://localhost:8080"
+  const origin = API_BASE || (typeof window === "undefined" ? "" : window.location.origin)
+  try {
+    const u = new URL(origin)
+    if (u.hostname !== "127.0.0.1" && u.hostname !== "[::1]") return origin
+    u.hostname = "localhost"
+    return u.toString().replace(/\/+$/, "")
+  } catch {
+    return origin
+  }
+}
+
 /** Marker href for links that need a real server (downloads); the demo shell intercepts clicks on it. */
 export const DEMO_UNAVAILABLE_HREF = "#demo-unavailable"
 
