@@ -1,4 +1,4 @@
-import { badRequest, conflict, err, getState, notFound, type DemoService, type Router } from "../engine"
+import { badRequest, conflict, err, getState, notFound, type DemoService, type Router, type State } from "../engine"
 import { ACCOUNT, DAY, HOUR, REGION, ago, ahead, hex, stableId, uuid, random } from "../util"
 import { NAMES } from "../ids"
 import type { Secret, SecretValue, SecretVersion } from "@/lib/types"
@@ -255,5 +255,42 @@ function routes(r: Router) {
   })
 }
 
-const service: DemoService = { name: "secrets", seed, routes }
+interface DbWithSecret {
+  id: string
+  kind: string
+  engine: string
+  secret_name?: string
+  master_username?: string
+  db_name?: string
+  endpoint: { address: string; port: number }
+  created_at: string
+}
+
+/**
+ * syncDbSecrets keeps the rds!<id> secret, managed by RDS, of every RDS and
+ * ElastiCache instance that has one (as the server creates it with the
+ * instance), and drops those of deleted instances.
+ */
+export function syncDbSecrets(s: State = getState()) {
+  const ss = s.secrets as SecretsState | undefined
+  if (!ss) return
+  const insts = ((s.rds as { instances?: DbWithSecret[] } | undefined)?.instances ?? []).filter((i) => i.secret_name)
+  const want = new Map(insts.map((i) => [i.secret_name as string, i]))
+  ss.secrets = ss.secrets.filter((x) => x.managed_by !== "rds" || want.has(x.name))
+  for (const [name, i] of want) {
+    if (ss.secrets.some((x) => x.name === name)) continue
+    const v: SecretVersion = { id: vid(`${name}-v0`), stages: ["AWSCURRENT"], created_at: i.created_at }
+    const value =
+      i.kind === "cache"
+        ? { password: "demo-not-a-real-secret", engine: i.engine, host: i.endpoint.address, port: i.endpoint.port }
+        : { username: i.master_username, password: "demo-not-a-real-secret", engine: i.engine, host: i.endpoint.address, port: i.endpoint.port, dbname: i.db_name, dbInstanceIdentifier: i.id }
+    ss.values[name] = { [v.id]: JSON.stringify(value, null, 2) }
+    ss.secrets.push({
+      name, arn: `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:${name}-${stableId("", name, 6)}`,
+      description: `Master credentials for database ${i.id}`, managed_by: "rds", versions: [v], created_at: i.created_at, updated_at: i.created_at, tags: null,
+    })
+  }
+}
+
+const service: DemoService = { name: "secrets", seed, routes, onLoad: (s) => syncDbSecrets(s) }
 export default service

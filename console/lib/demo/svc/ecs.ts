@@ -20,6 +20,12 @@ const ipFor = (subnet: string, seed: string) => {
   const r = Math.floor(rng(seed)() * 200) + 10
   return subnet === SUBNET.privateB ? `10.0.12.${r}` : subnet === SUBNET.privateA ? `10.0.11.${r}` : subnet === SUBNET.publicA ? `10.0.1.${r}` : subnet === SUBNET.publicB ? `10.0.2.${r}` : `172.31.${r}.${r % 250}`
 }
+/** serviceTask is the id and private IP of a seeded service's i-th running task (load balancer targets point at shop-api's). */
+export function serviceTask(svc: string, i: number): { id: string; ip: string } {
+  const id = taskId(`${svc}-${i}`)
+  return { id, ip: ipFor(SVC_SUBNETS[i % SVC_SUBNETS.length], id) }
+}
+const SVC_SUBNETS = [SUBNET.privateA, SUBNET.privateB]
 const vpcFor = (subnet: string) => (subnet === SUBNET.defaultA || subnet === SUBNET.defaultB ? VPC_DEFAULT : VPC_SHOP)
 
 // --------------------------------------------------------------- seed ------
@@ -76,7 +82,7 @@ const mkTask = (o: Partial<EcsTask> & { id: string; task_definition: string }, a
 function seed(): EcsState {
   const taskDefs = seedTaskDefs()
   const tasks: EcsTask[] = []
-  const svcTasks = (svc: string, tdk: string, n: number, age: number, subnets = [SUBNET.privateA, SUBNET.privateB]) => {
+  const svcTasks = (svc: string, tdk: string, n: number, age: number, subnets = SVC_SUBNETS) => {
     for (let i = 0; i < n; i++) tasks.push(mkTask({ id: taskId(`${svc}-${i}`), service: svc, task_definition: tdk }, age - i * 13 * MIN, subnets[i % subnets.length]))
   }
   svcTasks(NAMES.ecsWorker, "shop-worker:5", 2, 5 * DAY)

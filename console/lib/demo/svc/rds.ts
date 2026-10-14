@@ -2,6 +2,7 @@ import { badRequest, conflict, getState, later, notFound, unavailable, err, type
 import type { DbClass, DbEngine, DbEngines, DbInstance, DbSnapshot } from "@/lib/types"
 import { DAY, HOUR, MIN, AZ_A, AZ_B, ago, arn, nowIso, rng, random } from "../util"
 import { NAMES, SG, SUBNET, VPC_SHOP } from "../ids"
+import { syncDbSecrets } from "./secrets"
 
 interface RdsState {
   instances: DbInstance[]
@@ -160,6 +161,7 @@ function provision(body: any, snap?: DbSnapshot, status: "creating" | "restoring
   }
   inst.endpoint.connect_hint = connectHint(inst)
   st().instances.push(inst)
+  syncDbSecrets()
   setStatus(id, "available")
   return inst
 }
@@ -214,6 +216,7 @@ function routes(r: Router) {
     }
     st().snapshots = st().snapshots.filter((s) => !(s.source_instance === i.id && s.type === "automated"))
     st().instances = st().instances.filter((x) => x !== i)
+    syncDbSecrets()
   })
   const action = (name: string, from: string[], during: string, to: string) =>
     r.post(`${base}/instances/:id/${name}`, ({ params }) => {
