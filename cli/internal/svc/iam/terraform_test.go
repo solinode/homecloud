@@ -12,20 +12,10 @@ import (
 )
 
 // TestTerraform applies and destroys a Terraform configuration with the AWS
-// provider against HomeCloud's IAM and STS. It needs terraform (HC_TEST_TERRAFORM
-// or PATH) and network access to download the provider on first use; set
-// TF_PLUGIN_CACHE_DIR to reuse the download.
+// provider against HomeCloud's IAM and STS. Opt-in (see awstest.Terraform) since it
+// downloads the provider; set TF_PLUGIN_CACHE_DIR to reuse the download.
 func TestTerraform(t *testing.T) {
-	bin := os.Getenv("HC_TEST_TERRAFORM")
-	if bin == "" {
-		var err error
-		if bin, err = exec.LookPath("terraform"); err != nil {
-			t.Skip("terraform not installed (set HC_TEST_TERRAFORM)")
-		}
-	}
-	if testing.Short() {
-		t.Skip("terraform test is slow")
-	}
+	bin := awstest.Terraform(t)
 	h := awstest.New(t)
 	dir := t.TempDir()
 	write := func(policyAction string) {
