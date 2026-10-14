@@ -205,7 +205,7 @@ docker run -d --name homecloud --network host \
   -v /var/run/docker.sock:/var/run/docker.sock \
   homecloud:test serve --data-dir /data --addr 127.0.0.1:18080
 until curl -fs http://127.0.0.1:18080/api/v1/health; do sleep 1; done
-docker exec homecloud homecloud aws-env      # credentials; the endpoint is http://127.0.0.1:18080
+docker exec homecloud homecloud aws-env      # credentials; the endpoint is http://localhost:18080
 ```
 
 To clean up afterwards, remove the HomeCloud container with its data volume (`-v`), then
@@ -224,5 +224,12 @@ docker volume rm $(docker volume ls -q --filter label=homecloud.account=ACCOUNT)
 - AWS CLI v2, boto3 1.28+, aws-sdk-go-v2, the JavaScript SDK v3 and the Terraform AWS
   provider 5.x read `AWS_ENDPOINT_URL`.
 - Use path-style S3 addressing (`UsePathStyle`, `addressing_style: path`,
-  `s3_use_path_style = true`) when the endpoint is an IP address or `localhost`.
+  `s3_use_path_style = true`): HomeCloud serves buckets by path, so bucket names need not
+  resolve as host names.
+- Name a local server `localhost`, not `127.0.0.1`, as `homecloud aws-env` and the GitHub
+  Action do. S3 Control puts the account ID in front of the endpoint's host
+  (`http://123456789012.localhost:8080/...`), and the Terraform AWS provider calls it for
+  every `aws_s3_bucket` (6.x reads bucket tags that way), as do `aws s3control` and boto3's
+  `s3control` client; `123456789012.127.0.0.1` does not resolve. A remote server needs a
+  host name for the same reason.
 - The region is `us-east-1` unless the server was started with another one.

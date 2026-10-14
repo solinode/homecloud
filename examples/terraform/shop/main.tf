@@ -13,7 +13,7 @@ terraform {
 }
 
 variable "endpoint" {
-  description = "HomeCloud API endpoint. Use a host name such as localhost, not an IP address: the S3 client puts the bucket name in the host."
+  description = "HomeCloud API endpoint, as homecloud aws-env prints it. Use a host name such as localhost, not an IP address: S3 Control puts the account ID in front of the host."
   type        = string
   default     = "http://localhost:8080"
 }

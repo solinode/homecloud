@@ -156,6 +156,9 @@ func (h *Harness) Signed(t *testing.T, service, method, path string, header http
 	r.Header.Set("X-Amz-Content-Sha256", hash)
 	r.Header.Set("Host", r.URL.Host)
 	signed := []string{"host", "x-amz-content-sha256", "x-amz-date"}
+	if r.Header.Get("X-Amz-Target") != "" { // awsJson protocols must sign the target
+		signed = append(signed, "x-amz-target")
+	}
 	cred := h.AccessKeyID + "/" + now.Format("20060102") + "/us-east-1/" + service + "/aws4_request"
 	r.Header.Set("Authorization", "AWS4-HMAC-SHA256 Credential="+cred+", SignedHeaders="+strings.Join(signed, ";")+", Signature=0")
 	sig, err := awsapi.ParseSignature(r)

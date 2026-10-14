@@ -192,17 +192,29 @@ func mergeExtras(dst map[string]any, in map[string]any) map[string]any {
 	return dst
 }
 
-// awsPolicy reads Policies.PasswordPolicy; AWS requires every character class
-// unless the policy turns it off.
-func awsPolicy(in map[string]any, base PasswordPolicy) PasswordPolicy {
+// awsPolicy reads Policies.PasswordPolicy. Without one, the pool keeps base
+// (for a new pool AWS's default: every character class). A given policy is
+// taken as a whole: a character class it leaves out is not required, as in
+// AWS, where the Go SDK v2 (and so the Terraform provider) omits false flags
+// from the request. MinimumLength must be 6-99.
+func awsPolicy(in map[string]any, base PasswordPolicy) (PasswordPolicy, error) {
 	pol, _ := in["Policies"].(map[string]any)
 	pp, _ := pol["PasswordPolicy"].(map[string]any)
 	if pp == nil {
-		return base
+		return base, nil
 	}
-	out := PasswordPolicy{MinLength: 8, RequireUppercase: true, RequireLowercase: true, RequireNumbers: true, RequireSymbols: true}
-	if n, ok := intOf(pp, "MinimumLength"); ok {
-		out.MinLength = n
+	out := PasswordPolicy{MinLength: 8}
+	if v, present := pp["MinimumLength"]; present && v != nil {
+		f, ok := v.(float64)
+		switch {
+		case !ok || f != float64(int(f)):
+			return out, invalid("1 validation error detected: Value '%v' at 'policies.passwordPolicy.minimumLength' failed to satisfy constraint: Member must be an integer", v)
+		case f < minPasswordLength:
+			return out, invalid("1 validation error detected: Value '%d' at 'policies.passwordPolicy.minimumLength' failed to satisfy constraint: Member must have value greater than or equal to %d", int(f), minPasswordLength)
+		case f > maxPasswordLength:
+			return out, invalid("1 validation error detected: Value '%d' at 'policies.passwordPolicy.minimumLength' failed to satisfy constraint: Member must have value less than or equal to %d", int(f), maxPasswordLength)
+		}
+		out.MinLength = int(f)
 	}
 	for k, dst := range map[string]*bool{"RequireUppercase": &out.RequireUppercase, "RequireLowercase": &out.RequireLowercase,
 		"RequireNumbers": &out.RequireNumbers, "RequireSymbols": &out.RequireSymbols} {
@@ -210,7 +222,7 @@ func awsPolicy(in map[string]any, base PasswordPolicy) PasswordPolicy {
 			*dst = v
 		}
 	}
-	return out
+	return out, nil
 }
 
 func adminOnly(in map[string]any) (v, ok bool) {
@@ -227,7 +239,11 @@ func (s *Service) awsCreateUserPool(q *awsapi.Req) (any, error) {
 		return nil, err
 	}
 	// Users sign up with their e-mail address as username when UsernameAttributes says so.
-	p, err := s.newPool(str(in, "PoolName"), awsPolicy(in, PasswordPolicy{MinLength: 8, RequireUppercase: true, RequireLowercase: true, RequireNumbers: true, RequireSymbols: true}),
+	pp, err := awsPolicy(in, PasswordPolicy{MinLength: 8, RequireUppercase: true, RequireLowercase: true, RequireNumbers: true, RequireSymbols: true})
+	if err != nil {
+		return nil, err
+	}
+	p, err := s.newPool(str(in, "PoolName"), pp,
 		true, func() bool { v, ok := adminOnly(in); return !(ok && v) }(), tagsOf(in["UserPoolTags"]), mergeExtras(nil, in))
 	if err != nil {
 		return nil, err
@@ -386,7 +402,11 @@ func (s *Service) awsUpdateUserPool(q *awsapi.Req) (any, error) {
 		return nil, err
 	}
 	_, err := s.modPool(id, func(p *Pool) error {
-		p.PasswordPolicy = awsPolicy(in, p.PasswordPolicy)
+		pp, err := awsPolicy(in, p.PasswordPolicy)
+		if err != nil {
+			return err
+		}
+		p.PasswordPolicy = pp
 		if err := checkPolicy(&p.PasswordPolicy); err != nil {
 			return err
 		}

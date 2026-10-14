@@ -146,14 +146,14 @@
 <div class="code">
   <div class="code-bar"><span class="file">shell</span></div>
 <pre><code><span class="k">eval</span> <span class="s">"$(homecloud aws-env)"</span>
-<span class="k">echo</span> $AWS_ENDPOINT_URL                  <span class="c"># http://127.0.0.1:8080</span>
+<span class="k">echo</span> $AWS_ENDPOINT_URL                  <span class="c"># http://localhost:8080</span>
 <span class="f">aws</span> s3 ls                               <span class="c"># plain aws, no wrapper needed</span></code></pre>
 </div>
 <p>Things to change:</p>
 <ul>
   <li><strong>Credentials.</strong> Dummy keys such as <code>test</code>/<code>test</code> will not work: HomeCloud verifies SigV4 signatures. Use the keys from <code>homecloud aws-env</code>, or create an IAM user with only the permissions your code should have.</li>
   <li><strong>Hard-coded endpoints.</strong> Replace <code>localhost:4566</code> with <code>AWS_ENDPOINT_URL</code>, which current SDKs read on their own.</li>
-  <li><strong>S3 addressing.</strong> Use path-style addressing (<code>s3_use_path_style = true</code>, <code>addressing_style: path</code>, <code>UsePathStyle</code>) when the endpoint is <code>localhost</code> or an IP.</li>
+  <li><strong>S3 addressing.</strong> Use path-style addressing (<code>s3_use_path_style = true</code>, <code>addressing_style: path</code>, <code>UsePathStyle</code>): HomeCloud serves buckets by path.</li>
   <li><strong>Terraform.</strong> Instead of <code>tflocal</code>, use the stock provider with <code>s3_use_path_style</code>; <a href="/terraform-local-aws/">the Terraform guide</a> shows both ways to set the endpoint.</li>
   <li><strong>Permissions.</strong> Code that ran with no IAM checks may now get <code>AccessDenied</code>. That is usually the point, but budget time for it.</li>
 </ul>

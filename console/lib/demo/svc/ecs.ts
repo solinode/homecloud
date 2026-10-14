@@ -1,5 +1,5 @@
 import { badRequest, conflict, getState, later, notFound, type DemoService, type Router, type State } from "../engine"
-import { DAY, MIN, ACCOUNT, REGION, ago, arn, clone, nowIso, rng, stableId, uuid } from "../util"
+import { DAY, MIN, ACCOUNT, REGION, ago, arn, clone, nowIso, rng, stableId, uuid, random } from "../util"
 import { NAMES, SG, SUBNET, VPC_DEFAULT, VPC_SHOP } from "../ids"
 import { ECR_REGISTRY } from "./ecr"
 import type { EcsService, EcsServiceEvent, EcsTask, EcsTaskDefinition } from "@/lib/types"
@@ -20,6 +20,12 @@ const ipFor = (subnet: string, seed: string) => {
   const r = Math.floor(rng(seed)() * 200) + 10
   return subnet === SUBNET.privateB ? `10.0.12.${r}` : subnet === SUBNET.privateA ? `10.0.11.${r}` : subnet === SUBNET.publicA ? `10.0.1.${r}` : subnet === SUBNET.publicB ? `10.0.2.${r}` : `172.31.${r}.${r % 250}`
 }
+/** serviceTask is the id and private IP of a seeded service's i-th running task (load balancer targets point at shop-api's). */
+export function serviceTask(svc: string, i: number): { id: string; ip: string } {
+  const id = taskId(`${svc}-${i}`)
+  return { id, ip: ipFor(SVC_SUBNETS[i % SVC_SUBNETS.length], id) }
+}
+const SVC_SUBNETS = [SUBNET.privateA, SUBNET.privateB]
 const vpcFor = (subnet: string) => (subnet === SUBNET.defaultA || subnet === SUBNET.defaultB ? VPC_DEFAULT : VPC_SHOP)
 
 // --------------------------------------------------------------- seed ------
@@ -42,7 +48,7 @@ function td(family: string, revision: number, image: string, o: Partial<EcsTaskD
 function seedTaskDefs(): EcsTaskDefinition[] {
   const img = (n: string, t: string) => `${ECR_REGISTRY}/${n}:${t}`
   const workerEnv = { QUEUE_URL: `https://sqs.${REGION}.amazonaws.com/${ACCOUNT}/${NAMES.ordersQueue}`, LOG_LEVEL: "info", DB_HOST: "shop-db.c9demoexample.us-east-1.rds.amazonaws.com" }
-  const secrets = [{ name: "DB_PASSWORD", value_from: "shop/db/password" }]
+  const secrets = [{ name: "DB_PASSWORD", value_from: "shop/prod/db-password:password" }]
   return [
     td("shop-worker", 1, img("shop/worker", "v1.6.0"), { environment: workerEnv }, 110 * DAY, false),
     td("shop-worker", 2, img("shop/worker", "v1.7.1"), { environment: workerEnv }, 90 * DAY, false),
@@ -76,7 +82,7 @@ const mkTask = (o: Partial<EcsTask> & { id: string; task_definition: string }, a
 function seed(): EcsState {
   const taskDefs = seedTaskDefs()
   const tasks: EcsTask[] = []
-  const svcTasks = (svc: string, tdk: string, n: number, age: number, subnets = [SUBNET.privateA, SUBNET.privateB]) => {
+  const svcTasks = (svc: string, tdk: string, n: number, age: number, subnets = SVC_SUBNETS) => {
     for (let i = 0; i < n; i++) tasks.push(mkTask({ id: taskId(`${svc}-${i}`), service: svc, task_definition: tdk }, age - i * 13 * MIN, subnets[i % subnets.length]))
   }
   svcTasks(NAMES.ecsWorker, "shop-worker:5", 2, 5 * DAY)
@@ -208,7 +214,7 @@ function launch(tdk: string, o: { service?: string; subnet?: string; command?: s
     created_at: nowIso(),
     started_at: null,
     stopped_at: null,
-    ...(!o.service && def.container_port ? { public_ports: { [`${def.container_port}/tcp`]: 32768 + Math.floor(Math.random() * 2000) } } : {}),
+    ...(!o.service && def.container_port ? { public_ports: { [`${def.container_port}/tcp`]: 32768 + Math.floor(random() * 2000) } } : {}),
   }
   S().tasks.push(t)
   later(2500, () => {

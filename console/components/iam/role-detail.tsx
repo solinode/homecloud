@@ -29,7 +29,7 @@ import { PageHeader } from "@/components/console/page-header"
 import { Section } from "@/components/console/section"
 import { StatusBadge } from "@/components/console/status-badge"
 import { TimeAgo } from "@/components/console/time-ago"
-import { API_BASE, api, errorMessage, seg } from "@/lib/api"
+import { api, awsEndpoint, errorMessage, seg } from "@/lib/api"
 import { formatDate, pluralize } from "@/lib/format"
 import { revalidate, useApi, useQueryParam, useSetQueryParam } from "@/lib/hooks"
 import type { Health, IamRole, PolicySummary, TempCredentials } from "@/lib/types"
@@ -456,11 +456,6 @@ function TrustTab({ role, onChanged }: { role: IamRole; onChanged: () => void })
 
 // ---- sessions ----
 
-function endpoint(): string {
-  if (API_BASE) return API_BASE
-  return typeof window === "undefined" ? "" : window.location.origin
-}
-
 function SessionsTab({ role, onChanged }: { role: IamRole; onChanged: () => void }) {
   const session = useSession()
   const health = useApi<Health>("/api/v1/health")
@@ -501,7 +496,7 @@ function SessionsTab({ role, onChanged }: { role: IamRole; onChanged: () => void
 
   const snippet = creds
     ? [
-        `export AWS_ENDPOINT_URL=${endpoint()}`,
+        `export AWS_ENDPOINT_URL=${awsEndpoint()}`,
         `export AWS_REGION=${region}`,
         `export AWS_ACCESS_KEY_ID=${creds.access_key_id}`,
         `export AWS_SECRET_ACCESS_KEY=${creds.secret_access_key}`,

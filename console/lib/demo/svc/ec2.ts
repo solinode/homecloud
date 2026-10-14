@@ -1,5 +1,5 @@
 import { badRequest, conflict, err, getState, later, notFound, unavailable, type DemoService, type Req, type Router, type State } from "../engine"
-import { AZ_A, AZ_B, DAY, HOUR, MIN, ACCOUNT, REGION, ago, arn, hashStr, hex, stableId, uid } from "../util"
+import { AZ_A, AZ_B, DAY, HOUR, MIN, ACCOUNT, REGION, ago, arn, hashStr, hex, stableId, uid, random } from "../util"
 import { AMI, EIP, INSTANCE, KEY_PAIRS, NAMES, SG, SUBNET, VOLUME, VPC_DEFAULT, VPC_SHOP, FS } from "../ids"
 import { allocIp, defaultSg, defaultSubnet, vpcState, VPC_DEV, SUBNET_DEV } from "./vpc"
 import {
@@ -90,7 +90,7 @@ const SUBNET_INFO: Record<string, { vpc: string; az: string }> = {
 
 const hostPort = (id: string, port: number) => 30000 + ((hashStr(`${id}:${port}`) + port) % 12000)
 const dnsOf = (ip: string) => `ip-${ip.replace(/\./g, "-")}.internal`
-const PROFILE = arn("iam", "instance-profile/shop-web-role", { region: null })
+const PROFILE = arn("iam", "instance-profile/shop-web-profile", { region: null })
 
 interface InstSpec {
   id: string
@@ -614,7 +614,7 @@ function routes(r: Router) {
     const i = instById(params.id)
     if (i.state !== "running") throw err(409, "InvalidInstanceState", `instance ${i.id} is ${i.state}`)
     const res = runCommand(i, body.command)
-    return { command_id: uid("cmd-", 16), instance_id: i.id, duration_ms: 18 + Math.floor(Math.random() * 60), ...res }
+    return { command_id: uid("cmd-", 16), instance_id: i.id, duration_ms: 18 + Math.floor(random() * 60), ...res }
   })
   r.get(`${I}/:id/terminal`, () => {
     throw unavailable("The browser terminal")

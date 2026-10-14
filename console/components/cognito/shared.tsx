@@ -66,7 +66,11 @@ export function SignUpBadge({ pool }: { pool: Pick<UserPool, "self_sign_up" | "a
   )
 }
 
-/** PasswordPolicyFields edits a password policy (min length 6-128 and the four character classes). */
+/** Bounds of a password policy's minimum length (AWS PasswordPolicyType.MinimumLength). */
+export const MIN_PW_LENGTH = 6
+export const MAX_PW_LENGTH = 99
+
+/** PasswordPolicyFields edits a password policy (min length 6-99, as in AWS, and the four character classes). */
 export function PasswordPolicyFields({ value, onChange, idPrefix, error }: { value: PasswordPolicy; onChange: (p: PasswordPolicy) => void; idPrefix: string; error?: string }) {
   const boxes: [keyof PasswordPolicy, string][] = [
     ["require_uppercase", "Uppercase letters"],
@@ -76,12 +80,12 @@ export function PasswordPolicyFields({ value, onChange, idPrefix, error }: { val
   ]
   return (
     <div className="flex flex-col gap-3">
-      <Field label="Minimum length" htmlFor={`${idPrefix}-min`} error={error} help="6-128 characters.">
+      <Field label="Minimum length" htmlFor={`${idPrefix}-min`} error={error} help={`${MIN_PW_LENGTH}-${MAX_PW_LENGTH} characters.`}>
         <Input
           id={`${idPrefix}-min`}
           type="number"
-          min={6}
-          max={128}
+          min={MIN_PW_LENGTH}
+          max={MAX_PW_LENGTH}
           value={Number.isNaN(value.min_length) ? "" : value.min_length}
           onChange={(e) => onChange({ ...value, min_length: e.target.value === "" ? NaN : Number(e.target.value) })}
           className="w-28"
@@ -101,7 +105,8 @@ export function PasswordPolicyFields({ value, onChange, idPrefix, error }: { val
   )
 }
 
-export const minLengthError = (n: number) => (!Number.isInteger(n) || n < 6 || n > 99 ? "Enter a whole number from 6 to 99" : undefined)
+export const minLengthError = (n: number) =>
+  !Number.isInteger(n) || n < MIN_PW_LENGTH || n > MAX_PW_LENGTH ? `Enter a whole number from ${MIN_PW_LENGTH} to ${MAX_PW_LENGTH}` : undefined
 
 /** SwitchRow is a labelled switch with a description (settings toggles). */
 export function SwitchRow({ id, label, description, checked, onChange, disabled }: { id: string; label: string; description: string; checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {

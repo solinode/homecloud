@@ -1,5 +1,5 @@
 import { badRequest, conflict, err, getState, later, notFound, unavailable, type DemoService, type Req, type Router, type State } from "../engine"
-import { DAY, HOUR, MIN, ACCOUNT, REGION, ago, arn, clone, nowIso, stableId, uuid, hex, rng } from "../util"
+import { DAY, HOUR, MIN, ACCOUNT, REGION, ago, arn, clone, nowIso, stableId, uuid, hex, rng, random } from "../util"
 import { NAMES, SG, SUBNET } from "../ids"
 import type {
   EventInvokeConfig,
@@ -303,7 +303,7 @@ function seedFunctions(): FnSpec[] {
       memory_mb: 512,
       timeout_seconds: 30,
       environment: { DB_HOST: "shop-db.c9demoexample.us-east-1.rds.amazonaws.com", PROVIDER_KEY: "demo-not-a-real-secret", ORDERS_QUEUE_URL: `https://sqs.${REGION}.amazonaws.com/${ACCOUNT}/${NAMES.ordersQueue}`, LOG_LEVEL: "INFO" },
-      role: roleArn("shop-payments-role"),
+      role: roleArn("shop-payments-lambda-role"),
       layers: [`${layerArn("shop-deps")}:3`],
       subnet_id: SUBNET.privateA,
       security_group_ids: [SG.web],
@@ -423,6 +423,37 @@ function seedFunctions(): FnSpec[] {
       tags: { app: "shop", env: "prod" },
       created: 27 * DAY,
       modified: 27 * DAY,
+      versions: 0,
+    },
+    // Rotation functions of the shop/prod/db-password and shop/prod/smtp-credentials secrets.
+    {
+      name: "shop-rotate-db-secret",
+      runtime: "python3.12",
+      handler: "rotate.handler",
+      description: "Rotates the shop-db master password (Secrets Manager rotation)",
+      memory_mb: 128,
+      timeout_seconds: 30,
+      environment: { SECRETS_MANAGER_ENDPOINT: `https://secretsmanager.${REGION}.amazonaws.com` },
+      role: roleArn("shop-rotation-role"),
+      subnet_id: SUBNET.privateA,
+      security_group_ids: [SG.web],
+      tags: { app: "shop", env: "prod" },
+      created: 300 * DAY,
+      modified: 90 * DAY,
+      versions: 0,
+    },
+    {
+      name: "shop-rotate-smtp-secret",
+      runtime: "python3.12",
+      handler: "rotate.handler",
+      description: "Rotates the SMTP relay credentials (Secrets Manager rotation)",
+      memory_mb: 128,
+      timeout_seconds: 3,
+      environment: { SECRETS_MANAGER_ENDPOINT: `https://secretsmanager.${REGION}.amazonaws.com` },
+      role: roleArn("shop-rotation-role"),
+      tags: { app: "shop", env: "prod" },
+      created: 150 * DAY,
+      modified: 150 * DAY,
       versions: 0,
     },
   ]
@@ -559,8 +590,8 @@ function seed(): LambdaState {
     {
       id: uuid(),
       function_name: "shop-image-resizer",
-      queue_name: "shop-image-jobs",
-      event_source_arn: arn("sqs", "shop-image-jobs"),
+      queue_name: "shop-image-resize",
+      event_source_arn: arn("sqs", "shop-image-resize"),
       batch_size: 5,
       batching_window_seconds: 10,
       function_response_types: [],
@@ -719,8 +750,8 @@ function invokeFn(f: LambdaFunction, event: Json, executed: string): InvokeResul
   const rid = uuid()
   const cold = warmCount(f.name) === 0
   const fail = !!(event && typeof event === "object" && (event.fail || event.error || event.simulate_error))
-  const initMs = cold ? 180 + Math.floor(Math.random() * 300) : 0
-  const dur = Math.round((f.runtime.startsWith("java") ? 120 : 8) + Math.random() * 90 + (cold ? 40 : 0))
+  const initMs = cold ? 180 + Math.floor(random() * 300) : 0
+  const dur = Math.round((f.runtime.startsWith("java") ? 120 : 8) + random() * 90 + (cold ? 40 : 0))
   const py = f.runtime.startsWith("python")
   const log = (level: string, msg: string) => (py ? `[${level}]\t${stamp()}\t${rid}\t${msg}` : `${stamp()}\t${rid}\t${level}\t${msg}`)
   const lines = [`START RequestId: ${rid} Version: ${executed}`]
@@ -741,7 +772,7 @@ function invokeFn(f: LambdaFunction, event: Json, executed: string): InvokeResul
   }
   lines.push(`END RequestId: ${rid}`)
   const billed = Math.ceil((dur + initMs) / 1) || 1
-  lines.push(`REPORT RequestId: ${rid}\tDuration: ${dur}.${Math.floor(Math.random() * 90 + 10)} ms\tBilled Duration: ${billed} ms\tMemory Size: ${f.memory_mb} MB\tMax Memory Used: ${Math.round(f.memory_mb * (0.18 + Math.random() * 0.2))} MB${cold ? `\tInit Duration: ${initMs}.${Math.floor(Math.random() * 90 + 10)} ms` : ""}`)
+  lines.push(`REPORT RequestId: ${rid}\tDuration: ${dur}.${Math.floor(random() * 90 + 10)} ms\tBilled Duration: ${billed} ms\tMemory Size: ${f.memory_mb} MB\tMax Memory Used: ${Math.round(f.memory_mb * (0.18 + random() * 0.2))} MB${cold ? `\tInit Duration: ${initMs}.${Math.floor(random() * 90 + 10)} ms` : ""}`)
   st.invoked[f.name] = nowIso()
   return {
     request_id: rid,

@@ -198,6 +198,19 @@ function seed(): IamState {
     R("shop-payments-lambda-role", "Execution role of the shop-payments Lambda function.", svcTrust("lambda.amazonaws.com"), [A("AWSLambdaBasicExecutionRole"), A("shop-payments-secrets-read")], {
       "orders-table-access": pdoc(allow(["dynamodb:PutItem", "dynamodb:GetItem", "dynamodb:UpdateItem"], `arn:aws:dynamodb:us-east-1:${ACCOUNT}:table/shop-orders`)),
     }, 120 * DAY, 11 * MIN),
+    // execution roles of the other Lambda functions (see lambda.ts)
+    ...(
+      [
+        ["shop-order-processor-role", "shop-order-processor", [A("AWSLambdaSQSQueueExecutionRole")], 140 * DAY, 2 * MIN],
+        ["shop-image-resizer-role", "shop-image-resizer", [A("AWSLambdaSQSQueueExecutionRole"), A("shop-uploads-readwrite")], 130 * DAY, 9 * MIN],
+        ["shop-api-role", "shop-api-handler", [A("AWSLambdaBasicExecutionRole")], 110 * DAY, 1 * MIN],
+        ["shop-report-role", "shop-nightly-report", [A("AWSLambdaBasicExecutionRole")], 100 * DAY, 9 * HOUR],
+        ["shop-notifier-role", "shop-notifier", [A("AWSLambdaBasicExecutionRole"), A("AmazonSNSFullAccess")], 95 * DAY, 30 * MIN],
+        ["shop-inventory-role", "shop-inventory-sync", [A("AWSLambdaBasicExecutionRole")], 90 * DAY, 3 * HOUR],
+        ["shop-stream-role", "shop-session-stream", [A("AWSLambdaBasicExecutionRole")], 80 * DAY, 4 * MIN],
+        ["shop-rotation-role", "the shop-rotate-db-secret and shop-rotate-smtp-secret", [A("AWSLambdaBasicExecutionRole"), A("SecretsManagerReadWrite")], 300 * DAY, 12 * DAY],
+      ] as [string, string, string[], number, number][]
+    ).map(([name, fn, attached, age, used]) => R(name, fn.startsWith("the ") ? `Execution role of ${fn} Lambda functions.` : `Execution role of the ${fn} Lambda function.`, svcTrust("lambda.amazonaws.com"), attached, null, age, used)),
     R("shop-fulfillment-sfn-role", "Lets the order-fulfillment state machine call Lambda and SQS.", svcTrust("states.amazonaws.com"), [], {
       "fulfillment-invoke": pdoc(allow("lambda:InvokeFunction", `arn:aws:lambda:us-east-1:${ACCOUNT}:function:shop-*`), allow(["sqs:SendMessage"], Q_ARN), allow("sns:Publish", `arn:aws:sns:us-east-1:${ACCOUNT}:${NAMES.ordersTopic}`)),
     }, 110 * DAY, 40 * MIN),

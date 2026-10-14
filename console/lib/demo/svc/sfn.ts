@@ -1,5 +1,5 @@
 import { badRequest, conflict, err, getState, type DemoService, type Router } from "../engine"
-import { DAY, HOUR, MIN, ago, arn, clone, nowIso, uuid } from "../util"
+import { DAY, HOUR, MIN, ago, arn, clone, nowIso, uuid, random } from "../util"
 import { NAMES } from "../ids"
 import type { AslMachine, AslState, ExecutionCounts, ExecutionStatus, SfnExecution, SfnHistoryEvent, StateMachine, StateMachineSummary } from "@/lib/types"
 
@@ -25,7 +25,7 @@ const S = (): SfnState => getState().sfn as SfnState
 const machineArn = (name: string) => arn("states", `stateMachine:${name}`)
 const execArn = (machine: string, name: string) => arn("states", `execution:${machine}:${name}`)
 const lambdaArn = (fn: string) => arn("lambda", `function:${fn}`)
-const SFN_ROLE = arn("iam", "role/shop-sfn-role", { region: null })
+const SFN_ROLE = arn("iam", "role/shop-fulfillment-sfn-role", { region: null })
 const NAME_RE = /^[A-Za-z0-9_-]{1,80}$/
 
 // ---- definitions ----
@@ -154,7 +154,7 @@ function taskOutput(fn: string, input: unknown): unknown {
     case "shop-order-processor":
       return { order_id: inp.order_id ?? "ord_10432", valid: true, item_count: Array.isArray(inp.items) ? inp.items.length : 2 }
     case NAMES.paymentsFn:
-      return { status: "succeeded", payment_id: `pay_${Math.random().toString(16).slice(2, 10)}`, amount: inp.total ?? 4999, currency: inp.currency ?? "usd" }
+      return { status: "succeeded", payment_id: `pay_${random().toString(16).slice(2, 10)}`, amount: inp.total ?? 4999, currency: inp.currency ?? "usd" }
     case "shop-inventory-sync":
       return { reserved: true, warehouse: "wh-east-1" }
     case "shop-notifier":
@@ -194,7 +194,7 @@ function simulate(def: AslMachine, input: unknown, startMs: number, opts: SimOpt
   let t = startMs
   let id = 0
   const tick = (min = 8, max = 60) => {
-    t += min + Math.floor(Math.random() * (max - min))
+    t += min + Math.floor(random() * (max - min))
   }
   const ev = (type: string, state?: string, details?: unknown) => {
     tick()

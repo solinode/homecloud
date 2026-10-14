@@ -1,5 +1,5 @@
-import { badRequest, conflict, err, getState, notFound, type DemoService, type Router } from "../engine"
-import { ACCOUNT, DAY, HOUR, REGION, ago, ahead, hex, stableId, uuid } from "../util"
+import { badRequest, conflict, err, getState, notFound, type DemoService, type Router, type State } from "../engine"
+import { ACCOUNT, DAY, HOUR, REGION, ago, ahead, hex, stableId, uuid, random } from "../util"
 import { NAMES } from "../ids"
 import type { Secret, SecretValue, SecretVersion } from "@/lib/types"
 
@@ -183,7 +183,7 @@ function routes(r: Router) {
     if (body?.rotate_immediately !== false) {
       const cur = s.versions.find((v) => v.stages.includes("AWSCURRENT"))
       const old = (cur && st().values[s.name]?.[cur.id]) || "demo-not-a-real-secret"
-      const nv = putVersion(s, old.replace(/(-r\d+)?$/, "") + `-r${Math.floor(Math.random() * 900 + 100)}`)
+      const nv = putVersion(s, old.replace(/(-r\d+)?$/, "") + `-r${Math.floor(random() * 900 + 100)}`)
       versionId = nv.id
       s.last_rotated = new Date().toISOString()
     }
@@ -251,9 +251,46 @@ function routes(r: Router) {
     const n = Number(query.length) || 32
     if (n < 8 || n > 4096) throw badRequest("length must be between 8 and 4096")
     const cs = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789"
-    return { password: Array.from({ length: n }, () => cs[Math.floor(Math.random() * cs.length)]).join("") }
+    return { password: Array.from({ length: n }, () => cs[Math.floor(random() * cs.length)]).join("") }
   })
 }
 
-const service: DemoService = { name: "secrets", seed, routes }
+interface DbWithSecret {
+  id: string
+  kind: string
+  engine: string
+  secret_name?: string
+  master_username?: string
+  db_name?: string
+  endpoint: { address: string; port: number }
+  created_at: string
+}
+
+/**
+ * syncDbSecrets keeps the rds!<id> secret, managed by RDS, of every RDS and
+ * ElastiCache instance that has one (as the server creates it with the
+ * instance), and drops those of deleted instances.
+ */
+export function syncDbSecrets(s: State = getState()) {
+  const ss = s.secrets as SecretsState | undefined
+  if (!ss) return
+  const insts = ((s.rds as { instances?: DbWithSecret[] } | undefined)?.instances ?? []).filter((i) => i.secret_name)
+  const want = new Map(insts.map((i) => [i.secret_name as string, i]))
+  ss.secrets = ss.secrets.filter((x) => x.managed_by !== "rds" || want.has(x.name))
+  for (const [name, i] of want) {
+    if (ss.secrets.some((x) => x.name === name)) continue
+    const v: SecretVersion = { id: vid(`${name}-v0`), stages: ["AWSCURRENT"], created_at: i.created_at }
+    const value =
+      i.kind === "cache"
+        ? { password: "demo-not-a-real-secret", engine: i.engine, host: i.endpoint.address, port: i.endpoint.port }
+        : { username: i.master_username, password: "demo-not-a-real-secret", engine: i.engine, host: i.endpoint.address, port: i.endpoint.port, dbname: i.db_name, dbInstanceIdentifier: i.id }
+    ss.values[name] = { [v.id]: JSON.stringify(value, null, 2) }
+    ss.secrets.push({
+      name, arn: `arn:aws:secretsmanager:${REGION}:${ACCOUNT}:secret:${name}-${stableId("", name, 6)}`,
+      description: `Master credentials for database ${i.id}`, managed_by: "rds", versions: [v], created_at: i.created_at, updated_at: i.created_at, tags: null,
+    })
+  }
+}
+
+const service: DemoService = { name: "secrets", seed, routes, onLoad: (s) => syncDbSecrets(s) }
 export default service

@@ -101,8 +101,13 @@ function seed() {
   emailDlq.msgs.push(mkMsg(emailDlq.q.name, JSON.stringify({ to: "bounce@example.invalid", template: "order-confirmation", order_id: "ORD-88012" }), 2 * DAY, { receive_count: 3, source_queue: queueArn(email.q.name), first_receive: Date.now() - 2 * DAY }))
 
   const img: QueueState = { q: mkQueue("shop-image-resize", 150 * DAY, { visibility_timeout: 300, tags: { Project: "shop", Team: "web" } }), msgs: [], sent: 5410, received: 5410, deleted: 5410, dedup: {}, seq: 0 }
+  // consumed by shop-payments through an event source mapping (see lambda.ts)
+  const payments: QueueState = {
+    q: mkQueue("shop-payments-requests", 60 * DAY, { visibility_timeout: 180, tags: { Project: "shop", Environment: "prod", Team: "payments" } }),
+    msgs: [], sent: 21877, received: 21877, deleted: 21877, dedup: {}, seq: 0,
+  }
   const idle: QueueState = { q: mkQueue("shop-dev-scratch", 15 * DAY, { tags: { Environment: "dev" } }), msgs: [], sent: 0, received: 0, deleted: 0, dedup: {}, seq: 0 }
-  return { queues: [orders, dlq, notif, email, emailDlq, img, idle] }
+  return { queues: [orders, dlq, notif, email, emailDlq, img, payments, idle] }
 }
 
 function find(name: string) {
