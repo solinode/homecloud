@@ -11,6 +11,10 @@
 //
 // The AWS CLI is found on PATH (or HC_TEST_AWS); Python with boto3 is
 // HC_TEST_PYTHON (default python3). Tests skip when a tool is missing.
+//
+// The Terraform/OpenTofu tests are opt-in because they download the AWS
+// provider: set HC_TEST_TERRAFORM to run them, either to "1" (use terraform,
+// then tofu, from PATH) or to the path of the binary to use. See Terraform.
 package awstest
 
 import (
@@ -177,6 +181,33 @@ func (h *Harness) Signed(t *testing.T, service, method, path string, header http
 	defer resp.Body.Close()
 	out, _ := io.ReadAll(resp.Body)
 	return resp.StatusCode, resp.Header, out
+}
+
+// Terraform returns the Terraform or OpenTofu binary for a Terraform test, or
+// skips the test. The tests are opt-in: they run only when HC_TEST_TERRAFORM
+// is set, and not in -short mode. A value that names an executable file (for
+// example /opt/tofu/tofu) is used as the binary; any other value (such as 1)
+// looks up terraform, then tofu, on PATH. Set TF_PLUGIN_CACHE_DIR to reuse the
+// provider download across runs.
+func Terraform(t *testing.T) string {
+	t.Helper()
+	v := os.Getenv("HC_TEST_TERRAFORM")
+	if v == "" {
+		t.Skip("set HC_TEST_TERRAFORM=1 (or the path to terraform/tofu) to run")
+	}
+	if testing.Short() {
+		t.Skip("terraform test is slow")
+	}
+	if fi, err := os.Stat(v); err == nil && fi.Mode().IsRegular() && fi.Mode().Perm()&0o111 != 0 {
+		return v
+	}
+	for _, name := range []string{"terraform", "tofu"} {
+		if p, err := exec.LookPath(name); err == nil {
+			return p
+		}
+	}
+	t.Skipf("HC_TEST_TERRAFORM=%q is not an executable, and neither terraform nor tofu is on PATH", v)
+	return ""
 }
 
 func awsBin(t *testing.T) string {

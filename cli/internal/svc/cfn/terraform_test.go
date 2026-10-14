@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
 )
 
 // TestTerraformCloudFormationStack applies, re-plans, updates and destroys an
@@ -13,15 +15,7 @@ import (
 // (HC_TEST_TERRAFORM=1) since it downloads the provider; set TF_PLUGIN_CACHE_DIR
 // to reuse it.
 func TestTerraformCloudFormationStack(t *testing.T) {
-	if os.Getenv("HC_TEST_TERRAFORM") == "" {
-		t.Skip("set HC_TEST_TERRAFORM=1 to run")
-	}
-	bin, err := exec.LookPath("terraform")
-	if err != nil {
-		if bin, err = exec.LookPath("tofu"); err != nil {
-			t.Skip("terraform/tofu not installed")
-		}
-	}
+	bin := awstest.Terraform(t)
 	e := newEnv(t, false)
 	dir := t.TempDir()
 	cfg := func(retention string) string {

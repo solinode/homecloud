@@ -13,7 +13,7 @@ export const metadata: Metadata = {
     default: "HomeCloud Console",
     template: "%s | HomeCloud Console",
   },
-  description: "Manage your self-hosted HomeCloud: EC2, S3, VPC, IAM, Secrets Manager, CloudWatch and CloudTrail.",
+  description: "The web console for HomeCloud, a self-hosted AWS-compatible cloud.",
   applicationName: "HomeCloud Console",
   icons: { icon: `${process.env.NEXT_PUBLIC_BASE_PATH ?? ""}/favicon.svg` },
 }

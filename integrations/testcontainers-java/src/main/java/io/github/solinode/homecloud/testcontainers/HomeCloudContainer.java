@@ -265,17 +265,31 @@ public class HomeCloudContainer extends GenericContainer<HomeCloudContainer> {
     // Connection details
 
     /**
-     * The URL of the HomeCloud API, e.g. {@code http://127.0.0.1:18080}: what AWS_ENDPOINT_URL or
+     * The URL of the HomeCloud API, e.g. {@code http://localhost:18080}: what AWS_ENDPOINT_URL or
      * an SDK's endpoint override should be.
      *
      * @return the endpoint URL
      */
     public String getEndpoint() {
-        String host = getHost();
-        if ("localhost".equals(host)) {
-            host = "127.0.0.1"; // keeps SDKs from trying IPv6 first or bucket.localhost names
+        return "http://" + endpointHost(getHost()) + ":" + port;
+    }
+
+    /**
+     * Names a loopback Docker host {@code localhost}, as {@code homecloud aws-env} does: S3 Control
+     * (which the Terraform AWS provider calls for every bucket) puts the account ID in front of
+     * the endpoint's host, and {@code 123456789012.127.0.0.1} does not resolve. HomeCloud listens
+     * on 127.0.0.1 only; Java resolves localhost to 127.0.0.1 first, and the SDK's HTTP clients
+     * try the next address when one refuses the connection.
+     */
+    static String endpointHost(String host) {
+        switch (host) {
+            case "localhost":
+            case "127.0.0.1":
+            case "::1":
+                return "localhost";
+            default:
+                return host;
         }
-        return "http://" + host + ":" + port;
     }
 
     /**

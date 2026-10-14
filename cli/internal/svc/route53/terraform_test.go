@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/homecloudhq/homecloud/cli/internal/awsapi/awstest"
 	"github.com/homecloudhq/homecloud/cli/internal/svc/acm"
 )
 
@@ -14,15 +15,7 @@ import (
 // and the hashicorp/aws provider. Opt-in (HC_TEST_TERRAFORM=1) since it
 // downloads the provider; set TF_PLUGIN_CACHE_DIR to reuse it.
 func TestTerraform(t *testing.T) {
-	if os.Getenv("HC_TEST_TERRAFORM") == "" {
-		t.Skip("set HC_TEST_TERRAFORM=1 to run")
-	}
-	bin, err := exec.LookPath("terraform")
-	if err != nil {
-		if bin, err = exec.LookPath("tofu"); err != nil {
-			t.Skip("terraform/tofu not installed")
-		}
-	}
+	bin := awstest.Terraform(t)
 	h, _ := setup(t)
 	a := acm.New(h.Env, h.Secrets)
 	a.RegisterAWS()

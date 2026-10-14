@@ -1,11 +1,12 @@
 import { CreateTableCommand, DynamoDBClient, GetItemCommand, PutItemCommand } from "@aws-sdk/client-dynamodb";
 import { LambdaClient, ListFunctionsCommand } from "@aws-sdk/client-lambda";
 import { CreateBucketCommand, GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
+import { ListTagsForResourceCommand, S3ControlClient } from "@aws-sdk/client-s3-control";
 import { CreateQueueCommand, ReceiveMessageCommand, SendMessageCommand, SQSClient } from "@aws-sdk/client-sqs";
 import { GetCallerIdentityCommand, STSClient } from "@aws-sdk/client-sts";
 import { getContainerRuntimeClient } from "testcontainers";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
-import { DEFAULT_IMAGE, HomeCloudContainer, parseAwsEnv, type StartedHomeCloudContainer } from "../src/index.js";
+import { DEFAULT_IMAGE, endpointHost, HomeCloudContainer, parseAwsEnv, type StartedHomeCloudContainer } from "../src/index.js";
 
 // A local build (docker build -t homecloud:test .) or the official image.
 const IMAGE = process.env.HOMECLOUD_IMAGE || DEFAULT_IMAGE;
@@ -14,6 +15,14 @@ describe("parseAwsEnv", () => {
   it("parses quoted exports", () => {
     const env = parseAwsEnv('export AWS_ACCESS_KEY_ID="AKIAEXAMPLE"\nexport AWS_SECRET_ACCESS_KEY="a/b+c\\"d"\n# x\n');
     expect(env).toEqual({ AWS_ACCESS_KEY_ID: "AKIAEXAMPLE", AWS_SECRET_ACCESS_KEY: 'a/b+c"d' });
+  });
+});
+
+describe("endpointHost", () => {
+  it("names a loopback host localhost", () => {
+    expect(endpointHost("localhost")).toBe("localhost");
+    expect(endpointHost("127.0.0.1")).toBe("localhost");
+    expect(endpointHost("docker.example")).toBe("docker.example");
   });
 });
 
@@ -68,6 +77,12 @@ describe("HomeCloudContainer", () => {
     await s3.send(new PutObjectCommand({ Bucket: "tc-node", Key: "a.txt", Body: "hello" }));
     const obj = await s3.send(new GetObjectCommand({ Bucket: "tc-node", Key: "a.txt" }));
     expect(await obj.Body?.transformToString()).toBe("hello");
+    // S3 Control puts the account ID in front of the endpoint host (<account>.localhost),
+    // which is why the endpoint is not 127.0.0.1.
+    const control = new S3ControlClient(hc.getClientConfig());
+    await control.send(
+      new ListTagsForResourceCommand({ AccountId: hc.getAccountId(), ResourceArn: "arn:aws:s3:::tc-node" }),
+    );
   });
 
   it("SQS", async () => {
