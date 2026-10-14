@@ -162,7 +162,9 @@ with types. See [integrations/testcontainers-node/README.md](../integrations/tes
 
 All four modules start the image (default `ghcr.io/solinode/homecloud:latest`, configurable)
 with the Docker socket mounted and **host networking**, and the API on
-`127.0.0.1:18080` of the Docker host (configurable; not 8080, which is often taken).
+`127.0.0.1:18080` of the Docker host (configurable; not 8080, which is often taken). The
+endpoint they hand out names it `http://localhost:18080`, for the reason in
+[SDK notes](#sdk-notes).
 HomeCloud then reaches the containers it starts on the host's loopback ports, and they
 call it back through `host.docker.internal`, exactly as when it runs on the host. This
 works on Linux (GitHub Actions included), OrbStack, and Docker Desktop with host

@@ -47,6 +47,10 @@ def test_s3(homecloud):
     assert s3.get_object(Bucket="tc-python", Key="a.txt")["Body"].read() == b"hello"
     bucket = homecloud.get_resource("s3").Bucket("tc-python")
     assert [o.key for o in bucket.objects.all()] == ["a.txt"]
+    # S3 Control puts the account ID in front of the endpoint host
+    # (<account>.localhost), which is why the endpoint is not 127.0.0.1.
+    control = homecloud.get_client("s3control")
+    control.list_tags_for_resource(AccountId=homecloud.account_id, ResourceArn="arn:aws:s3:::tc-python")
 
 
 def test_sqs(homecloud):

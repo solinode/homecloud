@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"regexp"
 	"strconv"
@@ -146,10 +147,7 @@ func Run(ctx context.Context, img string, opts ...testcontainers.ContainerCustom
 	if err != nil {
 		return c, err
 	}
-	if host == "localhost" {
-		host = "127.0.0.1" // keep SDKs from trying IPv6 first or bucket.localhost names
-	}
-	c.endpoint = "http://" + host + ":" + strconv.Itoa(o.port)
+	c.endpoint = "http://" + net.JoinHostPort(endpointHost(host), strconv.Itoa(o.port))
 	if err := c.waitHealthy(ctx, 30*time.Second); err != nil {
 		return c, err
 	}
@@ -159,12 +157,26 @@ func Run(ctx context.Context, img string, opts ...testcontainers.ContainerCustom
 	return c, nil
 }
 
-// EndpointURL is the URL of the HomeCloud API, e.g. http://127.0.0.1:18080:
+// endpointHost names a loopback Docker host "localhost", as `homecloud aws-env`
+// does: S3 Control (which the Terraform AWS provider calls for every
+// aws_s3_bucket) puts the account ID in front of the endpoint's host, and
+// 123456789012.127.0.0.1 does not resolve while 123456789012.localhost does.
+// HomeCloud listens on 127.0.0.1 only; clients that try ::1 first fall back to
+// it. S3 clients should still use path-style addressing (see AWSConfig).
+func endpointHost(host string) string {
+	switch host {
+	case "localhost", "127.0.0.1", "::1":
+		return "localhost"
+	}
+	return host
+}
+
+// EndpointURL is the URL of the HomeCloud API, e.g. http://localhost:18080:
 // what AWS_ENDPOINT_URL or an SDK's base endpoint should be set to.
 func (c *Container) EndpointURL() string { return c.endpoint }
 
 // Endpoint returns the API address as testcontainers.Container.Endpoint does
-// ("127.0.0.1:18080", or "http://127.0.0.1:18080" for proto "http"). It
+// ("localhost:18080", or "http://localhost:18080" for proto "http"). It
 // replaces the generic one, which looks for a mapped port and so does not work
 // with host networking.
 func (c *Container) Endpoint(_ context.Context, proto string) (string, error) {
