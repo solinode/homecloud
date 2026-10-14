@@ -1,0 +1,69 @@
+name: Testcontainers modules
+# Tests integrations/testcontainers-java and integrations/testcontainers-node against a
+# HomeCloud image built from this commit. Runs only when those modules (or this
+# workflow) change.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "integrations/testcontainers-java/**"
+      - "integrations/testcontainers-node/**"
+      - ".github/workflows/testcontainers.yml"
+  pull_request:
+    paths:
+      - "integrations/testcontainers-java/**"
+      - "integrations/testcontainers-node/**"
+      - ".github/workflows/testcontainers.yml"
+
+concurrency:
+  group: testcontainers-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  HOMECLOUD_IMAGE: homecloud:test
+
+jobs:
+  java:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/testcontainers-java
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build the HomeCloud test image
+        run: docker build -f integrations/testdata/Dockerfile -t "$HOMECLOUD_IMAGE" cli
+        working-directory: .
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+          cache: maven
+      - run: mvn -B -ntp verify
+
+  node:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: integrations/testcontainers-node
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Build the HomeCloud test image
+        run: docker build -f integrations/testdata/Dockerfile -t "$HOMECLOUD_IMAGE" cli
+        working-directory: .
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: integrations/testcontainers-node/package-lock.json
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run build
+      - run: npm test
+      - run: npm pack --dry-run

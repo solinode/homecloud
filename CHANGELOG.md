@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- Testcontainers modules for Java (`io.github.solinode:testcontainers-homecloud`, `integrations/testcontainers-java`) and Node.js (`testcontainers-homecloud` on npm, `integrations/testcontainers-node`): start HomeCloud from a JUnit or Node test, get the endpoint, credentials and ready AWS SDK clients or client config, and remove every container HomeCloud started on stop. Release workflows publish them to Maven Central and npm from `testcontainers-java/v*` and `testcontainers-node/v*` tags.
+
 ## 0.4.1 (2026-10-11)
 
 A redesigned console, a new website and easier ways to use HomeCloud in CI.

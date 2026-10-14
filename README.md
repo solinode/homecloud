@@ -107,7 +107,7 @@ eval "$(homecloud aws-env)"
 
 S3 starts in the background on first boot; if your tests use S3 right away, wait for `s3: MinIO ready` in the log (see [`.github/workflows/ci.yml`](.github/workflows/ci.yml)).
 
-Or use the ready-made pieces in **[docs/integrations.md](docs/integrations.md)**: a GitHub Action that does the above in one step, and testcontainers modules for Go and Python.
+Or use the ready-made pieces in **[docs/integrations.md](docs/integrations.md)**: a GitHub Action that does the above in one step, and Testcontainers modules for Go, Python, Java and Node.js.
 
 ---
 
@@ -120,7 +120,8 @@ Or use the ready-made pieces in **[docs/integrations.md](docs/integrations.md)**
 | **Terraform / OpenTofu** (`hashicorp/aws` provider) | Tested: opt-in Terraform tests in the suite (IAM, S3, Route 53, CloudFormation and more; `HC_TEST_TERRAFORM=1`), and [`examples/terraform/shop`](examples/terraform/shop/README.md) applies, re-plans clean and destroys on a fresh install. Nightly: 17 of 17 popular `terraform-aws-modules` scenarios apply, re-plan clean and destroy ([results](docs/compatibility.md)). |
 | **CloudFormation** (`aws cloudformation deploy`) | Tested: stacks, change sets and the boto3 waiters ([details](docs/aws-compat.md#cloudformation)) |
 | **AWS CDK** | Partly: CDK-synthesized templates deploy through CloudFormation change sets; `cdk bootstrap` / `cdk deploy` end to end is not yet verified |
-| **Other AWS SDKs** (JavaScript, Go, Java, …) and **Pulumi** | Expected to work (same protocols and SigV4), not yet covered by tests. Reports welcome |
+| **Testcontainers** (Go, Python, Java, Node.js) | Modules in [`integrations/`](docs/integrations.md) start HomeCloud from a test and clean up after it; the Java and Node.js modules are tested in CI with S3, SQS, DynamoDB, Lambda and STS through the AWS SDK for Java v2 and the JavaScript SDK v3 |
+| **Other AWS SDKs** (Go, .NET, …) and **Pulumi** | Expected to work (same protocols and SigV4), not yet covered by tests. Reports welcome |
 
 Run `homecloud aws-env` to get the environment variables. For Terraform, point the provider's `endpoints {}` block at HomeCloud and use `s3_use_path_style = true`; the [shop example](examples/terraform/shop/README.md) shows a complete provider block.
 
@@ -224,7 +225,7 @@ HomeCloud needs the Docker socket, which is root-equivalent on the host: treat H
 ## Roadmap
 
 - **Shipped in [0.4.0](https://github.com/solinode/homecloud/releases/tag/v0.4.0):** VM-backed EC2 instances (QEMU, KVM when available), the container image `ghcr.io/solinode/homecloud`, a GitHub Action and testcontainers modules for Go and Python, a nightly Terraform modules compatibility suite ([17 of 17 pass](docs/compatibility.md)), and fixes from two security audits ([platform](docs/security-audit-2026-10.md), [VM instances](docs/security-audit-vm-2026-10.md)).
-- **Next:** signed releases with SBOMs, safer upgrades with automatic backup and rollback, Prometheus metrics for HomeCloud itself, a guided first run in the console, testcontainers for Java and Node, and passt networking for VMs on Ubuntu 24.04 hosts ([#90](https://github.com/solinode/homecloud/issues/90)).
+- **Next:** signed releases with SBOMs, safer upgrades with automatic backup and rollback, Prometheus metrics for HomeCloud itself, a guided first run in the console, and passt networking for VMs on Ubuntu 24.04 hosts ([#90](https://github.com/solinode/homecloud/issues/90)).
 - **Planned:** multi-node clusters ([#55](https://github.com/solinode/homecloud/issues/55), [design](docs/design/multi-node.md)), edge compute and hardware integrations ([#56](https://github.com/solinode/homecloud/issues/56), [design](docs/design/edge.md)).
 
 See the [open issues](https://github.com/solinode/homecloud/issues) for everything planned.
