@@ -1,0 +1,16 @@
+# Node.js (CDK, Pulumi, SDK examples)
+node_modules/
+package-lock.json
+*.js
+*.d.ts
+# CDK
+cdk.out/
+cdk.context.json
+outputs.json
+# Pulumi stack settings (written by `pulumi stack init` / `pulumi config set`)
+Pulumi.*.yaml
+# Terraform
+.terraform/
+*.tfstate*
+# Java
+target/

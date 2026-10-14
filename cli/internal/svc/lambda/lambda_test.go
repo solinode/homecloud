@@ -129,8 +129,38 @@ func TestApplyConfig(t *testing.T) {
 	}
 }
 
+// LoggingConfig (CDK's `logGroup`, Terraform's logging_config) picks the log
+// group and format; dropping the group goes back to /aws/lambda/<name>.
+func TestApplyLogging(t *testing.T) {
+	f := Function{Name: "fn", Runtime: "nodejs22.x", Handler: "index.handler", LogGroup: "/aws/lambda/fn"}
+	for i, l := range []LoggingConfig{
+		{LogFormat: "XML"},
+		{LogFormat: "Text", ApplicationLogLevel: "INFO"},
+		{LogFormat: "JSON", ApplicationLogLevel: "LOUD"},
+		{LogFormat: "JSON", SystemLogLevel: "TRACE"},
+		{LogGroup: "bad group name"},
+	} {
+		g := f
+		if err := applyConfig(&g, configInput{Logging: &l}); err == nil {
+			t.Errorf("case %d: expected an error", i)
+		}
+	}
+	if err := applyConfig(&f, configInput{Logging: &LoggingConfig{LogGroup: "App-ConsumerLogs/x"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.logging(); got != (LoggingConfig{LogFormat: "Text", LogGroup: "App-ConsumerLogs/x"}) {
+		t.Errorf("custom group: %+v", got)
+	}
+	if err := applyConfig(&f, configInput{Logging: &LoggingConfig{LogFormat: "JSON", ApplicationLogLevel: "DEBUG"}}); err != nil {
+		t.Fatal(err)
+	}
+	if got := f.logging(); got != (LoggingConfig{LogFormat: "JSON", LogGroup: "/aws/lambda/fn", ApplicationLogLevel: "DEBUG", SystemLogLevel: "INFO"}) {
+		t.Errorf("json: %+v", got)
+	}
+}
+
 func TestRuntimes(t *testing.T) {
-	for _, name := range []string{"python3.9", "python3.13", "nodejs18.x", "nodejs22.x", "java17", "java21", "ruby3.3", "dotnet8", "provided.al2023", "provided.al2"} {
+	for _, name := range []string{"python3.9", "python3.13", "python3.14", "nodejs18.x", "nodejs22.x", "nodejs24.x", "java17", "java21", "java25", "ruby3.3", "dotnet8", "provided.al2023", "provided.al2"} {
 		rt, ok := findRuntime(name)
 		if !ok || !strings.HasPrefix(rt.Image, "public.ecr.aws/lambda/") {
 			t.Errorf("runtime %s: %+v", name, rt)

@@ -31,7 +31,7 @@ def test_upload(homecloud):
 | | |
 | --- | --- |
 | `HomeCloudContainer(image=DEFAULT_IMAGE, port=18080, docker_socket="/var/run/docker.sock", wait_for_services=("s3",), startup_timeout=180)` | `wait_for_services` takes `s3`, `ecr`, `route53`; everything else is ready with the API |
-| `get_endpoint()` | `http://127.0.0.1:18080` |
+| `get_endpoint()` | `http://localhost:18080` |
 | `get_credentials()` | `Credentials(access_key_id, secret_access_key, region)` |
 | `get_client(service, **kw)` / `get_resource(service, **kw)` | boto3 client / resource for HomeCloud |
 | `aws_env()` | `AWS_ENDPOINT_URL`, keys and region for subprocesses (AWS CLI, Terraform) |
@@ -45,6 +45,12 @@ HomeCloud starts each service's backing containers on the Docker host, so the co
 gets the Docker socket and **host networking**; the API listens on `127.0.0.1:<port>` of
 the Docker host. This works on Linux (including GitHub Actions), OrbStack, and Docker
 Desktop with host networking turned on.
+
+The endpoint names that address `localhost`, as `homecloud aws-env` does: S3 Control puts
+the account ID in front of the endpoint's host (`123456789012.localhost`), and the
+Terraform AWS provider calls it for every `aws_s3_bucket`; `123456789012.127.0.0.1` does
+not resolve. Clients that try `::1` first fall back to `127.0.0.1`. S3 clients should use
+path-style addressing (`get_client("s3")` does), so bucket names need not resolve.
 
 Only one HomeCloud can run per Docker host: its helper containers have fixed names and
 host ports (9500, 9501, 5500, 8053). Use one session-scoped fixture, do not run it under

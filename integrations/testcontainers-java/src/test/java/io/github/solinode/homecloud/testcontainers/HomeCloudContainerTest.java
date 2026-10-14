@@ -22,6 +22,7 @@ import software.amazon.awssdk.services.dynamodb.model.KeyType;
 import software.amazon.awssdk.services.dynamodb.model.ScalarAttributeType;
 import software.amazon.awssdk.services.lambda.LambdaClient;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3control.S3ControlClient;
 import software.amazon.awssdk.services.sqs.SqsClient;
 import software.amazon.awssdk.services.sqs.model.Message;
 import software.amazon.awssdk.services.sts.StsClient;
@@ -96,6 +97,11 @@ class HomeCloudContainerTest {
             s3.putObject(b -> b.bucket("tc-java").key("a.txt"), RequestBody.fromString("hello"));
             assertEquals("hello", s3.getObjectAsBytes(b -> b.bucket("tc-java").key("a.txt")).asUtf8String());
             assertEquals(1, s3.listObjectsV2(b -> b.bucket("tc-java")).keyCount());
+        }
+        // S3 Control puts the account ID in front of the endpoint host (<account>.localhost),
+        // which is why the endpoint is not 127.0.0.1.
+        try (S3ControlClient control = hc.configure(S3ControlClient.builder()).build()) {
+            control.listTagsForResource(b -> b.accountId(hc.getAccountId()).resourceArn("arn:aws:s3:::tc-java"));
         }
     }
 

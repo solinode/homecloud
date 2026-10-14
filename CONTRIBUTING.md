@@ -110,7 +110,7 @@ If Docker tests skip with "no free 10.88-119.0.0/16 range", earlier runs leaked 
 | --- | --- |
 | `HC_TEST_PYTHON` | Python interpreter with boto3 (default `python3`); e.g. `HC_TEST_PYTHON=$PWD/.venv/bin/python` |
 | `HC_TEST_AWS` | path to the `aws` CLI (default: `aws` on `PATH`) |
-| `HC_TEST_TERRAFORM` | set to run the Terraform/OpenTofu tests (they download the AWS provider; set `TF_PLUGIN_CACHE_DIR` to reuse it) |
+| `HC_TEST_TERRAFORM` | set to run the Terraform/OpenTofu tests: `1` uses `terraform`, then `tofu`, from `PATH`; a path (e.g. `/opt/tofu/tofu`) uses that binary. They download the AWS provider; set `TF_PLUGIN_CACHE_DIR` to reuse it |
 | `HC_TEST_NODE_PATH` | a `node_modules` directory with `amazon-cognito-identity-js`, for the Cognito SRP test in Node.js |
 
 **End to end.** With a server running, `./scripts/smoke.sh` exercises every service through the CLI and

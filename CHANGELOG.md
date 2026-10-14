@@ -1,5 +1,15 @@
 # Changelog
 
+## Unreleased
+
+- **CDK, Pulumi and SDK examples, verified:** [`examples/cdk/basic`](examples/cdk/basic/README.md) (`cdk bootstrap` with the default template, `cdk deploy`, `cdk diff`, `cdk destroy`; HomeCloud must be served over HTTPS because the bootstrap bucket policy denies plain HTTP), [`examples/pulumi/basic`](examples/pulumi/basic/README.md) (`pulumi up`, `preview`, `refresh`, `destroy` with a local backend) and [`examples/sdk`](examples/sdk) (JavaScript v3, Go v2, Java v2: S3, SQS, DynamoDB, STS), with configuration snippets in [docs/aws-compat.md](docs/aws-compat.md#sdks) (#99, #100, #101).
+- IAM: the AWS managed policy `AWSCloudFormationReadOnlyAccess`; policy, group and instance profile names may be up to 128 characters, as in AWS (users and roles stay at 64); the `aws:ResourceAccount` condition key is set (to the server's account) for users and role sessions.
+- Lambda: `LoggingConfig` (log group, `Text`/`JSON` format, application and system log levels) over the AWS API and in CloudFormation (`AWS::Lambda::Function` `LoggingConfig`, CDK's `logGroup`); it was ignored and logs always went to `/aws/lambda/<name>`. New runtimes `nodejs24.x`, `python3.14` and `java25`.
+- CloudFormation: `DeleteChangeSet` with the name of a change set that does not exist succeeds when the stack exists, as in AWS (`cdk diff` and `cdk deploy` rely on it).
+- awsJson responses carry `X-Amz-Crc32`, as DynamoDB's do; the AWS SDK for Go v2 logged a checksum warning on every DynamoDB call without it.
+- The `--tls-self-signed` certificate also covers `*.localhost` and `*.<public-host>`, so S3 Control calls (`<account>.localhost`, made by the Terraform and Pulumi AWS providers) verify over HTTPS. Delete `<data-dir>/tls/` to replace a certificate made by an earlier version.
+- CloudWatch Logs, CloudWatch metrics and the Lambda environment reaper only see this installation's containers; on a Docker host shared with test runs they listed (and the reaper removed) containers of other accounts.
+
 ## 0.5.0 (2026-10-14)
 
 Trust and operations: signed releases, safe upgrades with rollback, backups that restore everything, Prometheus metrics and a status page, and Testcontainers for Java and Node.

@@ -1,0 +1,13 @@
+name: homecloud-basic
+description: S3, SQS, DynamoDB, IAM and Lambda on HomeCloud with the stock AWS provider
+runtime:
+  name: nodejs
+  options:
+    typescript: true
+config:
+  # HomeCloud's region. The endpoint comes from AWS_ENDPOINT_URL (`homecloud aws-env`).
+  aws:region:
+    value: us-east-1
+  # HomeCloud serves buckets by path, so bucket names need not resolve as host names.
+  aws:s3UsePathStyle:
+    value: true

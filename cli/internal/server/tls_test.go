@@ -1,7 +1,9 @@
 package server
 
 import (
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"net"
 	"net/http"
 	"os"
@@ -39,6 +41,18 @@ func TestSelfSignedTLS(t *testing.T) {
 	var out map[string]bool
 	if err := c.Do("GET", "/", nil, &out); err != nil || !out["ok"] {
 		t.Fatalf("https call through the trusted self-signed cert failed: %v %v", out, err)
+	}
+	// Account-prefixed S3 Control hosts are covered too.
+	pemBytes, _ := os.ReadFile(cert)
+	blk, _ := pem.Decode(pemBytes)
+	parsed, err := x509.ParseCertificate(blk.Bytes)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, h := range []string{"localhost", "123456789012.localhost", "homelab.local", "123456789012.homelab.local", "127.0.0.1"} {
+		if err := parsed.VerifyHostname(h); err != nil {
+			t.Errorf("%s: %v", h, err)
+		}
 	}
 	// A second call must reuse the existing certificate rather than regenerate it.
 	cert2, _, _ := SelfSignedCert(dir, "homelab.local")

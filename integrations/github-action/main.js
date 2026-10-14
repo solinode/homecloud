@@ -10,6 +10,7 @@ const env = {
   HC_PORT: input("port", "8080"),
   HC_SERVICES_WAIT: input("services-wait", ""),
   HC_WAIT_TIMEOUT: input("wait-timeout", "180"),
+  HC_VERIFY_SIGNATURE: input("verify-signature", "true"),
 };
 const r = spawnSync("bash", [path.join(__dirname, "setup.sh")], { stdio: "inherit", env });
 if (r.error) {

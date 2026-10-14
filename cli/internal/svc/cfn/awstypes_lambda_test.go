@@ -115,6 +115,7 @@ Resources:
         Variables: {STAGE: prod, N: 3}
       Tags:
         - {Key: team, Value: platform}
+      LoggingConfig: {LogGroup: fnstack-logs}
       Code:
         ZipFile: |
           def handler(event, context):
@@ -202,6 +203,9 @@ func TestLambdaStack(t *testing.T) {
 		cfg["Timeout"].(float64) != 7 || cfg["MemorySize"].(float64) != 256 || cfg["FunctionArn"] != fnArn ||
 		!strings.HasSuffix(cfg["Role"].(string), ":role/"+lastPart(cfg["Role"].(string))) {
 		t.Fatalf("configuration: %v", cfg)
+	}
+	if lc, _ := cfg["LoggingConfig"].(map[string]any); lc["LogGroup"] != "fnstack-logs" || lc["LogFormat"] != "Text" {
+		t.Fatalf("LoggingConfig: %v", cfg["LoggingConfig"])
 	}
 	vars := cfg["Environment"].(map[string]any)["Variables"].(map[string]any)
 	if vars["STAGE"] != "prod" || vars["N"] != "3" {

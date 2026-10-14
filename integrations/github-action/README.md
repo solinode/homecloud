@@ -13,7 +13,7 @@ an AWS account.
 
 The action:
 
-1. downloads the HomeCloud release you ask for and verifies it against the release's `checksums.txt`,
+1. downloads the HomeCloud release you ask for, verifies the Sigstore signature on its `checksums.txt` (releases from v0.5.0 on are signed) and checks the download against it,
 2. starts `homecloud serve` in the background (data in `$RUNNER_TEMP/homecloud-data`, log in `$RUNNER_TEMP/homecloud.log`),
 3. waits for `/api/v1/health` and for any services listed in `services-wait`,
 4. exports `AWS_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY` (masked), `AWS_REGION`, `AWS_DEFAULT_REGION` and `HOMECLOUD_DATA_DIR` for the following steps, and puts `homecloud` on `PATH`,
@@ -44,6 +44,7 @@ jobs:
 | `port` | `8080` | Port the API listens on, on `127.0.0.1`. |
 | `services-wait` | (none) | Comma or newline separated services to wait for. `s3`, `ecr` and `route53` start containers in the background; in-process services (`sqs`, `dynamodb`, `lambda`, ...) are ready with the API; an unknown name fails the step. |
 | `wait-timeout` | `180` | Seconds to wait for the API and the services. |
+| `verify-signature` | `true` | Verify the release signature with cosign before trusting `checksums.txt` (see [Release verification](#release-verification)). `false` checks the SHA-256 checksum only. |
 
 ### Outputs
 
@@ -125,6 +126,30 @@ provider "aws" {
         uses: solinode/setup-homecloud@v1
       - run: ./run-tests.sh --endpoint "${{ steps.homecloud.outputs.endpoint }}"
 ```
+
+## Release verification
+
+HomeCloud releases from v0.5.0 on publish `checksums.txt.sigstore.json`, a Sigstore bundle
+over `checksums.txt` made by keyless signing in HomeCloud's release workflow. When the bundle
+exists, the action runs
+
+```sh
+cosign verify-blob checksums.txt --bundle checksums.txt.sigstore.json \
+  --certificate-identity https://github.com/solinode/homecloud/.github/workflows/release.yml@refs/tags/<tag> \
+  --certificate-oidc-issuer https://token.actions.githubusercontent.com
+```
+
+and fails the step if the signature does not verify, or if a release from v0.5.0 on has no
+bundle. Only then does it trust the SHA-256 in `checksums.txt` for the archive. `latest` is
+resolved to its tag first, so the signer identity names the exact release.
+
+- cosign comes from the runner's `PATH` if it is there (for example installed with
+  `sigstore/cosign-installer`; cosign 2.4 or newer), otherwise the action downloads cosign
+  v3.1.3 from its GitHub release and checks it against a SHA-256 pinned in `setup.sh`.
+- Verification fetches Sigstore's trust root over the network. On a runner that cannot
+  reach Sigstore, set `verify-signature: false` to check the checksum only.
+- Releases before v0.5.0 are unsigned: they are checked against `checksums.txt` only, as
+  before.
 
 ## Notes
 

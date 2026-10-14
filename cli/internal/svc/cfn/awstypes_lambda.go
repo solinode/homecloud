@@ -172,6 +172,16 @@ func lambdaFunctionProps(x *xctx, in map[string]any) (map[string]any, error) {
 	if dl := mv(in, "DeadLetterConfig"); dl != nil && has(dl, "TargetArn") {
 		out["dead_letter_target"] = sv(dl, "TargetArn")
 	}
+	// CDK's `logGroup` prop sets LoggingConfig.LogGroup.
+	if lc := mv(in, "LoggingConfig"); lc != nil {
+		cfg := map[string]any{}
+		for _, k := range []string{"LogFormat", "LogGroup", "ApplicationLogLevel", "SystemLogLevel"} {
+			if has(lc, k) {
+				cfg[k] = sv(lc, k)
+			}
+		}
+		out["logging_config"] = cfg
+	}
 	return out, nil
 }
 

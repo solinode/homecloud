@@ -119,9 +119,11 @@ Or use the ready-made pieces in **[docs/integrations.md](docs/integrations.md)**
 | **boto3** (Python SDK) | Tested: the compatibility test suite runs boto3 in CI, including Cognito SRP sign-in through pycognito |
 | **Terraform / OpenTofu** (`hashicorp/aws` provider) | Tested: opt-in Terraform tests in the suite (IAM, S3, Route 53, CloudFormation and more; `HC_TEST_TERRAFORM=1`), and [`examples/terraform/shop`](examples/terraform/shop/README.md) applies, re-plans clean and destroys on a fresh install. Nightly: 17 of 17 popular `terraform-aws-modules` scenarios apply, re-plan clean and destroy ([results](docs/compatibility.md)). |
 | **CloudFormation** (`aws cloudformation deploy`) | Tested: stacks, change sets and the boto3 waiters ([details](docs/aws-compat.md#cloudformation)) |
-| **AWS CDK** | Partly: CDK-synthesized templates deploy through CloudFormation change sets; `cdk bootstrap` / `cdk deploy` end to end is not yet verified |
+| **AWS CDK** | Verified by hand: `cdk bootstrap` (default template), `cdk deploy`, `cdk diff` and `cdk destroy` with HomeCloud served over HTTPS ([`examples/cdk/basic`](examples/cdk/basic/README.md)); constructs that need CloudFormation custom resources do not deploy yet |
 | **Testcontainers** (Go, Python, Java, Node.js) | Modules in [`integrations/`](docs/integrations.md) start HomeCloud from a test and clean up after it; the Java and Node.js modules are tested in CI with S3, SQS, DynamoDB, Lambda and STS through the AWS SDK for Java v2 and the JavaScript SDK v3 |
-| **Other AWS SDKs** (Go, .NET, …) and **Pulumi** | Expected to work (same protocols and SigV4), not yet covered by tests. Reports welcome |
+| **Pulumi** (`@pulumi/aws`) | Verified by hand: `pulumi up`, `preview` (no changes), `refresh` and `destroy` ([`examples/pulumi/basic`](examples/pulumi/basic/README.md)) |
+| **AWS SDKs for JavaScript v3, Go v2, Java v2** | Verified by hand: S3, SQS, DynamoDB and STS ([configuration](docs/aws-compat.md#sdks), [`examples/sdk`](examples/sdk)); the Java and Node.js Testcontainers modules also run the Java and JavaScript SDKs in CI |
+| **Other AWS SDKs** (.NET, Rust, …) | Expected to work (same protocols and SigV4), not yet covered by tests. Reports welcome |
 
 Run `homecloud aws-env` to get the environment variables. For Terraform, point the provider's `endpoints {}` block at HomeCloud and use `s3_use_path_style = true`; the [shop example](examples/terraform/shop/README.md) shows a complete provider block.
 
@@ -229,7 +231,7 @@ Releases are signed (from v0.5.0): the release workflow signs `checksums.txt` an
 
 - **Shipped in [0.4.0](https://github.com/solinode/homecloud/releases/tag/v0.4.0):** VM-backed EC2 instances (QEMU, KVM when available), the container image `ghcr.io/solinode/homecloud`, a GitHub Action and testcontainers modules for Go and Python, a nightly Terraform modules compatibility suite ([17 of 17 pass](docs/compatibility.md)), and fixes from two security audits ([platform](docs/security-audit-2026-10.md), [VM instances](docs/security-audit-vm-2026-10.md)).
 - **Shipped in [0.5.0](https://github.com/solinode/homecloud/releases/tag/v0.5.0):** signed releases (Sigstore) with SBOMs and build provenance, verified by the installer and `homecloud upgrade`; automatic backups before upgrades and `homecloud upgrade --rollback`; restores that bring back databases, caches, load balancers and instances on a new machine; Prometheus metrics and a system status page ([docs/monitoring.md](docs/monitoring.md)); Testcontainers modules for Java and Node.
-- **Next:** closing the AWS API gaps users hit most, verified CDK and Pulumi support, passt networking for VMs on Ubuntu 24.04 hosts ([#90](https://github.com/solinode/homecloud/issues/90)), and multiple accounts with SSO for teams and classrooms.
+- **Next:** closing the AWS API gaps users hit most, passt networking for VMs on Ubuntu 24.04 hosts ([#90](https://github.com/solinode/homecloud/issues/90)), and multiple accounts with SSO for teams and classrooms.
 - **Planned:** multi-node clusters ([#55](https://github.com/solinode/homecloud/issues/55), [design](docs/design/multi-node.md)), edge compute and hardware integrations ([#56](https://github.com/solinode/homecloud/issues/56), [design](docs/design/edge.md)).
 
 See the [open issues](https://github.com/solinode/homecloud/issues) for everything planned.

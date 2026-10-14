@@ -509,6 +509,7 @@ var builtinPolicies = []builtinPolicy{
 	{"ElasticLoadBalancingFullAccess", "/", "Full access to load balancers and target groups.", doc("Allow", "elasticloadbalancing:*")},
 	{"AmazonElasticFileSystemFullAccess", "/", "Full access to shared file systems.", doc("Allow", "elasticfilesystem:*")},
 	{"AmazonAPIGatewayAdministrator", "/", "Full access to HTTP APIs.", doc("Allow", "apigateway:*")},
+	{"AWSCloudFormationReadOnlyAccess", "/", "Read access to stacks, change sets and templates.", doc("Allow", "cloudformation:Describe*", "cloudformation:EstimateTemplateCost", "cloudformation:Get*", "cloudformation:List*", "cloudformation:ValidateTemplate", "cloudformation:Detect*")},
 	{"AWSCloudFormationFullAccess", "/", "Full access to stacks (resources are created with the caller's own permissions).", doc("Allow", "cloudformation:*")},
 	{"AmazonCognitoPowerUser", "/", "Full access to user pools, app clients and pool users.", doc("Allow", "cognito-idp:*", "cognito-identity:*", "cognito-sync:*")},
 	{"AWSStepFunctionsFullAccess", "/", "Full access to state machines and executions.", doc("Allow", "states:*")},

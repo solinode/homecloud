@@ -408,6 +408,8 @@ func (s *Service) userContext(u User) CondContext {
 	c := CondContext{
 		"aws:username": {u.Name}, "aws:userid": {u.ID}, "aws:principalarn": {u.ARN},
 		"aws:principalaccount": {s.env.AccountID}, "aws:principaltype": {typ},
+		// Every resource a server holds is in its one account.
+		"aws:resourceaccount": {s.env.AccountID},
 	}
 	for k, v := range u.Tags {
 		c["aws:principaltag/"+strings.ToLower(k)] = []string{v}
@@ -474,13 +476,22 @@ func (s *Service) boundaryDoc(arn string) *PolicyDocument {
 }
 
 var (
-	nameRe = regexp.MustCompile(`^[\w+=,.@-]{1,64}$`)
-	pathRe = regexp.MustCompile(`^/([\x21-\x7E]+/)?$`)
+	nameRe     = regexp.MustCompile(`^[\w+=,.@-]{1,64}$`)
+	longNameRe = regexp.MustCompile(`^[\w+=,.@-]{1,128}$`)
+	pathRe     = regexp.MustCompile(`^/([\x21-\x7E]+/)?$`)
 )
 
+// validName checks an IAM name. As in AWS, user and role names allow 64
+// characters; policy (managed and inline), group and instance profile names
+// allow 128 (the CDK bootstrap stack names an inline policy with 72).
 func validName(kind, n string) error {
-	if !nameRe.MatchString(n) {
-		return core.Errf(http.StatusBadRequest, "ValidationError", "%s name %q is invalid: use 1-64 letters, digits or +=,.@_-", kind, n)
+	re, max := nameRe, 64
+	switch kind {
+	case "policy", "group", "instance profile":
+		re, max = longNameRe, 128
+	}
+	if !re.MatchString(n) {
+		return core.Errf(http.StatusBadRequest, "ValidationError", "%s name %q is invalid: use 1-%d letters, digits or +=,.@_-", kind, n, max)
 	}
 	return nil
 }
