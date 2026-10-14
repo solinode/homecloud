@@ -21,7 +21,7 @@ import (
 )
 
 func init() {
-	var resetRoot, selfSigned bool
+	var resetRoot, selfSigned, allowNewerData bool
 	cfg := core.DefaultConfig()
 	serveCmd := &cobra.Command{
 		Use:   "serve",
@@ -48,7 +48,7 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 			server.Version = Version
 			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 			defer stop()
-			return server.Run(ctx, cfg, server.Options{ResetRootPassword: resetRoot})
+			return server.Run(ctx, cfg, server.Options{ResetRootPassword: resetRoot, AllowNewerData: allowNewerData})
 		},
 	}
 	f := serveCmd.Flags()
@@ -66,6 +66,7 @@ and CLI credentials in the data directory. Settings passed as flags are saved to
 	f.StringVar(&cfg.TLSCert, "tls-cert", "", "serve HTTPS with this PEM certificate")
 	f.StringVar(&cfg.TLSKey, "tls-key", "", "PEM private key for --tls-cert")
 	f.BoolVar(&selfSigned, "tls-self-signed", false, "serve HTTPS with a generated self-signed certificate")
+	f.BoolVar(&allowNewerData, "allow-newer-data", false, "start even if the data directory was last used by a newer HomeCloud (risks corrupting it; prefer homecloud upgrade --rollback)")
 	RootCmd.AddCommand(serveCmd)
 
 	var p client.Profile

@@ -70,7 +70,10 @@ func CredentialsPath(dataDir string) string {
 
 type Options struct {
 	ResetRootPassword bool
-	Logf              func(format string, a ...any)
+	// AllowNewerData starts even on a data directory last used by a newer
+	// HomeCloud (see core.CheckDataVersion).
+	AllowNewerData bool
+	Logf           func(format string, a ...any)
 }
 
 type routable interface{ Routes(r *httpx.Router) }
@@ -83,8 +86,20 @@ func Run(ctx context.Context, cfg core.Config, opts Options) error {
 	if err := os.MkdirAll(cfg.DataDir, 0o700); err != nil {
 		return err
 	}
+	if err := core.CheckDataVersion(cfg.DataDir, Version); err != nil {
+		var newer *core.NewerDataError
+		if !opts.AllowNewerData || !errors.As(err, &newer) {
+			return err
+		}
+		logf("warning: %s data is from HomeCloud %s, newer than this binary (%s); starting anyway (--allow-newer-data)", cfg.DataDir, newer.DataVersion, newer.Version)
+	}
 	if err := migrateLegacyRegion(&cfg, logf); err != nil {
 		return fmt.Errorf("migrate region: %w", err)
+	}
+	// Recorded before anything else touches the data: from here on, this
+	// version's code may change it.
+	if err := core.StampDataVersion(cfg.DataDir, Version); err != nil {
+		return fmt.Errorf("record data version: %w", err)
 	}
 	if cfg.Region == "" {
 		cfg.Region = core.DefaultRegion

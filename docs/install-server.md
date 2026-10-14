@@ -86,8 +86,12 @@ homecloud version
 
 The script detects `linux` and `amd64`/`arm64`, downloads the latest release from GitHub, verifies its
 SHA-256 checksum, and installs `/usr/local/bin/homecloud` (using `sudo` when that directory is not
-writable). Without Docker it still installs the CLI, and says that the server needs Docker. Two
-environment variables change its behavior:
+writable). If [cosign](https://docs.sigstore.dev/cosign/system_config/installation/) is installed, it
+also verifies the release's Sigstore signature (releases from v0.5.0 on are signed by the release
+workflow) and refuses to install on a bad or missing signature; without cosign it says it checked the
+checksum only. To verify a release by hand, see [Verifying releases](../SECURITY.md#verifying-releases).
+Without Docker it still installs the CLI, and says that the server needs Docker. Two environment
+variables change its behavior:
 
 ```bash
 # pin a release, or install somewhere else
@@ -148,7 +152,9 @@ What to know:
 - **One installation per Docker host.** Like the binary, the container refuses to start when the host
   runs another installation's containers.
 - **Upgrade:** `docker pull ghcr.io/solinode/homecloud`, then recreate the container with the same
-  volume; data is migrated at start.
+  volume; data is migrated at start. Take a `homecloud backup` first: an older image refuses to start
+  on data a newer one has used, so going back means restoring that backup. Images are signed; see
+  [Verifying releases](../SECURITY.md#verifying-releases) for `cosign verify`.
 - **Backup and restore** ([section 10](#10-backups-and-restore)) stream through stdin and stdout. The
   backup includes the Docker volumes (S3 objects, databases, registry):
 
@@ -493,9 +499,43 @@ homecloud version
 homecloud doctor
 ```
 
-`upgrade` verifies the release's SHA-256 checksum before replacing the binary; `--version v0.3.0`
-installs a specific release. Data is migrated automatically when the new version starts. After an
-upgrade, the first start may need network access to rebuild the security-group helper image.
+`upgrade` checks the release before replacing the binary: `checksums.txt` must carry a valid Sigstore
+signature by this repository's release workflow for that tag, and the downloaded archive must match it
+(details and the equivalent `cosign verify-blob` commands are in
+[Verifying releases](../SECURITY.md#verifying-releases)). `--version v0.5.0` installs a specific
+release. Releases v0.4.1 and older are unsigned and install only with `--allow-unsigned`. Data is
+migrated automatically when the new version starts. After an upgrade, the first start may need network
+access to rebuild the security-group helper image.
+
+**Automatic backup and rollback.** Before replacing the binary, `upgrade` copies the data directory's
+state to `<data-dir>/upgrade-backups/<old-version>-<time>/` and keeps the current binary as
+`<binary>.previous` (for example `/usr/local/bin/homecloud.previous`). The copy holds what a new
+version's migrations may rewrite: `state.json`, `config.json`, `credentials`, `master.key`, TLS files,
+the DynamoDB database, queue, topic and state machine files and metrics. Logs, CloudTrail files, RDS
+snapshot files, Lambda code and the Docker volumes (S3 objects, databases) are left out, since migrations
+don't change them; that is what `homecloud backup` is for. The three most recent upgrade backups are kept.
+The data directory is the installed system service's, `$HOMECLOUD_DATA_DIR`, or `~/.homecloud` of the
+user running `sudo`; pass `--data-dir` otherwise.
+
+If the new version misbehaves, go back with the server stopped:
+
+```bash
+sudo systemctl stop homecloud
+sudo homecloud upgrade --rollback
+sudo systemctl start homecloud
+```
+
+`--rollback` refuses while a server answers for the data directory. It restores the previous binary and,
+if the new version has already run on the data, the state saved before the upgrade; the state it
+replaces is kept in `<data-dir>/upgrade-backups/rolled-back-<time>-<version>/`. Changes made after the
+upgrade are therefore lost in that case (resources created since then may remain as orphaned containers
+or volumes). If the new version never started, the data is kept as it is.
+
+Each start records the newest HomeCloud version that has used the data directory
+(`<data-dir>/data-version.json`), and `homecloud serve` refuses to start on data written by a newer
+version, since its migrations may have changed it in ways older code misreads. The message says what to
+do: upgrade again, or `homecloud upgrade --rollback`. `serve --allow-newer-data` overrides the check at
+your own risk.
 
 ## 12. KVM and VM instances
 
