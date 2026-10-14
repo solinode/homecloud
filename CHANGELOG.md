@@ -1,6 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 (2026-10-14)
+
+Trust and operations: signed releases, safe upgrades with rollback, backups that restore everything, Prometheus metrics and a status page, and Testcontainers for Java and Node.
 
 - **Signed releases:** the release workflow signs `checksums.txt` with Sigstore keyless signing (cosign, GitHub OIDC; published as `checksums.txt.sigstore.json`), attaches an SPDX SBOM for each binary, and records GitHub build provenance for the archives. The container image is signed with cosign and carries an SPDX SBOM attestation and build provenance. Third-party actions in the release workflow are pinned to commit SHAs. Verification commands are in [SECURITY.md](SECURITY.md#verifying-releases).
 - `homecloud upgrade` verifies the release signature against the release workflow's identity before trusting `checksums.txt`, and refuses unsigned releases; releases up to v0.4.1, published before signing, install only with `--allow-unsigned` (with a warning). The install scripts verify the signature when `cosign` is installed and fall back to the checksum with a message otherwise; `install.ps1` now verifies the checksum too.
